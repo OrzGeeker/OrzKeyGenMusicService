@@ -1,0 +1,40 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "sourceLanguages": [
+                "swift"
+            ],
+            "name": "Debug Run",
+            "program": "${workspaceFolder:Service}/.build/debug/Run",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "preLaunchTask": "swift: Build Debug Run"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "sourceLanguages": [
+                "swift"
+            ],
+            "name": "Release Run",
+            "program": "${workspaceFolder:Service}/.build/release/Run",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "preLaunchTask": "swift: Build Release Run"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "sourceLanguages": [
+                "swift"
+            ],
+            "name": "All Routes",
+            "program": "${workspaceFolder:Service}/.build/debug/Run",
+            "args": ["routes"],
+            "cwd": "${workspaceFolder:Service}",
+            "preLaunchTask": "swift: Build Debug Run"
+        }
+    ]
+}
