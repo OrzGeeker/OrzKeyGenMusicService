@@ -19,7 +19,7 @@ struct KeyGenMusicController: RouteCollection {
 
     func musicList(req: Request) throws -> String {
 
-        let workingDirectoryURL = URL(fileURLWithPath: req.application.directory.workingDirectory).appending(components: "Public", "KeyGenMusic")
+        let workingDirectoryURL = URL(fileURLWithPath: req.application.directory.workingDirectory).appending(components: "Public")
         guard FileManager.default.fileExists(atPath: workingDirectoryURL.path(percentEncoded: false))
         else {
             return ""
@@ -31,7 +31,7 @@ struct KeyGenMusicController: RouteCollection {
         task.arguments = [
             "bash",
             "-c",
-            "tree . -sJf --du"
+            "tree KeyGenMusic -sJf --du"
         ]
         let outputPipe = Pipe()
         task.standardOutput = outputPipe
