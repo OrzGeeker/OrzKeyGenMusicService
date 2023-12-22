@@ -31,7 +31,7 @@ struct KeyGenMusicController: RouteCollection {
         task.arguments = [
             "bash",
             "-c",
-            "tree KeyGenMusic -sJf --du"
+            "tree -sJf --du -- KeyGenMusic"
         ]
         let outputPipe = Pipe()
         task.standardOutput = outputPipe
