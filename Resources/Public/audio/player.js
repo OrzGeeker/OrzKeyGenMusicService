@@ -229,6 +229,14 @@ class OrzAudioPlayer {
         // 尝试 WASM 解码
         if (this.canUseWasm) {
             try {
+                // 前置检查格式是否被 WASM 支持
+                const supported = this.wasmKit._orz_audio_can_decode
+                    ? this.wasmKit.ccall('orz_audio_can_decode', 'number', ['string'], [format])
+                    : 0;
+                if (!supported) {
+                    throw new Error(`WASM: format "${format}" not supported by WASM module`);
+                }
+
                 await this._playWithWasm(url, format);
                 return;
             } catch (e) {
@@ -241,40 +249,53 @@ class OrzAudioPlayer {
     }
 
     /**
-     * 使用 WASM 模块解码并播放
+     * 使用 WASM 模块解码并播放（统一 API）
      */
     async _playWithWasm(url, format) {
         const resp = await fetch(url);
         const buf = await resp.arrayBuffer();
         const data = new Uint8Array(buf);
 
-        // 调用 WASM 加载模块
-        // 注意：Emscripten 6.0+ 不将 HEAPU8/HEAPF32 暴露为 Module 属性，
-        // 因此使用 Module.setValue/getValue（闭包函数，可访问内部堆视图）
-        const ptr = this.wasmKit._malloc(data.length);
+        // 写入 format 字符串到 WASM 堆
+        const fmtLen = this.wasmKit.lengthBytesUTF8(format) + 1;
+        const fmtPtr = this.wasmKit._malloc(fmtLen);
+        this.wasmKit.stringToUTF8(format, fmtPtr, fmtLen);
+
+        // 写入音频数据到 WASM 堆
+        const dataPtr = this.wasmKit._malloc(data.length);
         for (let i = 0; i < data.length; i++) {
-            this.wasmKit.setValue(ptr + i, data[i], 'i8');
+            this.wasmKit.setValue(dataPtr + i, data[i], 'i8');
         }
 
-        const loaded = this.wasmKit._openmpt_load(ptr, data.length);
-        this.wasmKit._free(ptr);
+        // 统一加载入口：orz_load(format, data, len)
+        const loaded = this.wasmKit._orz_load(fmtPtr, dataPtr, data.length);
+        this.wasmKit._free(fmtPtr);
+        this.wasmKit._free(dataPtr);
 
-        if (!loaded) throw new Error('WASM: failed to load module');
+        if (!loaded) {
+            this.wasmKit._orz_destroy();
+            throw new Error('WASM: failed to load module');
+        }
 
-        const duration = this.wasmKit._openmpt_get_duration();
+        const duration = this.wasmKit._orz_get_duration();
         if (duration > 0) this.duration = duration;
 
         // 渲染 PCM
-        const sampleRate = this.wasmKit._openmpt_get_sample_rate() || 48000;
-        const channels = this.wasmKit._openmpt_get_channels() || 2;
+        const sampleRate = this.wasmKit._orz_get_sample_rate() || 44100;
+        const channels = this.wasmKit._orz_get_channels() || 2;
         const totalFrames = Math.ceil(duration * sampleRate);
 
+        if (totalFrames <= 0 || totalFrames > 3600 * sampleRate) {
+            this.wasmKit._orz_destroy();
+            throw new Error('WASM: invalid duration');
+        }
+
         const renderPtr = this.wasmKit._malloc(totalFrames * channels * 4); // float32 = 4 bytes
-        const rendered = this.wasmKit._openmpt_render(renderPtr, totalFrames);
+        const rendered = this.wasmKit._orz_render(renderPtr, totalFrames);
 
         if (rendered <= 0) {
             this.wasmKit._free(renderPtr);
-            this.wasmKit._openmpt_destroy();
+            this.wasmKit._orz_destroy();
             throw new Error('WASM: no audio rendered');
         }
 
@@ -286,7 +307,7 @@ class OrzAudioPlayer {
         }
 
         this.wasmKit._free(renderPtr);
-        this.wasmKit._openmpt_destroy();
+        this.wasmKit._orz_destroy();
 
         // 创建 AudioBuffer 并播放
         const audioBuffer = this.audioCtx.createBuffer(

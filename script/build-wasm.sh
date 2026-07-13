@@ -29,6 +29,10 @@ CACHE_DIR="$BUILD_DIR/cache"
 LIBOPENMPT_VERSION="0.7.11"
 LIBOPENMPT_URL="https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-${LIBOPENMPT_VERSION}+release.autotools.tar.gz"
 
+# Game Music Emu — 用于 NSF/SPC 格式
+GME_VERSION="0.6.3"
+GME_URL="https://github.com/libgme/game-music-emu/archive/refs/tags/${GME_VERSION}.tar.gz"
+
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 
 # Colors
@@ -183,135 +187,146 @@ build_libopenmpt() {
 }
 
 # ------------------------------------------------------------------
+# Build Game Music Emu (NSF, SPC)
+# ------------------------------------------------------------------
+build_libgme() {
+    log "Building Game Music Emu ${GME_VERSION}..."
+
+    local src_dir
+    src_dir=$(download_source "$GME_URL" "game-music-emu" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/CMakeLists.txt" ]; then
+        warn "gme source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/gme"
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || { warn "Cannot enter gme build dir"; echo ""; return; }
+
+    log "Configuring game-music-emu with Emscripten..."
+    emcmake cmake "$src_dir" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DGME_ENABLE_SPC=ON \
+        -DGME_ENABLE_NSF=ON \
+        -DGME_ENABLE_GBS=OFF \
+        -DGME_ENABLE_GYM=OFF \
+        -DGME_ENABLE_HES=OFF \
+        -Wno-dev \
+        2>&1 || {
+            warn "gme cmake failed"
+            popd >/dev/null
+            echo ""
+            return
+        }
+
+    log "Building game-music-emu..."
+    emmake make -j"$JOBS" 2>&1 || {
+        warn "gme make failed"
+        popd >/dev/null
+        echo ""
+        return
+    }
+
+    popd >/dev/null
+
+    # 返回 gme 库和头文件路径
+    local lib_path=$(find "$build_dir" -name "libgme.a" 2>/dev/null | head -1)
+    if [ -z "$lib_path" ]; then
+        warn "libgme.a not found in $build_dir"
+        echo ""
+        return
+    fi
+
+    # 找到头文件目录
+    local inc_path=$(find "$src_dir" -name "gme.h" -exec dirname {} \; 2>/dev/null | head -1)
+    if [ -z "$inc_path" ]; then
+        inc_path="$build_dir"
+    fi
+
+    echo "$lib_path|$inc_path"
+}
+
+# ------------------------------------------------------------------
 # Generate WASM wrapper
 # ------------------------------------------------------------------
 generate_wrapper() {
-    log "Generating WASM wrapper..."
+    local libopenmpt_dir="$1"
+    local gme_result="$2"  # "lib_path|inc_path" or empty
 
-    local lib_dir="$1"
-
-    # Compile the C wrapper that exposes libopenmpt functions via Emscripten
-    cat > "$BUILD_DIR/wrapper.c" << 'WRAPPERC'
-#include <emscripten.h>
-#include <libopenmpt/libopenmpt.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-
-// Module handle
-static openmpt_module *mod = NULL;
-
-// Separate left/right render buffers (new libopenmpt 0.7 API)
-static float *render_left = NULL;
-static float *render_right = NULL;
-static int render_buf_size = 0;
-
-// Module info
-static int current_sample_rate = 48000;
-static int current_channels = 2;
-
-EMSCRIPTEN_KEEPALIVE
-int openmpt_load(const unsigned char *data, int data_len) {
-    mod = openmpt_module_create_from_memory2(data, (size_t)data_len, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    if (!mod) return 0;
-    return 1;
-}
-
-EMSCRIPTEN_KEEPALIVE
-double openmpt_get_duration() {
-    if (!mod) return 0;
-    return openmpt_module_get_duration_seconds(mod);
-}
-
-EMSCRIPTEN_KEEPALIVE
-int openmpt_get_sample_rate() {
-    return current_sample_rate;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int openmpt_get_channels() {
-    return current_channels;
-}
-
-EMSCRIPTEN_KEEPALIVE
-int openmpt_render(float *out, int frames) {
-    if (!mod) return 0;
-    if (!render_left || frames > render_buf_size) {
-        float *nl = (float *)realloc(render_left, (size_t)frames * sizeof(float));
-        float *nr = (float *)realloc(render_right, (size_t)frames * sizeof(float));
-        if (!nl || !nr) return 0;
-        render_left = nl;
-        render_right = nr;
-        render_buf_size = frames;
-    }
-    size_t rendered = openmpt_module_read_float_stereo(
-        mod, current_sample_rate, (size_t)frames, render_left, render_right
-    );
-    for (size_t i = 0; i < rendered && i < (size_t)frames; i++) {
-        out[i * 2 + 0] = render_left[i];
-        out[i * 2 + 1] = render_right[i];
-    }
-    return (int)rendered;
-}
-
-EMSCRIPTEN_KEEPALIVE
-void openmpt_destroy() {
-    if (mod) { openmpt_module_destroy(mod); mod = NULL; }
-    free(render_left);  render_left  = NULL;
-    free(render_right); render_right = NULL;
-    render_buf_size = 0;
-}
-WRAPPERC
-
-    # Additional format wrappers (stubs for now, expand as libraries are added)
-    cat > "$BUILD_DIR/audio_engine.c" << 'AUDIOENGINEC'
-#include <emscripten.h>
-#include <string.h>
-#include <stdint.h>
-
-// Combined audio engine entry point
-// Routes to the appropriate decoder based on format signature
-
-EMSCRIPTEN_KEEPALIVE
-int orz_audio_can_decode(const char *extension) {
-    // Check if this format is supported
-    const char *supported[] = {
-        "xm", "mod", "it", "s3m", "mo3", "mtm",
-        "nsf", "spc", "sid", "sc68", "hsc", "ym",
-        "ahx", "amd", "fc13", "fc14", "sap", "rad", "d00", "v2m",
-        NULL
-    };
-    for (int i = 0; supported[i] != NULL; i++) {
-        if (strcmp(extension, supported[i]) == 0) return 1;
-    }
-    return 0;
-}
-AUDIOENGINEC
-
-    # Link everything into WASM
-    # Currently only libopenmpt is linked; other libraries can be added incrementally
-    log "Linking WASM module..."
-
-    # Try multiple possible locations for libopenmpt.a
-    local libopenmpt_wasm=""
-    for try_path in \
-        "$lib_dir/libopenmpt.a" \
-        "$lib_dir/.libs/libopenmpt.a" \
-        "$lib_dir/src/libopenmpt/.libs/libopenmpt.a" \
-        "$lib_dir/install/lib/libopenmpt.a"; do
-        if [ -f "$try_path" ]; then
-            libopenmpt_wasm="$try_path"
-            break
-        fi
-    done
-    if [ -z "$libopenmpt_wasm" ]; then
-        libopenmpt_wasm=$(find "$lib_dir" -name "libopenmpt.a" 2>/dev/null | head -1 || echo "")
+    # Parse gme result
+    local gme_lib=""
+    local gme_inc=""
+    if [ -n "$gme_result" ]; then
+        gme_lib="${gme_result%%|*}"
+        gme_inc="${gme_result#*|}"
     fi
 
-    if [ -z "$libopenmpt_wasm" ] || [ ! -f "$libopenmpt_wasm" ]; then
-        warn "libopenmpt static library not found at: $lib_dir"
-        warn "Creating stub WASM binary instead."
-        # Create a minimal stub for development
+    # 构建源文件和库列表
+    local source_files=()
+    local libs=()
+    local inc_dirs=()
+
+    # C 源文件路径（复用 Sources/OrzAudioKit/ 中的统一解码层）
+    local ORZ_SRC="$PROJECT_DIR/Sources/OrzAudioKit"
+    source_files=(
+        "$ORZ_SRC/orz_dispatch.c"
+        "$ORZ_SRC/openmpt_impl.c"
+        "$ORZ_SRC/audio_engine.c"
+    )
+    inc_dirs+=("$ORZ_SRC/include")
+
+    # libopenmpt
+    if [ -n "$libopenmpt_dir" ]; then
+        local libopenmpt_wasm=""
+        for try_path in \
+            "$libopenmpt_dir/libopenmpt.a" \
+            "$libopenmpt_dir/.libs/libopenmpt.a" \
+            "$libopenmpt_dir/src/libopenmpt/.libs/libopenmpt.a" \
+            "$libopenmpt_dir/install/lib/libopenmpt.a"; do
+            if [ -f "$try_path" ]; then
+                libopenmpt_wasm="$try_path"
+                break
+            fi
+        done
+        if [ -z "$libopenmpt_wasm" ]; then
+            libopenmpt_wasm=$(find "$libopenmpt_dir" -name "libopenmpt.a" 2>/dev/null | head -1 || echo "")
+        fi
+        if [ -n "$libopenmpt_wasm" ]; then
+            libs+=("$libopenmpt_wasm")
+        fi
+
+        local openmpt_inc=""
+        for try_inc in \
+            "$libopenmpt_dir/../include" \
+            "$libopenmpt_dir/install/include" \
+            "$BUILD_DIR/src/libopenmpt/libopenmpt"; do
+            if [ -f "$try_inc/libopenmpt/libopenmpt.h" ]; then
+                openmpt_inc="$try_inc"
+                break
+            elif [ -f "$try_inc/libopenmpt.h" ]; then
+                openmpt_inc="$(dirname "$try_inc")"
+                break
+            fi
+        done
+        if [ -n "$openmpt_inc" ]; then
+            inc_dirs+=("$openmpt_inc")
+        fi
+    fi
+
+    # Game Music Emu
+    if [ -n "$gme_lib" ]; then
+        source_files+=("$ORZ_SRC/gme_impl.c")
+        libs+=("$gme_lib")
+        if [ -n "$gme_inc" ]; then
+            inc_dirs+=("$gme_inc")
+        fi
+    fi
+
+    if [ ${#libs[@]} -eq 0 ]; then
+        warn "No decoder libraries found, creating stub WASM binary."
         cat > "$BUILD_DIR/stub.c" << 'STUBC'
 #include <emscripten.h>
 
@@ -330,38 +345,28 @@ STUBC
             -s EXPORTED_FUNCTIONS='["_orz_audio_is_ready", "_orz_audio_version"]' \
             -s ALLOW_MEMORY_GROWTH=1 \
             -o "$OUTPUT_DIR/orz_audio.js"
-    else
-        # Find include directory
-        local include_dir=""
-        for try_inc in \
-            "$lib_dir/../include" \
-            "$lib_dir/install/include" \
-            "$BUILD_DIR/src/libopenmpt/libopenmpt"; do
-            if [ -f "$try_inc/libopenmpt/libopenmpt.h" ]; then
-                include_dir="$try_inc"
-                break
-            elif [ -f "$try_inc/libopenmpt.h" ]; then
-                include_dir="$(dirname "$try_inc")"
-                break
-            fi
-        done
-
-        # Build with libopenmpt
-        local emcc_args=("$BUILD_DIR/wrapper.c" "$BUILD_DIR/audio_engine.c" "$libopenmpt_wasm")
-        if [ -n "$include_dir" ]; then
-            emcc_args+=("-I$include_dir")
-        fi
-        emcc "${emcc_args[@]}" \
-            -s WASM=1 \
-            -s MODULARIZE=1 \
-            -s EXPORT_NAME="OrzAudioKit" \
-            -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString"]' \
-            -s EXPORTED_FUNCTIONS='["_openmpt_load", "_openmpt_get_duration", "_openmpt_render", "_openmpt_destroy", "_orz_audio_can_decode", "_openmpt_get_sample_rate", "_openmpt_get_channels", "_malloc", "_free"]' \
-            -s ALLOW_MEMORY_GROWTH=1 \
-            -s INITIAL_MEMORY=16777216 \
-            --no-entry \
-            -o "$OUTPUT_DIR/orz_audio.js"
+        return
     fi
+
+    # 构建包含标志
+    local inc_flags=""
+    for dir in "${inc_dirs[@]}"; do
+        inc_flags="$inc_flags -I$dir"
+    done
+
+    log "Linking WASM with libraries: ${libs[*]}"
+
+    emcc "${source_files[@]}" "${libs[@]}" \
+        $inc_flags \
+        -s WASM=1 \
+        -s MODULARIZE=1 \
+        -s EXPORT_NAME="OrzAudioKit" \
+        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8"]' \
+        -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
+        -s INITIAL_MEMORY=67108864 \
+        --no-entry \
+        -O3 \
+        -o "$OUTPUT_DIR/orz_audio.js"
 
     log "WASM module created:"
     ls -lh "$OUTPUT_DIR/orz_audio.wasm" "$OUTPUT_DIR/orz_audio.js" 2>/dev/null || true
@@ -385,7 +390,14 @@ main() {
         fi
     fi
 
-    generate_wrapper "$libopenmpt_dir"
+    # Try to build Game Music Emu (nsf, spc)
+    local gme_result=""
+    gme_result=$(build_libgme 2>&1)
+    if [ -z "$gme_result" ]; then
+        warn "game-music-emu build failed, NSF/SPC formats will not be available"
+    fi
+
+    generate_wrapper "$libopenmpt_dir" "$gme_result"
 
     log "Build complete!"
     log "WASM output: $OUTPUT_DIR/orz_audio.wasm"
