@@ -98,6 +98,10 @@ public struct MusicScannerService {
                     song.$artist.id = artist.id
                     song.sha256 = sha256
                     song.duration = await extractDuration(filePath: file.fullPath)
+                    // 尝试生成音频指纹（fpcalc 不可用时静默跳过）
+                    if let fp = try? await generateFingerprint(filePath: file.fullPath) {
+                        song.audioFingerprint = fp
+                    }
                     try await song.create(on: db)
                     songsCreated += 1
                 }
@@ -251,6 +255,12 @@ songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cl
         } catch {
             return nil
         }
+    }
+
+    /// 尝试生成音频指纹（fpcalc 不可用时静默失败）
+    func generateFingerprint(filePath: String) async throws -> String? {
+        let fingerprinter = AudioFingerprinter()
+        return try? await fingerprinter.generateFingerprintFromFile(filePath: filePath)
     }
 
     func cleanupRemovedFiles(activeFiles: Set<String>) async throws -> Int {

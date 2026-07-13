@@ -45,7 +45,7 @@ RUN [ -d /build/Public ] && { cp -Ra /build/Public ./Public && chmod -R a-w ./Pu
 # ================================
 # Run image
 # ================================
-FROM ubuntu:jammy
+FROM swift:6.1-jammy-slim
 
 # Make sure all system packages are up to date, and install runtime deps.
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \

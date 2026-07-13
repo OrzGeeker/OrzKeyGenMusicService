@@ -53,6 +53,11 @@ struct UploadController: RouteCollection {
         let song = Song(title: title, filePath: filePath, fileFormat: format.rawValue, fileSize: fileData.count)
         song.sha256 = sha256
 
+        // 尝试生成音频指纹
+        if let fp = try? await AudioFingerprinter().generateFingerprintFromFile(filePath: "\(uploadDir)\(fileName)") {
+            song.audioFingerprint = fp
+        }
+
         // 关联 Artist
         if let artistName = body.artist {
             if let existingArtist = try await Artist.query(on: req.db).filter("name", .equal, artistName).first() {
