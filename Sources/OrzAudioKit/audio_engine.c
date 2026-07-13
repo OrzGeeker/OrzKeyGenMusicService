@@ -8,6 +8,9 @@ extern const Decoder decoder_openmpt;
 // Game Music Emu (NSF/SPC)
 extern const Decoder decoder_gme;
 
+// ASAP (SAP — Atari POKEY 格式)
+extern const Decoder decoder_asap;
+
 // libsidplayfp (SID) — 待 C++ 运行时兼容修复
 // extern const Decoder decoder_sidplayfp;
 
@@ -24,6 +27,9 @@ __attribute__((used)) void register_all() {
 
     // Game Music Emu: 游戏音乐格式 (nsf, spc)
     orz_register_decoder("nsf,spc", &decoder_gme);
+
+    // ASAP: Atari POKEY 格式
+    orz_register_decoder("sap", &decoder_asap);
 
     // libsidplayfp: Commodore 64 SID 格式 — 待修复
     // orz_register_decoder("sid", &decoder_sidplayfp);
