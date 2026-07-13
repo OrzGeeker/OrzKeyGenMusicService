@@ -5,10 +5,18 @@ import Vapor
 
 // configures your application
 public func configure(_ app: Application) throws {
-    
-    // uncomment to serve files from /Public folder
+
+    // CORS — 允许前端跨域访问
+    let corsConfig = CORSMiddleware.Configuration(
+        allowedOrigin: .all,
+        allowedMethods: [.GET, .POST, .PUT, .DELETE, .OPTIONS, .PATCH],
+        allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith]
+    )
+    app.middleware.use(CORSMiddleware(configuration: corsConfig))
+
+    // 静态文件
     app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
-    
+
     app.databases.use(
         .postgres(
             configuration: .init(
@@ -22,7 +30,12 @@ public func configure(_ app: Application) throws {
         as: .psql
     )
 
-    app.migrations.add(CreateTodo())
+    // Migrations
+    app.migrations.add(CreateArtist())
+    app.migrations.add(CreateAlbum())
+    app.migrations.add(CreateSong())
+    app.migrations.add(CreatePlaylist())
+    app.migrations.add(CreatePlaylistSongPivot())
 
     app.views.use(.leaf)
 
