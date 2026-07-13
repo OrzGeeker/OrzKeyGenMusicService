@@ -52,14 +52,13 @@ public struct MusicScannerService {
         let audioFiles = collectAudioFiles()
 
         // 2. 处理每个文件（去重 + upsert）
-        var artistsCreated = 0
         var songsCreated = 0
         var songsUpdated = 0
         var duplicatesSkipped = 0
 
         for file in audioFiles {
             // 计算 SHA-256（文件级去重）
-            let sha256 = try? computeSHA256(filePath: file.fullPath)
+            let sha256 = try? await computeSHA256(filePath: file.fullPath)
 
             // 检查 SHA-256 是否已存在
             if let sha = sha256,
@@ -85,7 +84,7 @@ public struct MusicScannerService {
                     existing.fileSize = file.fileSize
                     existing.$artist.id = artist.id
                     existing.sha256 = sha256
-                    existing.duration = try? extractDuration(filePath: file.fullPath)
+                    existing.duration = await extractDuration(filePath: file.fullPath)
                     try await existing.update(on: db)
                     songsUpdated += 1
                 } else {
@@ -98,7 +97,7 @@ public struct MusicScannerService {
                     )
                     song.$artist.id = artist.id
                     song.sha256 = sha256
-                    song.duration = try? extractDuration(filePath: file.fullPath)
+                    song.duration = await extractDuration(filePath: file.fullPath)
                     try await song.create(on: db)
                     songsCreated += 1
                 }
@@ -112,7 +111,7 @@ public struct MusicScannerService {
 
         return ScanResult(
             totalScanned: audioFiles.count,
-            artistsCreated: artistsCreated,
+            artistsCreated: 0,
             songsCreated: songsCreated,
             songsUpdated: songsUpdated,
             duplicatesSkipped: duplicatesSkipped,
@@ -230,49 +229,24 @@ songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cl
         return artist
     }
 
-    func computeSHA256(filePath: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["shasum", "-a", "256", filePath]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
-        process.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8),
-              let hash = output.split(separator: " ").first
-        else { throw AudioError.decodeFailed("SHA-256 failed") }
-
+    func computeSHA256(filePath: String) async throws -> String {
+        let result = try await ProcessRunner.execute(arguments: ["shasum", "-a", "256", filePath])
+        guard let hash = result.split(separator: " ").first else {
+            throw AudioError.decodeFailed("SHA-256 failed")
+        }
         return String(hash)
     }
 
     /// 使用 ffprobe 提取音频时长（秒）
-    func extractDuration(filePath: String) -> Double? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [
-            "ffprobe", "-v", "quiet",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            filePath
-        ]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = nil
-
+    func extractDuration(filePath: String) async -> Double? {
         do {
-            try process.run()
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  let duration = Double(output), duration > 0
-            else { return nil }
-
+            let result = try await ProcessRunner.execute(arguments: [
+                "ffprobe", "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                filePath
+            ])
+            guard let duration = Double(result), duration > 0 else { return nil }
             return duration
         } catch {
             return nil

@@ -25,10 +25,10 @@ public class AudioFingerprinter: @unchecked Sendable {
     /// 从 PCM 数据生成音频指纹
     /// - Parameter pcmData: PCM 数据
     /// - Returns: base64 编码的指纹字符串
-    public func generateFingerprint(pcmData: PCMData) throws -> String {
+    public func generateFingerprint(pcmData: PCMData) async throws -> String {
         // TODO: 接入 CChromaprint
         // 当前降级：使用 ffmpeg CLI 的指纹功能
-        return try generateFingerprintViaFFmpeg(pcmData: pcmData)
+        return try await generateFingerprintViaFFmpeg(pcmData: pcmData)
     }
 
     /// 对比两个指纹的相似度 (0.0 ~ 1.0)
@@ -42,7 +42,7 @@ public class AudioFingerprinter: @unchecked Sendable {
     }
 
     /// 通过 ffmpeg 生成指纹（降级方案）
-    private func generateFingerprintViaFFmpeg(pcmData: PCMData) throws -> String {
+    private func generateFingerprintViaFFmpeg(pcmData: PCMData) async throws -> String {
         // 将 PCM 写入临时 WAV 文件
         let wavData = pcmData.encodeWAV()
         let tmpPath = "/tmp/orz_fp_\(UUID().uuidString).wav"
@@ -51,19 +51,9 @@ public class AudioFingerprinter: @unchecked Sendable {
 
         // 使用 ffmpeg 计算 SHA-256 作为简化指纹
         // 实际 Chromaprint 接入后替换
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["shasum", "-a", "256", tmpPath]
+        let result = try await ProcessRunner.execute(arguments: ["shasum", "-a", "256", tmpPath])
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
-        process.waitUntilExit()
-
-        let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let hash = output.split(separator: " ").first
-        else {
+        guard let hash = result.split(separator: " ").first else {
             throw FingerprintError.ffmpegFailed("Cannot compute SHA-256")
         }
 

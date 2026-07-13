@@ -33,7 +33,7 @@ struct UploadController: RouteCollection {
         }
 
         // 计算 SHA-256 去重
-        let sha256 = try computeSHA256(data: fileData)
+        let sha256 = try await computeSHA256(data: fileData)
 
         // 检查是否已存在
         if let existing = try await Song.query(on: req.db).filter("sha256", .equal, sha256).first() {
@@ -84,25 +84,15 @@ struct UploadController: RouteCollection {
         return .noContent
     }
 
-    private func computeSHA256(data: Data) throws -> String {
+    private func computeSHA256(data: Data) async throws -> String {
         let tmpPath = "/tmp/orz_upload_\(UUID().uuidString)"
         try data.write(to: URL(fileURLWithPath: tmpPath))
         defer { try? FileManager.default.removeItem(atPath: tmpPath) }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["shasum", "-a", "256", tmpPath]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
-        process.waitUntilExit()
-
-        let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: outputData, encoding: .utf8),
-              let hash = output.split(separator: " ").first
-        else { throw Abort(.internalServerError, reason: "SHA-256 computation failed") }
-
+        let result = try await ProcessRunner.execute(arguments: ["shasum", "-a", "256", tmpPath])
+        guard let hash = result.split(separator: " ").first else {
+            throw Abort(.internalServerError, reason: "SHA-256 computation failed")
+        }
         return String(hash)
     }
 }

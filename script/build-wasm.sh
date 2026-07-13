@@ -126,37 +126,57 @@ build_libopenmpt() {
     log "Building libopenmpt ${LIBOPENMPT_VERSION}..."
 
     local src_dir
-    src_dir=$(download_source "$LIBOPENMPT_URL" "libopenmpt" 2>/dev/null) || {
-        warn "Using bundled or alternate download approach..."
-        # Alternative: use the pre-built or direct source
+    src_dir=$(download_source "$LIBOPENMPT_URL" "libopenmpt" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/configure" ]; then
+        warn "libopenmpt source not available at $src_dir, trying alternate..."
+        # Try to download again via a different method
         src_dir="$BUILD_DIR/src/libopenmpt"
-        mkdir -p "$src_dir"
-    }
+        if [ ! -f "$src_dir/configure" ]; then
+            warn "Cannot build libopenmpt - source unavailable"
+            echo ""
+            return
+        fi
+    fi
 
     local build_dir="$BUILD_DIR/libopenmpt"
     mkdir -p "$build_dir"
 
     pushd "$build_dir" >/dev/null || err "Cannot enter build dir"
 
-    # Configure with Emscripten
-    # libopenmpt can be built without its more complex dependencies for WASM
-    # by disabling certain features
-    emcmake cmake "$src_dir" \
-        -DCMAKE_BUILD_TYPE=MinSizeRel \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_TESTING=OFF \
-        -DCMAKE_DISABLE_FIND_PACKAGE_MPG123=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_OGG=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_VORBIS=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_VORBISFILE=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_PORTAUDIO=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_FLAC=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=ON \
-        -DCMAKE_DISABLE_FIND_PACKAGE_MPG123=ON \
-        2>&1 | tail -5
+    # Configure with Emscripten (autotools, not CMake)
+    log "Configuring libopenmpt with Emscripten..."
+    emconfigure "$src_dir/configure" \
+        --host=wasm32-unknown-emscripten \
+        --disable-shared \
+        --enable-static \
+        --disable-examples \
+        --disable-tests \
+        --disable-openmpt123 \
+        --without-mpg123 \
+        --without-ogg \
+        --without-vorbis \
+        --without-vorbisfile \
+        --without-portaudio \
+        --without-sdl2 \
+        --without-flac \
+        --without-zlib \
+        CC=emcc CXX=em++ \
+        --prefix="$build_dir/install" \
+        2>&1 || {
+            warn "libopenmpt configure failed"
+            popd >/dev/null
+            echo ""
+            return
+        }
 
-    emmake make -j"$JOBS" 2>&1 | tail -5
+    log "Building libopenmpt..."
+    emmake make -j"$JOBS" 2>&1 || {
+        warn "libopenmpt make failed"
+        popd >/dev/null
+        echo ""
+        return
+    }
 
     popd >/dev/null
     echo "$build_dir"
@@ -264,10 +284,20 @@ AUDIOENGINEC
     # Currently only libopenmpt is linked; other libraries can be added incrementally
     log "Linking WASM module..."
 
-    local libopenmpt_wasm="$lib_dir/libopenmpt.a"
-    if [ ! -f "$libopenmpt_wasm" ]; then
-        # Try to find it
-        libopenmpt_wasm=$(find "$lib_dir" -name "*.a" 2>/dev/null | head -1 || echo "")
+    # Try multiple possible locations for libopenmpt.a
+    local libopenmpt_wasm=""
+    for try_path in \
+        "$lib_dir/libopenmpt.a" \
+        "$lib_dir/.libs/libopenmpt.a" \
+        "$lib_dir/src/libopenmpt/.libs/libopenmpt.a" \
+        "$lib_dir/install/lib/libopenmpt.a"; do
+        if [ -f "$try_path" ]; then
+            libopenmpt_wasm="$try_path"
+            break
+        fi
+    done
+    if [ -z "$libopenmpt_wasm" ]; then
+        libopenmpt_wasm=$(find "$lib_dir" -name "libopenmpt.a" 2>/dev/null | head -1 || echo "")
     fi
 
     if [ -z "$libopenmpt_wasm" ] || [ ! -f "$libopenmpt_wasm" ]; then
@@ -293,11 +323,27 @@ STUBC
             -s ALLOW_MEMORY_GROWTH=1 \
             -o "$OUTPUT_DIR/orz_audio.js"
     else
+        # Find include directory
+        local include_dir=""
+        for try_inc in \
+            "$lib_dir/../include" \
+            "$lib_dir/install/include" \
+            "$BUILD_DIR/src/libopenmpt/libopenmpt"; do
+            if [ -f "$try_inc/libopenmpt/libopenmpt.h" ]; then
+                include_dir="$try_inc"
+                break
+            elif [ -f "$try_inc/libopenmpt.h" ]; then
+                include_dir="$(dirname "$try_inc")"
+                break
+            fi
+        done
+
         # Build with libopenmpt
-        emcc "$BUILD_DIR/wrapper.c" "$BUILD_DIR/audio_engine.c" \
-            "$libopenmpt_wasm" \
-            -O3 \
-            -I "$lib_dir/../include" \
+        local emcc_args=("$BUILD_DIR/wrapper.c" "$BUILD_DIR/audio_engine.c" "$libopenmpt_wasm")
+        if [ -n "$include_dir" ]; then
+            emcc_args+=("-I$include_dir")
+        fi
+        emcc "${emcc_args[@]}" \
             -s WASM=1 \
             -s MODULARIZE=1 \
             -s EXPORT_NAME="OrzAudioKit" \

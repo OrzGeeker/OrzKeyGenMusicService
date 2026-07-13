@@ -44,10 +44,10 @@ struct SongController: RouteCollection {
 
         guard !safeQuery.isEmpty else { return [] }
 
-        // 同时搜索歌曲标题和艺术家名称
+        // 同时搜索歌曲标题和艺术家名称（使用 LOWER 兼容 PostgreSQL 和 SQLite）
         let songs = try await Song.query(on: req.db)
             .join(Artist.self, on: \Artist.$id == \Song.$artist.$id, method: .left)
-            .filter(.sql(unsafeRaw: "title ILIKE '%\(safeQuery)%' OR \"artists\".\"name\" ILIKE '%\(safeQuery)%'"))
+            .filter(.sql(unsafeRaw: "LOWER(title) LIKE '%\(safeQuery.lowercased())%' OR LOWER(\"artists\".\"name\") LIKE '%\(safeQuery.lowercased())%'"))
             .limit(50)
             .all()
 
@@ -102,7 +102,7 @@ struct SongController: RouteCollection {
             return try await req.fileio.asyncStreamFile(at: path)
 
         case .serverDecode(let path, let fmt):
-            let wav = try engine.decodeToWAV(filePath: path, format: fmt)
+            let wav = try await engine.decodeToWAV(filePath: path, format: fmt)
             var headers = HTTPHeaders()
             headers.add(name: "Content-Type", value: "audio/wav")
             headers.add(name: "Content-Length", value: "\(wav.count)")

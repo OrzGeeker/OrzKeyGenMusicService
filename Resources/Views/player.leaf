@@ -173,6 +173,33 @@
             font-size: 10px; padding: 1px 4px; border-radius: 8px;
             font-weight: 600;
         }
+
+        /* Playlist management */
+        .pl-actions { margin-top: 16px; border-top: 1px solid var(--divider); padding-top: 12px; }
+        .pl-section { margin-bottom: 12px; }
+        .pl-section input { margin-bottom: 6px; }
+        .pl-name-input {
+            width: 100%; background: transparent; border: 1px solid var(--divider);
+            color: var(--text); font-size: 12px; padding: 4px 6px; outline: none;
+            box-sizing: border-box;
+        }
+        .pl-name-input:focus { border-color: var(--text-sub); }
+        .pl-btn {
+            background: transparent; border: 1px solid var(--divider); color: var(--text-sub);
+            font-size: 11px; padding: 3px 8px; cursor: pointer; width: 100%;
+            transition: color .15s, border-color .15s;
+        }
+        .pl-btn:hover { color: var(--text); border-color: var(--text-sub); }
+        .pl-btn:disabled { opacity: 0.4; cursor: default; }
+        .pl-btn.danger:hover { border-color: #e33; color: #e33; }
+        .pl-btn.sm { width: auto; font-size: 10px; padding: 2px 6px; }
+        .saved-pl-item {
+            display: flex; align-items: center; gap: 6px;
+            padding: 4px 0; font-size: 12px;
+        }
+        .saved-pl-name { flex: 1; cursor: pointer; color: var(--text-sub); }
+        .saved-pl-name:hover { color: var(--text); }
+        .saved-pl-count { font-size: 10px; color: var(--text-sub); opacity: 0.6; }
     </style>
 </head>
 <body x-data="playerApp()">
@@ -247,6 +274,25 @@
         <div x-show="queue.length === 0" style="color:#666;font-size:13px;padding:12px;text-align:center;">
             队列为空
         </div>
+        <div class="pl-actions" x-show="queue.length > 0 || playlists.length > 0">
+            <div class="pl-section" x-show="queue.length > 0">
+                <input class="pl-name-input" type="text" x-model="newPlaylistName" placeholder="新建播放列表名..."
+                       @keydown.enter="saveAsPlaylist()">
+                <button class="pl-btn" @click="saveAsPlaylist()" :disabled="!newPlaylistName.trim()">保存队列</button>
+            </div>
+            <div class="pl-section" x-show="playlists.length > 0">
+                <span style="font-size:12px;color:var(--text-sub);">已保存的播放列表</span>
+                <template x-for="pl in playlists" :key="pl.id">
+                    <div class="saved-pl-item">
+                        <span class="saved-pl-name" @click="loadPlaylist(pl.id)" x-text="pl.name"></span>
+                        <template x-if="pl.songCount">
+                            <span class="saved-pl-count" x-text="`${pl.songCount}首`"></span>
+                        </template>
+                        <button class="pl-btn sm danger" @click="deletePlaylist(pl.id)">删除</button>
+                    </div>
+                </template>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -277,6 +323,8 @@
             currentTime: 0,
             duration: 0,
             playlistOpen: false,
+            playlists: [],
+            newPlaylistName: '',
 
             async init() {
                 if (player) {
@@ -292,6 +340,7 @@
                     };
                 }
                 await this.loadSongs();
+                await this.loadPlaylists();
             },
 
             get timeDisplay() {
@@ -401,6 +450,57 @@
             removeFromQueue(idx) {
                 this.queue.splice(idx, 1);
                 if (idx <= this.queueIndex) this.queueIndex--;
+            },
+
+            // ── 播放列表管理 ──
+
+            async loadPlaylists() {
+                try {
+                    const res = await fetch('/api/playlists');
+                    const data = await res.json();
+                    this.playlists = Array.isArray(data) ? data : [];
+                } catch (e) { console.error('Failed to load playlists:', e); }
+            },
+
+            async saveAsPlaylist() {
+                const name = this.newPlaylistName.trim();
+                if (!name || this.queue.length === 0) return;
+                try {
+                    const res = await fetch('/api/playlists', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ name, description: '' })
+                    });
+                    const pl = await res.json();
+                    // Add all queue songs
+                    for (const song of this.queue) {
+                        await fetch(`/api/playlists/${pl.id}/songs`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ songId: song.id })
+                        });
+                    }
+                    this.newPlaylistName = '';
+                    await this.loadPlaylists();
+                } catch (e) { console.error('Failed to save playlist:', e); }
+            },
+
+            async loadPlaylist(plId) {
+                try {
+                    const res = await fetch(`/api/playlists/${plId}`);
+                    const pl = await res.json();
+                    if (pl.songs && pl.songs.length > 0) {
+                        this.queue = pl.songs;
+                        this.playSong(pl.songs[0]);
+                    }
+                } catch (e) { console.error('Failed to load playlist:', e); }
+            },
+
+            async deletePlaylist(plId) {
+                try {
+                    await fetch(`/api/playlists/${plId}`, { method: 'DELETE' });
+                    this.playlists = this.playlists.filter(p => p.id !== plId);
+                } catch (e) { console.error('Failed to delete playlist:', e); }
             }
         };
     }

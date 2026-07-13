@@ -17,20 +17,20 @@ public class ModuleDecoder: @unchecked Sendable {
     ///   - filePath: 文件路径
     ///   - format: 音频格式
     /// - Returns: PCM 数据
-    public func decode(filePath: String, format: AudioFormat) throws -> PCMData {
-        return try decodeWithFFmpeg(filePath: filePath, format: format)
+    public func decode(filePath: String, format: AudioFormat) async throws -> PCMData {
+        return try await decodeWithFFmpeg(filePath: filePath, format: format)
     }
 
     // MARK: - FFmpeg Universal Decoder
 
-    /// 通过 ffmpeg CLI 解码任意音频格式为 WAV/PCM
+    /// 通过 ffmpeg CLI 异步解码任意音频格式为 WAV/PCM
     ///
     /// ffmpeg 通过系统库插件（libopenmpt, libgme, libsidplay 等）
     /// 可解码绝大多数模块格式。如需支持所有格式，在 Docker 中安装对应库：
     ///
     ///   apt install ffmpeg libopenmpt-dev libgme-dev libsidplay2-dev \
     ///               libstsound-dev uade123 asap-tools libadplug-dev
-    private func decodeWithFFmpeg(filePath: String, format: AudioFormat) throws -> PCMData {
+    private func decodeWithFFmpeg(filePath: String, format: AudioFormat) async throws -> PCMData {
         let outputPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("orz_mod_\(UUID().uuidString).wav")
             .path
@@ -48,16 +48,10 @@ public class ModuleDecoder: @unchecked Sendable {
             outputPath
         ]
 
-        // Capture stderr for error diagnostics
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
+        let result = try await ProcessRunner.run(process)
 
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorMsg = String(data: errorData, encoding: .utf8) ?? "unknown error"
+        guard result.terminationStatus == 0 else {
+            let errorMsg = result.stderrString ?? "unknown error"
             throw AudioError.decodeFailed(
                 "ffmpeg decode failed for \(format.rawValue): \(errorMsg)"
             )

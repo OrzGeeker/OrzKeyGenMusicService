@@ -53,21 +53,21 @@ public class AudioEngine: @unchecked Sendable {
     private let standardDecoder = StandardDecoder()
     private let moduleDecoder = ModuleDecoder()
 
-    public func decodeToPCM(filePath: String, format: AudioFormat) throws -> PCMData {
+    public func decodeToPCM(filePath: String, format: AudioFormat) async throws -> PCMData {
         switch format {
         case .xm, .mod, .it, .s3m, .mo3, .mtm,
              .nsf, .spc, .sid, .sc68, .hsc, .ym,
              .ahx, .amd, .fc13, .fc14, .sap,
              .rad, .d00, .v2m, .bp:
-            return try moduleDecoder.decode(filePath: filePath, format: format)
+            return try await moduleDecoder.decode(filePath: filePath, format: format)
         case .mp3, .ogg, .wav, .flac, .mid, .m4a, .aac:
-            return try standardDecoder.decode(filePath: filePath, format: format)
+            return try await standardDecoder.decode(filePath: filePath, format: format)
         }
     }
 
     /// 解码音频文件并包装为 WAV 格式
-    public func decodeToWAV(filePath: String, format: AudioFormat) throws -> Data {
-        let pcm = try decodeToPCM(filePath: filePath, format: format)
+    public func decodeToWAV(filePath: String, format: AudioFormat) async throws -> Data {
+        let pcm = try await decodeToPCM(filePath: filePath, format: format)
         return pcm.encodeWAV()
     }
 }

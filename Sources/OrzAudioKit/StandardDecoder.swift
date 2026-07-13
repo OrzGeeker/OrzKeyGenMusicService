@@ -16,22 +16,26 @@ public class StandardDecoder: @unchecked Sendable {
     ///   - filePath: 文件路径
     ///   - format: 音频格式
     /// - Returns: PCM 数据
-    public func decode(filePath: String, format: AudioFormat) throws -> PCMData {
+    public func decode(filePath: String, format: AudioFormat) async throws -> PCMData {
         #if canImport(AVFoundation)
-        return try decodeWithAVFoundation(filePath: filePath)
+        return try await decodeWithAVFoundation(filePath: filePath)
         #else
-        return try decodeWithFFmpegCLI(filePath: filePath)
+        return try await decodeWithFFmpegCLI(filePath: filePath)
         #endif
     }
 
     #if canImport(AVFoundation)
     /// 使用 AVFoundation 解码
-    private func decodeWithAVFoundation(filePath: String) throws -> PCMData {
+    private func decodeWithAVFoundation(filePath: String) async throws -> PCMData {
         let url = URL(fileURLWithPath: filePath)
         let asset = AVAsset(url: url)
 
-        guard let reader = try? AVAssetReader(asset: asset),
-              let track = asset.tracks(withMediaType: .audio).first
+        guard let reader = try? AVAssetReader(asset: asset) else {
+            throw AudioError.decodeFailed("Cannot create AVAssetReader for: \(filePath)")
+        }
+
+        let tracks = try? await asset.loadTracks(withMediaType: .audio)
+        guard let track = tracks?.first
         else {
             throw AudioError.decodeFailed("Cannot create AVAssetReader for: \(filePath)")
         }
@@ -67,7 +71,7 @@ public class StandardDecoder: @unchecked Sendable {
     #endif
 
     /// 使用 ffmpeg CLI 解码（Linux 降级）
-    private func decodeWithFFmpegCLI(filePath: String) throws -> PCMData {
+    private func decodeWithFFmpegCLI(filePath: String) async throws -> PCMData {
         let outputPath = "/tmp/orz_audio_\(UUID().uuidString).wav"
         defer { try? FileManager.default.removeItem(atPath: outputPath) }
 
@@ -79,10 +83,9 @@ public class StandardDecoder: @unchecked Sendable {
             "-f", "wav", outputPath
         ]
 
-        try process.run()
-        process.waitUntilExit()
+        let result = try await ProcessRunner.run(process)
 
-        guard process.terminationStatus == 0 else {
+        guard result.terminationStatus == 0 else {
             throw AudioError.decodeFailed("ffmpeg failed for: \(filePath)")
         }
 

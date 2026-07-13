@@ -14,6 +14,9 @@ public func configure(_ app: Application) throws {
     )
     app.middleware.use(CORSMiddleware(configuration: corsConfig))
 
+    // 统一错误响应格式
+    app.middleware.use(ErrorResponseMiddleware())
+
     // 静态文件
     app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 
