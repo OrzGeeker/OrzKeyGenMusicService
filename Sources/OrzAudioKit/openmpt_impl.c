@@ -4,6 +4,13 @@
 #include <stdint.h>
 #include "audio_engine.h"
 
+// C++ 异常安全包装（在 cxx_helpers.cpp 中实现）
+extern openmpt_module* safe_openmpt_create(const unsigned char* data, size_t len);
+extern double safe_openmpt_duration(openmpt_module* mod);
+extern size_t safe_openmpt_render(openmpt_module* mod, int rate, size_t frames,
+                                  float* left, float* right);
+extern void safe_openmpt_destroy(openmpt_module* mod);
+
 // ── 单例状态 ──
 static openmpt_module *mod = NULL;
 static float *render_left = NULL;
@@ -14,21 +21,20 @@ static int render_buf_size = 0;
 
 static int impl_load(const unsigned char *data, int len) {
     if (mod) {
-        openmpt_module_destroy(mod);
+        safe_openmpt_destroy(mod);
         mod = NULL;
     }
     free(render_left);  render_left  = NULL;
     free(render_right); render_right = NULL;
     render_buf_size = 0;
 
-    mod = openmpt_module_create_from_memory2(data, (size_t)len,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    mod = safe_openmpt_create(data, (size_t)len);
     return mod ? 1 : 0;
 }
 
 static double impl_get_duration() {
     if (!mod) return 0;
-    return openmpt_module_get_duration_seconds(mod);
+    return safe_openmpt_duration(mod);
 }
 
 static int impl_get_sample_rate() {
@@ -51,7 +57,7 @@ static int impl_render(float *out, int frames) {
         render_buf_size = frames;
     }
 
-    size_t rendered = openmpt_module_read_float_stereo(
+    size_t rendered = safe_openmpt_render(
         mod, 48000, (size_t)frames, render_left, render_right
     );
 
@@ -64,7 +70,7 @@ static int impl_render(float *out, int frames) {
 
 static void impl_destroy() {
     if (mod) {
-        openmpt_module_destroy(mod);
+        safe_openmpt_destroy(mod);
         mod = NULL;
     }
     free(render_left);  render_left  = NULL;

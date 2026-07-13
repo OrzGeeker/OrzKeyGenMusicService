@@ -3,6 +3,14 @@
 #include <string.h>
 #include "audio_engine.h"
 
+// C++ 异常安全包装（在 cxx_helpers.cpp 中实现）
+extern const char* safe_gme_open_data(const unsigned char*, int, Music_Emu**, int);
+extern const char* safe_gme_start_track(Music_Emu*, int);
+extern const char* safe_gme_track_info(Music_Emu*, gme_info_t**, int);
+extern void        safe_gme_free_info(gme_info_t*);
+extern const char* safe_gme_play(Music_Emu*, int, short*);
+extern void        safe_gme_delete(Music_Emu*);
+
 // ── 单例状态 ──
 static Music_Emu *emu = NULL;
 static short *render_buf = NULL;
@@ -12,17 +20,17 @@ static int render_buf_size = 0;
 // ── Decoder 接口实现 ──
 
 static int impl_load(const unsigned char *data, int len) {
-    if (emu) { gme_delete(emu); emu = NULL; }
+    if (emu) { safe_gme_delete(emu); emu = NULL; }
     free(render_buf); render_buf = NULL;
     render_buf_size = 0;
 
     // gme_open_data 自动检测格式（nsf, spc, gbs 等）
-    gme_err_t err = gme_open_data(data, len, &emu, GME_SAMPLE_RATE);
+    const char* err = safe_gme_open_data(data, len, &emu, GME_SAMPLE_RATE);
     if (err) return 0;
 
     // 从第一轨开始播放
-    err = gme_start_track(emu, 0);
-    if (err) { gme_delete(emu); emu = NULL; return 0; }
+    err = safe_gme_start_track(emu, 0);
+    if (err) { safe_gme_delete(emu); emu = NULL; return 0; }
 
     return 1;
 }
@@ -30,7 +38,7 @@ static int impl_load(const unsigned char *data, int len) {
 static double impl_get_duration() {
     if (!emu) return 0;
     gme_info_t *info = NULL;
-    if (gme_track_info(emu, &info, 0)) return 0;
+    if (safe_gme_track_info(emu, &info, 0)) return 0;
     double secs = 0;
     if (info->length > 0) {
         secs = info->length / 1000.0;
@@ -40,7 +48,7 @@ static double impl_get_duration() {
         // 格式可能没有长度信息（如 NSF），默认 2 分钟
         secs = 120.0;
     }
-    gme_free_info(info);
+    safe_gme_free_info(info);
     return secs;
 }
 
@@ -63,7 +71,7 @@ static int impl_render(float *out, int frames) {
         render_buf_size = sample_count;
     }
 
-    gme_err_t err = gme_play(emu, sample_count, render_buf);
+    const char* err = safe_gme_play(emu, sample_count, render_buf);
     if (err) return 0;
 
     // int16 → float32 转换
@@ -74,7 +82,7 @@ static int impl_render(float *out, int frames) {
 }
 
 static void impl_destroy() {
-    if (emu) { gme_delete(emu); emu = NULL; }
+    if (emu) { safe_gme_delete(emu); emu = NULL; }
     free(render_buf); render_buf = NULL;
     render_buf_size = 0;
 }
