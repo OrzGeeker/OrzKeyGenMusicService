@@ -249,8 +249,12 @@ class OrzAudioPlayer {
         const data = new Uint8Array(buf);
 
         // 调用 WASM 加载模块
+        // 注意：Emscripten 6.0+ 不将 HEAPU8/HEAPF32 暴露为 Module 属性，
+        // 因此使用 Module.setValue/getValue（闭包函数，可访问内部堆视图）
         const ptr = this.wasmKit._malloc(data.length);
-        this.wasmKit.HEAPU8.set(data, ptr);
+        for (let i = 0; i < data.length; i++) {
+            this.wasmKit.setValue(ptr + i, data[i], 'i8');
+        }
 
         const loaded = this.wasmKit._openmpt_load(ptr, data.length);
         this.wasmKit._free(ptr);
@@ -264,9 +268,8 @@ class OrzAudioPlayer {
         const sampleRate = this.wasmKit._openmpt_get_sample_rate() || 48000;
         const channels = this.wasmKit._openmpt_get_channels() || 2;
         const totalFrames = Math.ceil(duration * sampleRate);
-        const bufSize = totalFrames * channels;
 
-        const renderPtr = this.wasmKit._malloc(bufSize * 4); // float32 = 4 bytes
+        const renderPtr = this.wasmKit._malloc(totalFrames * channels * 4); // float32 = 4 bytes
         const rendered = this.wasmKit._openmpt_render(renderPtr, totalFrames);
 
         if (rendered <= 0) {
@@ -275,12 +278,12 @@ class OrzAudioPlayer {
             throw new Error('WASM: no audio rendered');
         }
 
-        // 复制渲染数据到 Float32Array
+        // 使用 getValue 逐个读取渲染后的浮点样本
         const actualFrames = rendered;
-        const samples = new Float32Array(
-            this.wasmKit.HEAPF32.buffer, renderPtr, actualFrames * channels
-        );
-        const audioSamples = new Float32Array(samples); // 复制一份
+        const audioSamples = new Float32Array(actualFrames * channels);
+        for (let i = 0; i < audioSamples.length; i++) {
+            audioSamples[i] = this.wasmKit.getValue(renderPtr + i * 4, 'float');
+        }
 
         this.wasmKit._free(renderPtr);
         this.wasmKit._openmpt_destroy();

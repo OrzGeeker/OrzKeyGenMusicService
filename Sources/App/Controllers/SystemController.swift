@@ -16,9 +16,9 @@ struct SystemController: RouteCollection {
         async let albumCount = Album.query(on: req.db).count()
         async let playlistCount = Playlist.query(on: req.db).count()
 
-        // 使用聚合查询获取总文件大小而非加载所有行
-        let totalSize = try await Song.query(on: req.db)
-            .sum(\.$fileSize) ?? 0
+        // 加载所有歌曲汇总文件大小（Fluent 的 sum() 聚合在 PostgresNIO
+        // 中存在类型解码问题，改用 Swift 层面手动汇总）
+        let totalSize = try await Song.query(on: req.db).all().reduce(0) { $0 + $1.fileSize }
 
         return StatsResponse(
             totalSongs: try await songCount,

@@ -1,3 +1,4 @@
+import Foundation
 import Vapor
 import Fluent
 import OrzAudioKit
@@ -79,8 +80,7 @@ struct SongController: RouteCollection {
             throw Abort(.notFound)
         }
 
-        let publicDir = req.application.directory.publicDirectory
-        let fullPath = "\(publicDir)\(song.filePath)"
+        let fullPath = resolveFilePath(for: song, req: req)
 
         guard FileManager.default.fileExists(atPath: fullPath) else {
             throw Abort(.notFound, reason: "Audio file not found on disk")
@@ -117,7 +117,7 @@ struct SongController: RouteCollection {
             throw Abort(.notFound)
         }
 
-        let fullPath = "\(req.application.directory.publicDirectory)\(song.filePath)"
+        let fullPath = resolveFilePath(for: song, req: req)
         guard FileManager.default.fileExists(atPath: fullPath) else {
             throw Abort(.notFound)
         }
@@ -126,6 +126,16 @@ struct SongController: RouteCollection {
     }
 
     // MARK: - Helpers
+
+    /// 解析歌曲文件的完整磁盘路径
+    ///
+    /// 优先使用 MUSIC_PATH 环境变量（与扫描器一致），否则回退到 publicDirectory。
+    /// 修复：扫描器与流式端点路径不匹配的问题。
+    private func resolveFilePath(for song: Song, req: Request) -> String {
+        let musicPath = Environment.get("MUSIC_PATH")
+            ?? req.application.directory.publicDirectory
+        return (musicPath as NSString).appendingPathComponent(song.filePath)
+    }
 
     private func baseURL(from req: Request) -> String {
         "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
