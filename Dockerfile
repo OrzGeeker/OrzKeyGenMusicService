@@ -1,7 +1,7 @@
 # ================================
 # Build image
 # ================================
-FROM swift:6.0-jammy as build
+FROM swift:6.1-jammy as build
 
 # Install OS updates and audio library dependencies
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
@@ -12,8 +12,6 @@ RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
        libopenmpt-dev \
        libgme-dev \
        libsidplay2-dev \
-       libstsound-dev \
-       libadplug-dev \
        libchromaprint-dev \
        libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -60,8 +58,6 @@ RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
       libopenmpt0 \
       libgme0 \
       libsidplay2 \
-      libstsound0 \
-      libadplug0 \
       libchromaprint1 \
       curl \
     && rm -r /var/lib/apt/lists/*

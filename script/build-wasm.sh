@@ -37,9 +37,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-log()  { echo -e "${GREEN}[WASM]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-err()  { echo -e "${RED}[ERR]${NC} $1"; exit 1; }
+log()  { echo -e "${GREEN}[WASM]${NC} $1" >&2; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+err()  { echo -e "${RED}[ERR]${NC} $1" >&2; exit 1; }
 
 # ------------------------------------------------------------------
 # Parse arguments
@@ -201,8 +201,9 @@ generate_wrapper() {
 // Module handle
 static openmpt_module *mod = NULL;
 
-// Buffer for rendered audio
-static float *render_buf = NULL;
+// Separate left/right render buffers (new libopenmpt 0.7 API)
+static float *render_left = NULL;
+static float *render_right = NULL;
 static int render_buf_size = 0;
 
 // Module info
@@ -211,18 +212,15 @@ static int current_channels = 2;
 
 EMSCRIPTEN_KEEPALIVE
 int openmpt_load(const unsigned char *data, int data_len) {
-    int error = 0;
-    mod = openmpt_module_create_from_memory(data, (size_t)data_len, NULL, NULL, &error);
-    if (!mod || error != 0) {
-        return 0;
-    }
+    mod = openmpt_module_create_from_memory2(data, (size_t)data_len, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    if (!mod) return 0;
     return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE
 double openmpt_get_duration() {
     if (!mod) return 0;
-    return openmpt_module_get_duration_seconds(mod, current_sample_rate);
+    return openmpt_module_get_duration_seconds(mod);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -238,27 +236,37 @@ int openmpt_get_channels() {
 EMSCRIPTEN_KEEPALIVE
 int openmpt_render(float *out, int frames) {
     if (!mod) return 0;
-    int rendered = openmpt_module_read_float_stereo(mod, current_sample_rate, frames, out);
-    return rendered;
+    if (!render_left || frames > render_buf_size) {
+        float *nl = (float *)realloc(render_left, (size_t)frames * sizeof(float));
+        float *nr = (float *)realloc(render_right, (size_t)frames * sizeof(float));
+        if (!nl || !nr) return 0;
+        render_left = nl;
+        render_right = nr;
+        render_buf_size = frames;
+    }
+    size_t rendered = openmpt_module_read_float_stereo(
+        mod, current_sample_rate, (size_t)frames, render_left, render_right
+    );
+    for (size_t i = 0; i < rendered && i < (size_t)frames; i++) {
+        out[i * 2 + 0] = render_left[i];
+        out[i * 2 + 1] = render_right[i];
+    }
+    return (int)rendered;
 }
 
 EMSCRIPTEN_KEEPALIVE
 void openmpt_destroy() {
-    if (mod) {
-        openmpt_module_destroy(mod);
-        mod = NULL;
-    }
-    if (render_buf) {
-        free(render_buf);
-        render_buf = NULL;
-        render_buf_size = 0;
-    }
+    if (mod) { openmpt_module_destroy(mod); mod = NULL; }
+    free(render_left);  render_left  = NULL;
+    free(render_right); render_right = NULL;
+    render_buf_size = 0;
 }
 WRAPPERC
 
     # Additional format wrappers (stubs for now, expand as libraries are added)
     cat > "$BUILD_DIR/audio_engine.c" << 'AUDIOENGINEC'
 #include <emscripten.h>
+#include <string.h>
 #include <stdint.h>
 
 // Combined audio engine entry point
@@ -370,10 +378,11 @@ main() {
     local libopenmpt_dir=""
     if ! $ONLY_OPENMPT; then
         # Try to build libopenmpt
-        libopenmpt_dir=$(build_libopenmpt 2>&1) || {
-            warn "libopenmpt build failed, creating stub..."
+        libopenmpt_dir=$(build_libopenmpt 2>&1)
+        if [ -z "$libopenmpt_dir" ] || [ ! -f "$libopenmpt_dir/libopenmpt.a" -a ! -f "$libopenmpt_dir/.libs/libopenmpt.a" ]; then
+            warn "libopenmpt build failed or library not found, creating stub..."
             libopenmpt_dir=""
-        }
+        fi
     fi
 
     generate_wrapper "$libopenmpt_dir"
