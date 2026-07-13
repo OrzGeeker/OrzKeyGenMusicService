@@ -23,6 +23,7 @@ static const unsigned int SAMPLE_RATE = 44100;
 // ── Decoder 接口实现 ──
 
 static int impl_load(const unsigned char *data, int len) {
+    try {
     // 清理已有状态
     delete player; player = nullptr;
     delete tune; tune = nullptr;
@@ -66,11 +67,10 @@ static int impl_load(const unsigned char *data, int len) {
     // 初始化混音器（立体声）
     player->initMixer(true);
 
-    // SID 文件通常无内置长度信息，设默认 180 秒
-    // HVSC Songlengths.txt 数据库可通过 SidDatabase 类加载，暂不集成
     song_length_ms = 180000.0;
 
     return 1;
+    } catch (...) { return 0; }
 }
 
 static double impl_get_duration() {

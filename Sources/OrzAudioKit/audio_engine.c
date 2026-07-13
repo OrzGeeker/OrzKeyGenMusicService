@@ -8,7 +8,7 @@ extern const Decoder decoder_openmpt;
 // Game Music Emu (NSF/SPC)
 extern const Decoder decoder_gme;
 
-// libsidplayfp (SID) — 待 C++ 异常问题修复后启用
+// libsidplayfp (SID) — 待 C++ 运行时兼容修复
 // extern const Decoder decoder_sidplayfp;
 
 
