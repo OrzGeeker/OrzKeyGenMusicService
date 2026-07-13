@@ -8,6 +8,9 @@ extern const Decoder decoder_openmpt;
 // Game Music Emu (NSF/SPC) — 编译 gme 库后取消注释
 // extern const Decoder decoder_gme;
 
+// libsidplayfp (SID) — 编译 libsidplayfp 后取消注释
+extern const Decoder decoder_sidplayfp;
+
 
 // ── 解码器自动注册 ──
 static int registered = 0;
@@ -21,6 +24,9 @@ __attribute__((used)) void register_all() {
 
     // Game Music Emu: 游戏音乐格式 (nsf, spc) — 编译 gme 库后启用
     // orz_register_decoder("nsf,spc", &decoder_gme);
+
+    // libsidplayfp: Commodore 64 SID 格式
+    orz_register_decoder("sid", &decoder_sidplayfp);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──

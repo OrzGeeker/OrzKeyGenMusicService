@@ -33,6 +33,10 @@ LIBOPENMPT_URL="https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-${LIBOPE
 GME_VERSION="0.6.3"
 GME_URL="https://github.com/libgme/game-music-emu/archive/refs/tags/${GME_VERSION}.tar.gz"
 
+# libsidplayfp — 用于 SID (Commodore 64) 格式
+SIDPLAYFP_VERSION="3.0.2"
+SIDPLAYFP_URL="https://github.com/libsidplayfp/libsidplayfp/releases/download/v${SIDPLAYFP_VERSION}/libsidplayfp-${SIDPLAYFP_VERSION}.tar.gz"
+
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 
 # Colors
@@ -250,11 +254,74 @@ build_libgme() {
 }
 
 # ------------------------------------------------------------------
+# Build libsidplayfp (SID format)
+# ------------------------------------------------------------------
+build_libsidplayfp() {
+    log "Building libsidplayfp ${SIDPLAYFP_VERSION}..."
+
+    local src_dir
+    src_dir=$(download_source "$SIDPLAYFP_URL" "libsidplayfp" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/configure" ]; then
+        warn "libsidplayfp source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/sidplayfp"
+    mkdir -p "$build_dir"
+
+    log "Configuring libsidplayfp with Emscripten..."
+    pushd "$build_dir" >/dev/null || { warn "Cannot enter build dir"; echo ""; return; }
+
+    emconfigure "$src_dir/configure" \
+        --host=wasm32-unknown-emscripten \
+        --disable-shared \
+        --enable-static \
+        --disable-silent-rules \
+        CC=emcc CXX=em++ \
+        --prefix="$build_dir/install" \
+        2>&1 || {
+            warn "libsidplayfp configure failed"
+            popd >/dev/null
+            echo ""
+            return
+        }
+
+    log "Building libsidplayfp..."
+    emmake make -j"$JOBS" 2>&1 || {
+        warn "libsidplayfp make failed"
+        popd >/dev/null
+        echo ""
+        return
+    }
+
+    popd >/dev/null
+
+    # 查找 lib .a 文件
+    local lib_path=$(find "$build_dir" -name "libsidplayfp.a" 2>/dev/null | head -1)
+    if [ -z "$lib_path" ]; then
+        warn "libsidplayfp.a not found"
+        echo ""
+        return
+    fi
+
+    # 查找 include 目录（src 目录包含 sidplayfp/ 子目录）
+    local inc_path=$(find "$src_dir" -name "sidplayfp.h" -exec dirname {} \; 2>/dev/null | head -1)
+    if [ -n "$inc_path" ]; then
+        inc_path=$(dirname "$inc_path")
+    fi
+
+    echo "$lib_path|$inc_path"
+}
+
+# ------------------------------------------------------------------
 # Generate WASM wrapper
 # ------------------------------------------------------------------
 generate_wrapper() {
     local libopenmpt_dir="$1"
     local gme_result="$2"  # "lib_path|inc_path" or empty
+    local sidplayfp_result="$3"  # "lib_path|inc_path" or empty
 
     # Parse gme result
     local gme_lib=""
@@ -322,6 +389,19 @@ generate_wrapper() {
         libs+=("$gme_lib")
         if [ -n "$gme_inc" ]; then
             inc_dirs+=("$gme_inc")
+        fi
+    fi
+
+    # libsidplayfp (C++ wrapper)
+    local sidplayfp_lib=""
+    local sidplayfp_inc=""
+    if [ -n "$sidplayfp_result" ]; then
+        sidplayfp_lib="${sidplayfp_result%%|*}"
+        sidplayfp_inc="${sidplayfp_result#*|}"
+        source_files+=("$ORZ_SRC/sidplayfp_impl.cpp")
+        libs+=("$sidplayfp_lib")
+        if [ -n "$sidplayfp_inc" ]; then
+            inc_dirs+=("$sidplayfp_inc")
         fi
     fi
 
@@ -397,7 +477,14 @@ main() {
         warn "game-music-emu build failed, NSF/SPC formats will not be available"
     fi
 
-    generate_wrapper "$libopenmpt_dir" "$gme_result"
+    # Try to build libsidplayfp (sid)
+    local sidplayfp_result=""
+    sidplayfp_result=$(build_libsidplayfp 2>&1)
+    if [ -z "$sidplayfp_result" ]; then
+        warn "libsidplayfp build failed, SID format will not be available"
+    fi
+
+    generate_wrapper "$libopenmpt_dir" "$gme_result" "$sidplayfp_result"
 
     log "Build complete!"
     log "WASM output: $OUTPUT_DIR/orz_audio.wasm"
