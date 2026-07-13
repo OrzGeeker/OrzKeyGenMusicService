@@ -1,20 +1,11 @@
-# Docker Compose file for Vapor
+# Docker Compose for OrzPlayer Service
 #
-# Install Docker on your system to run and test
-# your Vapor app in a production-like environment.
-#
-# Note: This file is intended for testing and does not
-# implement best practices for a production deployment.
-#
-# Learn more: https://docs.docker.com/compose/reference/
-#
-#   Build images: docker-compose build
-#      Start app: docker-compose up app
-# Start database: docker-compose up db
-# Run migrations: docker-compose run migrate
-#       Stop all: docker-compose down (add -v to wipe db)
-#
-version: '3.7'
+#   Build images: docker compose build
+#      Start app: docker compose up app
+# Start database: docker compose up db
+# Run migrations: docker compose run migrate
+#  Trigger scan: docker compose run scan
+#       Stop all: docker compose down (add -v to wipe db)
 
 volumes:
   db_data:
@@ -25,7 +16,8 @@ x-shared_environment: &shared_environment
   DATABASE_NAME: vapor_database
   DATABASE_USERNAME: vapor_username
   DATABASE_PASSWORD: vapor_password
-  
+  MUSIC_PATH: /music
+
 services:
   app:
     image: music-service:latest
@@ -34,11 +26,15 @@ services:
     environment:
       <<: *shared_environment
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - '8080:8080'
-    # user: '0' # uncomment to run as root for testing purposes even though Dockerfile defines 'vapor' user.
+    volumes:
+      # 挂载音乐目录到容器内 /music
+      - ${MUSIC_DIR:-./music}:/music:ro
     command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]
+
   migrate:
     image: music-service:latest
     build:
@@ -46,29 +42,39 @@ services:
     environment:
       <<: *shared_environment
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     command: ["migrate", "--yes"]
     deploy:
       replicas: 0
-  revert:
+
+  scan:
     image: music-service:latest
     build:
       context: .
     environment:
       <<: *shared_environment
     depends_on:
-      - db
-    command: ["migrate", "--revert", "--yes"]
+      db:
+        condition: service_healthy
+    volumes:
+      - ${MUSIC_DIR:-./music}:/music:ro
+    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8081"]
     deploy:
       replicas: 0
+
   db:
-    image: postgres:14-alpine
+    image: postgres:16-alpine
     volumes:
-      - db_data:/var/lib/postgresql/data/pgdata
+      - db_data:/var/lib/postgresql/data
     environment:
-      PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_USER: vapor_username
       POSTGRES_PASSWORD: vapor_password
       POSTGRES_DB: vapor_database
     ports:
       - '5432:5432'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vapor_username -d vapor_database"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

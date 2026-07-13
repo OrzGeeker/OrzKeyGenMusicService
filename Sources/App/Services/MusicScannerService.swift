@@ -85,6 +85,7 @@ public struct MusicScannerService {
                     existing.fileSize = file.fileSize
                     existing.$artist.id = artist.id
                     existing.sha256 = sha256
+                    existing.duration = try? extractDuration(filePath: file.fullPath)
                     try await existing.update(on: db)
                     songsUpdated += 1
                 } else {
@@ -97,6 +98,7 @@ public struct MusicScannerService {
                     )
                     song.$artist.id = artist.id
                     song.sha256 = sha256
+                    song.duration = try? extractDuration(filePath: file.fullPath)
                     try await song.create(on: db)
                     songsCreated += 1
                 }
@@ -244,6 +246,37 @@ songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cl
         else { throw AudioError.decodeFailed("SHA-256 failed") }
 
         return String(hash)
+    }
+
+    /// 使用 ffprobe 提取音频时长（秒）
+    func extractDuration(filePath: String) -> Double? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "ffprobe", "-v", "quiet",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            filePath
+        ]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = nil
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let duration = Double(output), duration > 0
+            else { return nil }
+
+            return duration
+        } catch {
+            return nil
+        }
     }
 
     func cleanupRemovedFiles(activeFiles: Set<String>) async throws -> Int {

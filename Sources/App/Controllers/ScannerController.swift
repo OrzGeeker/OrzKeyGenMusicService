@@ -10,8 +10,10 @@ struct ScannerController: RouteCollection {
     /// POST /api/scan — 触发全量扫描
     @Sendable
     func scan(req: Request) async throws -> MusicScannerService.ScanResult {
-        let publicDir = req.application.directory.publicDirectory
-        let service = MusicScannerService(basePath: publicDir, db: req.db)
+        // 优先使用 MUSIC_PATH 环境变量，否则默认扫描 Public 目录
+        let musicPath = Environment.get("MUSIC_PATH")
+            ?? req.application.directory.publicDirectory
+        let service = MusicScannerService(basePath: musicPath, db: req.db)
         return try await service.scan()
     }
 }

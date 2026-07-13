@@ -50,7 +50,7 @@ struct UploadController: RouteCollection {
 
         // 创建 Song 记录
         let title = body.title ?? (body.file.filename as NSString).deletingPathExtension
-        let song = Song(title: title, filePath: filePath, fileFormat: ext, fileSize: fileData.count)
+        let song = Song(title: title, filePath: filePath, fileFormat: format.rawValue, fileSize: fileData.count)
         song.sha256 = sha256
 
         // 关联 Artist

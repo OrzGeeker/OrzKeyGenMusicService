@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OrzPlayer</title>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="/audio/player.js"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -249,6 +250,14 @@
     </div>
 
     <script>
+    // 全局音频播放引擎实例
+    let player = null;
+    document.addEventListener('DOMContentLoaded', () => {
+        player = new OrzAudioPlayer();
+        // 尝试初始化 WASM（不影响页面加载）
+        player.initWasm();
+    });
+
     function playerApp() {
         return {
             songs: [],
@@ -269,33 +278,28 @@
             duration: 0,
             playlistOpen: false,
 
-            // Audio elements
-            audioEl: null,
-            usingWASM: false,
-            audioCtx: null,
-            wasmPlayer: null,
-            wasmSource: null,
-
             async init() {
-                this.audioEl = new Audio();
-                this.audioEl.volume = this.volume;
-                this.audioEl.addEventListener('timeupdate', () => {
-                    if (this.audioEl.duration) {
-                        this.currentTime = this.audioEl.currentTime;
-                        this.duration = this.audioEl.duration;
-                        this.progressPercent = (this.currentTime / this.duration) * 100;
-                    }
-                });
-                this.audioEl.addEventListener('ended', () => this.next());
-                this.audioEl.addEventListener('error', () => {
-                    console.log('Audio error, trying fallback...');
-                });
+                if (player) {
+                    player.volume = this.volume;
+                    player.onTimeUpdate = (ct, dur) => {
+                        this.currentTime = ct;
+                        this.duration = dur;
+                        this.progressPercent = dur > 0 ? (ct / dur) * 100 : 0;
+                    };
+                    player.onEnded = () => this.next();
+                    player.onError = (e) => {
+                        console.error('Playback error:', e);
+                    };
+                }
                 await this.loadSongs();
             },
 
             get timeDisplay() {
                 if (!this.duration) return '0:00 / 0:00';
-                const fmt = (s) => { const m = Math.floor(s/60); return `${m}:${String(Math.floor(s%60)).padStart(2,'0')}`; };
+                const fmt = (s) => {
+                    const m = Math.floor(s / 60);
+                    return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+                };
                 return `${fmt(this.currentTime)} / ${fmt(this.duration)}`;
             },
 
@@ -309,7 +313,7 @@
                     const data = await res.json();
                     this.songs = data.items || [];
                     this.hasMore = data.metadata?.page < data.metadata?.totalPages;
-                } catch(e) { console.error(e); }
+                } catch (e) { console.error(e); }
                 this.isLoading = false;
             },
 
@@ -324,7 +328,7 @@
                     const data = await res.json();
                     this.songs = [...this.songs, ...(data.items || [])];
                     this.hasMore = data.metadata?.page < data.metadata?.totalPages;
-                } catch(e) { console.error(e); }
+                } catch (e) { console.error(e); }
                 this.isLoading = false;
             },
 
@@ -343,66 +347,22 @@
                     const data = await res.json();
                     this.songs = Array.isArray(data) ? data : [];
                     this.hasMore = false;
-                } catch(e) { console.error(e); }
+                } catch (e) { console.error(e); }
                 this.isLoading = false;
             },
 
             async playSong(song) {
-                if (this.wasmSource) { this.wasmSource.stop(); this.wasmSource = null; }
-                this.audioEl.pause();
+                if (!player) return;
                 this.currentSong = song;
                 this.isPlaying = false;
                 this.progressPercent = 0;
                 this.currentTime = 0;
 
-                const strategy = song.playStrategy || 'wasm';
-                const url = song.streamUrl;
+                await player.play(song);
 
-                if (strategy === 'direct' || strategy === 'serverDecode') {
-                    this.usingWASM = false;
-                    this.audioEl.src = url;
-                    this.audioEl.play().then(() => this.isPlaying = true).catch(() => {});
-                } else {
-                    // WASM decode
-                    this.usingWASM = true;
-                    try {
-                        if (!this.audioCtx) {
-                            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                        }
-                        const resp = await fetch(url);
-                        const buf = await resp.arrayBuffer();
-                        // Simple PCM play via AudioContext
-                        // In production, use WasmPlayer or libopenmpt.wasm
-                        this.audioCtx.decodeAudioData(buf).then((audioBuf) => {
-                            this.wasmSource = this.audioCtx.createBufferSource();
-                            this.wasmSource.buffer = audioBuf;
-                            this.wasmSource.connect(this.audioCtx.destination);
-                            this.wasmSource.start();
-                            this.isPlaying = true;
-                            this.duration = audioBuf.duration;
+                this.isPlaying = player.isPlaying;
 
-                            // Track progress
-                            const startTime = this.audioCtx.currentTime;
-                            const tick = () => {
-                                if (!this.isPlaying) return;
-                                this.currentTime = this.audioCtx.currentTime - startTime;
-                                this.progressPercent = Math.min((this.currentTime / this.duration) * 100, 100);
-                                if (this.currentTime < this.duration) {
-                                    requestAnimationFrame(tick);
-                                } else {
-                                    this.next();
-                                }
-                            };
-                            requestAnimationFrame(tick);
-                        }).catch(() => {
-                            // Fallback to server decode
-                            this.audioEl.src = song.streamUrl;
-                            this.audioEl.play().then(() => this.isPlaying = true).catch(() => {});
-                        });
-                    } catch(e) { console.error(e); }
-                }
-
-                // Add to queue
+                // 添加到队列
                 if (!this.queue.find(s => s.id === song.id)) {
                     this.queue.push(song);
                 }
@@ -411,18 +371,8 @@
 
             togglePlay() {
                 if (!this.currentSong) return;
-                if (this.usingWASM) {
-                    if (this.isPlaying) {
-                        if (this.audioCtx) this.audioCtx.suspend();
-                        this.isPlaying = false;
-                    } else {
-                        if (this.audioCtx) this.audioCtx.resume();
-                        this.isPlaying = true;
-                    }
-                } else {
-                    if (this.isPlaying) { this.audioEl.pause(); this.isPlaying = false; }
-                    else { this.audioEl.play().then(() => this.isPlaying = true).catch(() => {}); }
-                }
+                if (player) player.togglePlay();
+                if (player) this.isPlaying = player.isPlaying;
             },
 
             prev() {
@@ -440,16 +390,12 @@
             seek(e) {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const pct = (e.clientX - rect.left) / rect.width;
-                if (this.usingWASM) {
-                    this.progressPercent = pct * 100;
-                } else if (this.audioEl.duration) {
-                    this.audioEl.currentTime = pct * this.audioEl.duration;
-                }
+                if (player) player.seek(pct);
             },
 
             toggleMute() {
                 this.volume = this.volume === 0 ? 0.7 : 0;
-                this.audioEl.volume = this.volume;
+                if (player) player.setVolume(this.volume);
             },
 
             removeFromQueue(idx) {

@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -14,32 +14,11 @@ let package = Package(
     ],
     targets: [
         // ── Audio Engine ──
-        .target(
-            name: "OrzAudioKit",
-            dependencies: [
-                .target(name: "COpenMPT"),
-                .target(name: "CGameMusicEmu"),
-                .target(name: "CSIDPlay"),
-                .target(name: "CSC68"),
-                .target(name: "CSTSound"),
-                .target(name: "CUADE"),
-                .target(name: "CASAP"),
-                .target(name: "CAdPlug"),
-                .target(name: "CV2M"),
-                .target(name: "CChromaprint"),
-            ]
-        ),
-        // ── C Library Bridge Targets ──
-        .target(name: "COpenMPT"),
-        .target(name: "CGameMusicEmu"),
-        .target(name: "CSIDPlay"),
-        .target(name: "CSC68"),
-        .target(name: "CSTSound"),
-        .target(name: "CUADE"),
-        .target(name: "CASAP"),
-        .target(name: "CAdPlug"),
-        .target(name: "CV2M"),
-        .target(name: "CChromaprint"),
+        // 解码策略：标准格式 → AVFoundation / ffmpeg CLI
+        //           模块格式 → ffmpeg CLI（通过 system lib 插件）
+        //           冷门格式 → ffmpeg CLI 降级
+        // WASM 路径：Emscripten 编译 libopenmpt → 浏览器端解码
+        .target(name: "OrzAudioKit"),
 
         // ── App ──
         .target(

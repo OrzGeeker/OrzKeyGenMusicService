@@ -18,8 +18,16 @@ struct ArtistController: RouteCollection {
         let page = try await Artist.query(on: req.db)
             .sort(\.$name, .ascending)
             .paginate(for: req)
+
+        var responses: [ArtistResponse] = []
+        for artist in page.items {
+            let count = try await Song.query(on: req.db)
+                .filter("artist_id", .equal, artist.id!)
+                .count()
+            responses.append(ArtistResponse(artist: artist, songCount: count))
+        }
         return .init(
-            items: page.items.map { ArtistResponse(artist: $0) },
+            items: responses,
             metadata: page.metadata
         )
     }
@@ -30,7 +38,10 @@ struct ArtistController: RouteCollection {
         guard let artist = try await Artist.find(req.parameters.get("id"), on: req.db) else {
             throw Abort(.notFound)
         }
-        return ArtistResponse(artist: artist)
+        let songCount = try await Song.query(on: req.db)
+            .filter("artist_id", .equal, artist.id!)
+            .count()
+        return ArtistResponse(artist: artist, songCount: songCount)
     }
 
     /// GET /api/artists/:id/songs

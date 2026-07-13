@@ -1,21 +1,27 @@
 # ================================
 # Build image
 # ================================
-FROM swift:5.7-jammy as build
+FROM swift:6.0-jammy as build
 
-# Install OS updates and, if needed, sqlite3
+# Install OS updates and audio library dependencies
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
     && apt-get -q update \
-    && apt-get -q dist-upgrade -y\
+    && apt-get -q dist-upgrade -y \
+    && apt-get -q install -y \
+       # Audio decoding libraries (for ffmpeg plugin support)
+       libopenmpt-dev \
+       libgme-dev \
+       libsidplay2-dev \
+       libstsound-dev \
+       libadplug-dev \
+       libchromaprint-dev \
+       libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up a build area
 WORKDIR /build
 
 # First just resolve dependencies.
-# This creates a cached layer that can be reused
-# as long as your Package.swift/Package.resolved
-# files do not change.
 COPY ./Package.* ./
 RUN swift package resolve
 
@@ -23,7 +29,7 @@ RUN swift package resolve
 COPY . .
 
 # Build everything, with optimizations
-RUN swift build -c release --static-swift-stdlib
+RUN swift build -c release
 
 # Switch to the staging area
 WORKDIR /staging
@@ -35,26 +41,29 @@ RUN cp "$(swift build --package-path /build -c release --show-bin-path)/Run" ./
 RUN find -L "$(swift build --package-path /build -c release --show-bin-path)/" -regex '.*\.resources$' -exec cp -Ra {} ./ \;
 
 # Copy any resources from the public directory and views directory if the directories exist
-# Ensure that by default, neither the directory nor any of its contents are writable.
-RUN [ -d /build/Public ] && { mv /build/Public ./Public && chmod -R a-w ./Public; } || true
-RUN [ -d /build/Resources ] && { mv /build/Resources ./Resources && chmod -R a-w ./Resources; } || true
+RUN [ -d /build/Resources ] && { cp -Ra /build/Resources ./Resources && chmod -R a-w ./Resources; } || true
+RUN [ -d /build/Public ] && { cp -Ra /build/Public ./Public && chmod -R a-w ./Public; } || true
 
 # ================================
 # Run image
 # ================================
 FROM ubuntu:jammy
 
-# Make sure all system packages are up to date, and install only essential packages.
+# Make sure all system packages are up to date, and install runtime deps.
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
     && apt-get -q update \
     && apt-get -q dist-upgrade -y \
     && apt-get -q install -y \
       ca-certificates \
       tzdata \
-# If your app or its dependencies import FoundationNetworking, also install `libcurl4`.
-      # libcurl4 \
-# If your app or its dependencies import FoundationXML, also install `libxml2`.
-      # libxml2 \
+      ffmpeg \
+      libopenmpt0 \
+      libgme0 \
+      libsidplay2 \
+      libstsound0 \
+      libadplug0 \
+      libchromaprint1 \
+      curl \
     && rm -r /var/lib/apt/lists/*
 
 # Create a vapor user and group with /app as its home directory
@@ -72,6 +81,10 @@ USER vapor:vapor
 # Let Docker bind to port 8080
 EXPOSE 8080
 
-# Start the Vapor service when the image is run, default to listening on 8080 in production environment
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/stats || exit 1
+
+# Start the Vapor service
 ENTRYPOINT ["./Run"]
 CMD ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]

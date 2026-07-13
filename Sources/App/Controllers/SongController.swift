@@ -31,19 +31,32 @@ struct SongController: RouteCollection {
         )
     }
 
-    /// GET /api/songs/search?q= — 搜索
+    /// GET /api/songs/search?q= — 搜索（歌曲名 + 艺术家名）
     @Sendable
     func search(req: Request) async throws -> [SongResponse] {
-        guard let query = req.query[String.self, at: "q"], !query.isEmpty else {
+        guard let rawQuery = req.query[String.self, at: "q"], !rawQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
             return []
         }
 
+        // 安全过滤：移除可能破坏 SQL 的特殊字符，保留字母、数字、空格和基本标点
+        let safeQuery = rawQuery.replacingOccurrences(of: "'", with: "''")
+            .trimmingCharacters(in: .whitespaces)
+
+        guard !safeQuery.isEmpty else { return [] }
+
+        // 同时搜索歌曲标题和艺术家名称
         let songs = try await Song.query(on: req.db)
-            .filter(.sql(raw: "title ILIKE '%\(query)%'"))
+            .join(Artist.self, on: \Artist.$id == \Song.$artist.$id, method: .left)
+            .filter(.sql(unsafeRaw: "title ILIKE '%\(safeQuery)%' OR \"artists\".\"name\" ILIKE '%\(safeQuery)%'"))
             .limit(50)
             .all()
 
         let baseURL = baseURL(from: req)
+        // 预加载关联
+        for song in songs {
+            try await song.$artist.load(on: req.db)
+            try await song.$album.load(on: req.db)
+        }
         return songs.map { SongResponse(song: $0, baseURL: baseURL) }
     }
 
@@ -86,7 +99,7 @@ struct SongController: RouteCollection {
         switch strategy {
         case .directFile(let path, _),
              .wasmDecode(let path, _):
-            return req.fileio.streamFile(at: path)
+            return try await req.fileio.asyncStreamFile(at: path)
 
         case .serverDecode(let path, let fmt):
             let wav = try engine.decodeToWAV(filePath: path, format: fmt)
@@ -109,7 +122,7 @@ struct SongController: RouteCollection {
             throw Abort(.notFound)
         }
 
-        return req.fileio.streamFile(at: fullPath)
+        return try await req.fileio.asyncStreamFile(at: fullPath)
     }
 
     // MARK: - Helpers
