@@ -331,6 +331,14 @@ class OrzAudioPlayer {
             const audioCopy = new Float32Array(audioSamples);
 
             this.wasmKit._free(renderPtr);
+
+            // 重新读取时长（某些解码器在渲染过程中检测到终止后会更新）
+            const actualDuration = this.wasmKit._orz_get_duration();
+            if (actualDuration > 0 && actualDuration < this.duration) {
+                this.duration = actualDuration;
+                console.log('WASM: corrected duration =', actualDuration);
+            }
+
             this.wasmKit._orz_destroy();
             console.log('WASM: decode complete, playing via AudioContext');
 

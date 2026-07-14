@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <string.h>
 #include "audio_engine.h"
+#ifndef EMSCRIPTEN
+#define EMSCRIPTEN 1  // 暴露 api68_override_max_playtime 等 EMSCRIPTEN 专用函数
+#endif
 #include "api68/api68.h"
 
 // ── 单例状态 ──
@@ -61,15 +64,20 @@ static int impl_load(const unsigned char *data, int len)
         return 0;
     }
 
-    // 获取时长
-    api68_music_info_t info;
-    if (!api68_music_info(sc68, &info, -1, 0)) {
-        duration_ms = info.time_ms;
-    }
-    if (duration_ms <= 0) duration_ms = 120000; // 默认 2 分钟
-
-    // 默认第一轨
+    // 默认第一轨（关联播放器，必须在 music_info 前启动）
     api68_play(sc68, 0);
+
+    // 获取时长 — 大多数 sc68 keygen 文件没有内嵌时长信息
+    api68_override_max_playtime(0);
+    api68_music_info_t info;
+    for (int try_track = 0; try_track >= -1 && duration_ms <= 0; try_track--) {
+        memset(&info, 0, sizeof(info));
+        int ret = api68_music_info(sc68, &info, try_track, 0);
+        if (ret == 0 && info.time_ms > 0 && info.time_ms < 3600000) {
+            duration_ms = info.time_ms;
+        }
+    }
+    if (duration_ms <= 0) duration_ms = 180000; // 默认 3 分钟
 
     return 1;
 }
@@ -107,7 +115,15 @@ static int impl_render(float *out, int frames)
         int to_process = (remaining > buffer_samples) ? buffer_samples : remaining;
 
         int status = api68_process(sc68, pcm_buffer, to_process);
-        if (status & API68_END) break;
+        if (status & API68_END) {
+            // 更新真实时长（检测到曲目终止）
+            int real_ms = 0;
+            int seek_pos = api68_seek(sc68, -1);
+            if (seek_pos > 0) real_ms = seek_pos;
+            if (real_ms <= 0) real_ms = (int)((unsigned long long)(total + to_process) * 1000 / sample_rate);
+            if (real_ms > 0 && real_ms < duration_ms) duration_ms = real_ms;
+            break;
+        }
         if (status == API68_MIX_ERROR) break;
 
         // sc68 packed stereo: 每个 int32 包含 left(16bit) + right(16bit)
