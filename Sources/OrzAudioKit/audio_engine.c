@@ -32,7 +32,7 @@ __attribute__((used)) void register_all() {
     registered = 1;
 
     // libopenmpt: 模块跟踪器格式
-    orz_register_decoder("xm,mod,it,s3m,mo3,mtm", &decoder_openmpt);
+    orz_register_decoder("xm,mod,it,s3m,mo3,mtm,fc13,fc14", &decoder_openmpt);
 
     // Game Music Emu: 游戏音乐格式 (nsf, spc)
     orz_register_decoder("nsf,spc", &decoder_gme);

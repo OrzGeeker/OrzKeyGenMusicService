@@ -13,11 +13,6 @@ Backend Service About [KeyGen Music](http://keygenmusic.org/)
 | 解码方式 | 格式 | 解码库 | 数量 |
 |---------|------|--------|------|
 | 浏览器原生 | mp3, ogg, wav, flac, mid, m4a, aac | — | 186 |
-| WASM 解码 (已集成) | xm, mod, it, s3m, mo3, mtm | libopenmpt | 4881 |
-| WASM 解码 (已集成) | nsf, spc | game-music-emu | — |
-| WASM 解码 (已集成) | sap | ASAP | — |
-| WASM 解码 (已集成) | sid | libsidplayfp (sidlite) | 48 |
-| WASM 待集成 | sc68, ym | libsc68 | 141 |
 | WASM 待集成 | v2m | v2m-player | 130 |
 | WASM 待集成 | ahx, amd, fc13, fc14 | uade | 100 |
 | WASM 待集成 | rad, d00, hsc | adplug | 41 |

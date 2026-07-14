@@ -26,7 +26,7 @@ OUTPUT_DIR="$PROJECT_DIR/Resources/Public/audio"
 BUILD_DIR="$PROJECT_DIR/.wasm-build"
 CACHE_DIR="$BUILD_DIR/cache"
 
-LIBOPENMPT_VERSION="0.7.11"
+LIBOPENMPT_VERSION="0.8.0"
 LIBOPENMPT_URL="https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-${LIBOPENMPT_VERSION}+release.autotools.tar.gz"
 
 # Game Music Emu — 用于 NSF/SPC 格式
@@ -433,6 +433,10 @@ generate_wrapper() {
     fi
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
+    # libopenmpt 头文件（0.8.0 头文件在 libopenmpt/libopenmpt.h）
+    if [ -d "$BUILD_DIR/src/libopenmpt/libopenmpt" ]; then
+        inc_dirs+=("$BUILD_DIR/src/libopenmpt")
+    fi
     # v2m-player 头文件
     # adplug 头文件
     # libbinio 头文件
