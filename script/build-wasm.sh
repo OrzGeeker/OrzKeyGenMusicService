@@ -486,6 +486,8 @@ generate_wrapper() {
         # v2m-player (V2M format)
         "$ORZ_SRC/v2m_wasm.cpp"
         "$ORZ_SRC/v2mplayer_wasm.cpp"
+        # uade (Amiga: ahx, amd)
+        "$ORZ_SRC/uade_wasm.c"
     )
 
     # v2m synth_core.cpp（在 v2m 源码目录中）
@@ -518,6 +520,14 @@ generate_wrapper() {
         inc_dirs+=("$BUILD_DIR/src/sc68/api68")     # api68.h (fallback)
         inc_dirs+=("$BUILD_DIR/src/sc68/file68")    # file68/*.h
         inc_dirs+=("$BUILD_DIR/src/sc68")           # config68.h etc
+    fi
+
+    # uade (Amiga emulator) 头文件
+    if [ -d "$BUILD_DIR/src/uade" ]; then
+        inc_dirs+=("$BUILD_DIR/src/uade")           # sysconfig.h, uae.h, etc.
+        inc_dirs+=("$BUILD_DIR/src/uade/include")   # uae/*.h
+        inc_dirs+=("$BUILD_DIR/src/uade/frontends/include")  # uade/*.h
+        inc_dirs+=("$BUILD_DIR/src/uade/frontends/common")   # support.h, etc.
     fi
 
     # libopenmpt

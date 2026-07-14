@@ -23,6 +23,9 @@ extern const Decoder decoder_v2m;
 // ym6 (Atari ST YM2149)
 extern const Decoder decoder_ym6;
 
+// uade (Amiga: ahx, amd)
+extern const Decoder decoder_uade;
+
 // adplug (AdLib OPL2/3: rad, d00, hsc)
 extern const Decoder decoder_adplug;
 
@@ -54,6 +57,9 @@ __attribute__((used)) void register_all() {
 
     // ym6: Atari ST YM2149 raw frame 格式 (需 LHa 解压)
     orz_register_decoder("ym", &decoder_ym6);
+
+    // uade (Amiga: ahx, amd)
+    orz_register_decoder("ahx,amd", &decoder_uade);
 
     // adplug: AdLib OPL2/3 格式 (rad, d00, hsc)
     orz_register_decoder("rad,d00,hsc", &decoder_adplug);
