@@ -46,8 +46,8 @@ typedef struct {
     int      env_alternate : 1;
     int      env_hold     : 1;
 
-    // Frame data (YM6 register dumps)
-    const uint8_t *frame_data;   // pointer to frame data in original buffer
+    // Frame data (YM6 register dumps) — owned copy
+    uint8_t *frame_data;
     int   total_frames;
     int   current_frame;
     double frame_remainder;      // fractional sample accumulation
@@ -107,6 +107,8 @@ static void ym6_write_frame(ym6_t *y, const uint8_t *frame) {
 
 // ── Parse YM3/4/5/6 header ──
 // Returns duration in seconds, or 0 on failure.
+// Frame data for YM4/5/6 is always the LAST total_frames*16 bytes of the file.
+// YM3 uses 4-byte frames at a fixed offset after the header.
 static double ym6_parse_header(const uint8_t *data, int len,
                                 int *out_total_frames, int *out_frame_offset) {
     if (len < 4) return 0;
@@ -114,32 +116,49 @@ static double ym6_parse_header(const uint8_t *data, int len,
     if (m0 != 'Y' || m1 != 'M') return 0;
     if (m2 < '3' || m2 > '6') return 0;  // Only YM3-6
     if (m3 != '!' && m3 != ' ') return 0;
-    if (len < 38) return 0;
 
-    // Big-endian fields at fixed offsets
-    int total_frames = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    int total_frames = 0;
+    int fps = 50;
+
+    if (m2 == '3') {
+        // YM3: magic(4) + frames(4) + 4-byte frames (only 4 registers, delta-encoded)
+        if (len < 8) return 0;
+        total_frames = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+        if (total_frames <= 0 || len < 8 + total_frames * 4) return 0;
+        *out_total_frames = total_frames;
+        *out_frame_offset = 8;
+        return (double)total_frames / fps;
+    }
+
+    if (m2 == '4') {
+        // YM4: magic(4) + frames(4) + 16-byte frames
+        if (len < 8) return 0;
+        total_frames = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+        if (total_frames <= 0) return 0;
+        // Frame data is the last total_frames*16 bytes
+        int frame_offset = len - total_frames * 16;
+        if (frame_offset < 8) return 0;
+        *out_total_frames = total_frames;
+        *out_frame_offset = frame_offset;
+        return (double)total_frames / fps;
+    }
+
+    // YM5/6: full metadata header
+    //   YM5: magic(4) + name(8) + author(8) + frames(4) + attrs(4) + fps(2) = 30
+    //        + extra text (variable, no size field)
+    //   YM6: same + loop(4) = 34, + extra text (variable)
+    // Frame data is the LAST total_frames*16 bytes of the file
+    if (len < 30) return 0;
+    total_frames = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
     if (total_frames <= 0) return 0;
 
-    int fps = (data[28] << 8) | data[29];
+    fps = (data[28] << 8) | data[29];
     if (fps <= 0) fps = 50;
 
-    // Header size and extra data
-    int header_size = 4 + 8 + 8 + 4 + 4 + 2 + 4; // magic+name+author+frames+attrs+fps+loop
-    int extra_size = 0;
-    if (m2 >= '5') {
-        if (len < 38) return 0;
-        extra_size = (data[34] << 24) | (data[35] << 16) | (data[36] << 8) | data[37];
-        header_size = 38;  // YM5/6 has 4-byte extra size at offset 34
-    } else {
-        if (len < 34) return 0;
-        extra_size = (data[30] << 24) | (data[31] << 16) | (data[32] << 8) | data[33];
-        header_size = 34;  // YM3/4 has extra size at offset 30
-    }
-    if (extra_size > len - header_size) return 0;
-
-    int frame_offset = header_size + extra_size;
-    int expected = frame_offset + total_frames * 16;
-    if (len < expected) return 0;
+    // Calculate frame data offset from end of file
+    int frame_offset = len - total_frames * 16;
+    int min_header = (m2 == '6') ? 38 : 34;
+    if (frame_offset < min_header) return 0;
 
     *out_total_frames = total_frames;
     *out_frame_offset = frame_offset;
@@ -272,7 +291,13 @@ static int impl_load(const unsigned char *data, int len) {
     if (!ym) return 0;
 
     ym6_reset(ym);
-    ym->frame_data = data + frame_offset;
+
+    // Copy frame data — WASM caller may free the input buffer after orz_load returns
+    int frames_size = total_frames * 16;
+    ym->frame_data = (uint8_t*)malloc(frames_size);
+    if (!ym->frame_data) { free(ym); ym = NULL; return 0; }
+    memcpy(ym->frame_data, data + frame_offset, frames_size);
+
     ym->total_frames = total_frames;
     ym->current_frame = 0;
     ym->frame_remainder = 0;
@@ -300,7 +325,10 @@ static int impl_render(float *out, int frames) {
 }
 
 static void impl_destroy(void) {
-    if (ym) { free(ym); ym = NULL; }
+    if (ym) {
+        if (ym->frame_data) free(ym->frame_data);
+        free(ym); ym = NULL;
+    }
 }
 
 // ── Export decoder ──
