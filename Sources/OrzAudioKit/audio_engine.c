@@ -11,8 +11,8 @@ extern const Decoder decoder_gme;
 // ASAP (SAP — Atari POKEY 格式)
 extern const Decoder decoder_asap;
 
-// libsidplayfp (SID) — C++ 运行时兼容待排查
-// extern const Decoder decoder_sidplayfp;
+// libsidplayfp (SID)
+extern const Decoder decoder_sidplayfp;
 
 
 // ── 解码器自动注册 ──
@@ -31,8 +31,8 @@ __attribute__((used)) void register_all() {
     // ASAP: Atari POKEY 格式
     orz_register_decoder("sap", &decoder_asap);
 
-    // libsidplayfp: Commodore 64 SID 格式 — 待修复
-    // orz_register_decoder("sid", &decoder_sidplayfp);
+    // libsidplayfp: Commodore 64 SID 格式
+    orz_register_decoder("sid", &decoder_sidplayfp);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──

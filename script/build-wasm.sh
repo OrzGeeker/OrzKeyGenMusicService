@@ -212,6 +212,7 @@ build_libgme() {
     emcmake cmake "$src_dir" \
         -DBUILD_SHARED_LIBS=OFF \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DENABLE_UBSAN=OFF \
         -DGME_ENABLE_SPC=ON \
         -DGME_ENABLE_NSF=ON \
         -DGME_ENABLE_GBS=OFF \
@@ -242,9 +243,11 @@ build_libgme() {
         return
     fi
 
-    # 找到头文件目录
+    # 找到头文件目录 — gme.h 在 gme/gme.h，需父目录
     local inc_path=$(find "$src_dir" -name "gme.h" -exec dirname {} \; 2>/dev/null | head -1)
-    if [ -z "$inc_path" ]; then
+    if [ -n "$inc_path" ]; then
+        inc_path="$(dirname "$inc_path")"  # 升到包含 gme/ 子目录的目录
+    else
         inc_path="$build_dir"
     fi
 
@@ -303,10 +306,10 @@ build_libsidplayfp() {
         return
     fi
 
-    # 查找 include 目录（src 目录包含 sidplayfp/ 子目录）
-    local inc_path=$(find "$src_dir" -name "sidplayfp.h" -exec dirname {} \; 2>/dev/null | head -1)
-    if [ -n "$inc_path" ]; then
-        inc_path=$(dirname "$inc_path")
+    # 查找 include 目录 — sidplayfp.h 在 sidplayfp/ 子目录中
+    local inc_h_path=$(find "$src_dir" -name "sidplayfp.h" -exec dirname {} \; 2>/dev/null | head -1)
+    if [ -n "$inc_h_path" ]; then
+        inc_path="$(dirname "$inc_h_path")"  # 升一级到包含 sidplayfp/ 的目录
     fi
 
     echo "$lib_path|$inc_path"
@@ -338,11 +341,13 @@ generate_wrapper() {
     source_files=(
         "$ORZ_SRC/orz_dispatch.c"
         "$ORZ_SRC/openmpt_impl.c"
-        "$ORZ_SRC/gme_impl.c"
+        "$ORZ_SRC/gme_impl.c"       # 定义 decoder_gme，libgme.a 可选链接
+        "$ORZ_SRC/asap_impl.c"
         "$ORZ_SRC/audio_engine.c"
         "$ORZ_SRC/cxx_helpers.cpp"
     )
     inc_dirs+=("$ORZ_SRC/include")
+    inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
 
     # libopenmpt
     if [ -n "$libopenmpt_dir" ]; then
@@ -384,23 +389,37 @@ generate_wrapper() {
 
     # Game Music Emu
     if [ -n "$gme_lib" ]; then
-        source_files+=("$ORZ_SRC/gme_impl.c")
         libs+=("$gme_lib")
         if [ -n "$gme_inc" ]; then
             inc_dirs+=("$gme_inc")
         fi
     fi
 
+    # ASAP (Atari POKEY)
+    local asap_lib="$BUILD_DIR/libasap_wasm.a"
+    if [ -f "$asap_lib" ]; then
+        libs+=("$asap_lib")
+        log "ASAP library found: $asap_lib"
+    else
+        warn "ASAP library not found at $asap_lib, sap format will not be available"
+    fi
+
     # libsidplayfp (C++ wrapper)
     local sidplayfp_lib=""
-    local sidplayfp_inc=""
+    local sidplayfp_inc_raw=""
     if [ -n "$sidplayfp_result" ]; then
         sidplayfp_lib="${sidplayfp_result%%|*}"
-        sidplayfp_inc="${sidplayfp_result#*|}"
+        sidplayfp_inc_raw="${sidplayfp_result#*|}"
         source_files+=("$ORZ_SRC/sidplayfp_impl.cpp")
         libs+=("$sidplayfp_lib")
-        if [ -n "$sidplayfp_inc" ]; then
-            inc_dirs+=("$sidplayfp_inc")
+        if [ -n "$sidplayfp_inc_raw" ]; then
+            # 支持多个 include 路径 (用 | 分隔)
+            IFS='|' read -ra inc_parts <<< "$sidplayfp_inc_raw"
+            for part in "${inc_parts[@]}"; do
+                if [ -n "$part" ] && [ -d "$part" ]; then
+                    inc_dirs+=("$part")
+                fi
+            done
         fi
     fi
 
@@ -443,6 +462,7 @@ STUBC
         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
+        -s ALLOW_MEMORY_GROWTH=1 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
         --no-entry \
         -O3 \
@@ -460,26 +480,91 @@ main() {
 
     check_prereqs
 
+    # ── libopenmpt ──
     local libopenmpt_dir=""
-    if ! $ONLY_OPENMPT; then
-        # Try to build libopenmpt
+    local libopenmpt_a=""
+    local -a openmpt_candidates=(
+        "$BUILD_DIR/libopenmpt/.libs/libopenmpt.a"
+        "$BUILD_DIR/libopenmpt/libopenmpt.a"
+        "$BUILD_DIR/libopenmpt/src/libopenmpt/.libs/libopenmpt.a"
+    )
+    for f in "${openmpt_candidates[@]}"; do
+        if [ -f "$f" ]; then
+            libopenmpt_a="$f"
+            libopenmpt_dir="$(dirname "$f")"
+            # 如果 .libs 下找到，目录同级
+            if [[ "$f" == *"/.libs/"* ]]; then
+                libopenmpt_dir="$(dirname "$(dirname "$f")")"
+            elif [[ "$f" == */install/lib/* ]]; then
+                libopenmpt_dir="$(dirname "$(dirname "$(dirname "$f")")")"
+            fi
+            break
+        fi
+    done
+    if [ -z "$libopenmpt_a" ]; then
+        log "libopenmpt .a not cached, building from source..."
         libopenmpt_dir=$(build_libopenmpt)
-        if [ -z "$libopenmpt_dir" ] || [ ! -f "$libopenmpt_dir/libopenmpt.a" -a ! -f "$libopenmpt_dir/.libs/libopenmpt.a" ]; then
-            warn "libopenmpt build failed or library not found, creating stub..."
+        if [ -z "$libopenmpt_dir" ] || [ ! -f "$libopenmpt_dir/.libs/libopenmpt.a" -a ! -f "$libopenmpt_dir/libopenmpt.a" ]; then
+            warn "libopenmpt build failed, stub only"
             libopenmpt_dir=""
         fi
+    else
+        log "Using cached libopenmpt: $libopenmpt_a"
     fi
 
-    # Try to build Game Music Emu (nsf, spc)
+    # ── Game Music Emu ──
     local gme_result=""
-    gme_result=$(build_libgme)
+    local gme_lib_path=$(find "$BUILD_DIR/gme" -name "libgme.a" 2>/dev/null | head -1)
+    # gme 头文件以 #include <gme/gme.h> 引用 → -I 需指向含 gme/ 子目录的父目录
+    local gme_inc_path=""
+    # 从可能的源目录中查找正确的 include 父目录
+    for d in "$BUILD_DIR/src/game-music-emu" "$BUILD_DIR/src/gme"; do
+        if [ -f "$d/gme/gme.h" ]; then
+            gme_inc_path="$d"
+            break
+        fi
+    done
+    if [ -n "$gme_lib_path" ]; then
+        gme_result="${gme_lib_path}|${gme_inc_path}"
+        log "Using cached game-music-emu: $gme_lib_path"
+        log "  gme include path: $gme_inc_path"
+    else
+        gme_result=$(build_libgme)
+    fi
     if [ -z "$gme_result" ]; then
         warn "game-music-emu build failed, NSF/SPC formats will not be available"
     fi
 
-    # Try to build libsidplayfp (sid)
+    # ── libsidplayfp ──
     local sidplayfp_result=""
-    sidplayfp_result=$(build_libsidplayfp)
+    local sid_a=$(find "$BUILD_DIR/sidplayfp" -name "libsidplayfp.a" 2>/dev/null | head -1)
+    local sid_inc_src=""
+    local sid_h_path=$(find "$BUILD_DIR/src/libsidplayfp" -name "sidplayfp.h" 2>/dev/null | head -1)
+    if [ -n "$sid_h_path" ]; then
+        sid_inc_src="$(dirname "$(dirname "$sid_h_path")")"
+    fi
+    # 生成的头文件（如 sidversion.h）在 build 输出中
+    local sid_inc_build="$BUILD_DIR/sidplayfp/src"
+    # sidlite builder 头文件
+    local sid_inc_sidlite="$BUILD_DIR/src/libsidplayfp/src/builders/sidlite-builder"
+    # 合并多个 include 路径，用 | 分隔用于 generate_wrapper 解析
+    local sid_inc=""
+    for inc in "$sid_inc_src" "$sid_inc_build" "$sid_inc_sidlite"; do
+        if [ -n "$inc" ] && [ -d "$inc" ]; then
+            if [ -z "$sid_inc" ]; then
+                sid_inc="$inc"
+            else
+                sid_inc="$sid_inc|$inc"
+            fi
+        fi
+    done
+
+    if [ -n "$sid_a" ]; then
+        sidplayfp_result="${sid_a}|${sid_inc}"
+        log "Using cached libsidplayfp: $sid_a"
+    else
+        sidplayfp_result=$(build_libsidplayfp)
+    fi
     if [ -z "$sidplayfp_result" ]; then
         warn "libsidplayfp build failed, SID format will not be available"
     fi
