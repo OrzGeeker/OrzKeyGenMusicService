@@ -20,6 +20,9 @@ extern const Decoder decoder_sc68;
 // v2m-player (Farbrausch V2M)
 extern const Decoder decoder_v2m;
 
+// ym6 (Atari ST YM2149)
+extern const Decoder decoder_ym6;
+
 // adplug (AdLib OPL2/3: rad, d00, hsc)
 extern const Decoder decoder_adplug;
 
@@ -46,8 +49,11 @@ __attribute__((used)) void register_all() {
     // v2m-player: Farbrausch V2 合成器格式
     orz_register_decoder("v2m", &decoder_v2m);
 
-    // libsc68: Atari ST YM / Amiga 格式 (sc68=120首可播, ym=21首需LHa解压+格式转换)
+    // libsc68: Atari ST YM / Amiga 格式
     orz_register_decoder("sc68", &decoder_sc68);
+
+    // ym6: Atari ST YM2149 raw frame 格式 (需 LHa 解压)
+    orz_register_decoder("ym", &decoder_ym6);
 
     // adplug: AdLib OPL2/3 格式 (rad, d00, hsc)
     orz_register_decoder("rad,d00,hsc", &decoder_adplug);

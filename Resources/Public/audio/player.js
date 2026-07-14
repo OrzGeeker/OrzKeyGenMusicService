@@ -274,9 +274,7 @@ class OrzAudioPlayer {
             const dataPtr = this.wasmKit._malloc(data.length);
             if (!dataPtr) throw new Error('malloc data failed');
             step = 'copy_data';
-            for (let i = 0; i < data.length; i++) {
-                this.wasmKit.setValue(dataPtr + i, data[i], 'i8');
-            }
+            this.wasmKit.HEAPU8.set(data, dataPtr);
 
             step = 'orz_load';
             const loaded = this.wasmKit._orz_load(fmtPtr, dataPtr, data.length);
@@ -323,10 +321,14 @@ class OrzAudioPlayer {
 
             step = 'getValue';
             const actualFrames = rendered;
-            const audioSamples = new Float32Array(actualFrames * channels);
-            for (let i = 0; i < audioSamples.length; i++) {
-                audioSamples[i] = this.wasmKit.getValue(renderPtr + i * 4, 'float');
-            }
+            // Direct view on WASM heap — zero-copy!
+            const audioSamples = new Float32Array(
+                this.wasmKit.HEAPU8.buffer,
+                renderPtr,
+                actualFrames * channels
+            );
+            // Make a copy (WASM heap gets reused on next load)
+            const audioCopy = new Float32Array(audioSamples);
 
             this.wasmKit._free(renderPtr);
             this.wasmKit._orz_destroy();
@@ -341,11 +343,11 @@ class OrzAudioPlayer {
                 const left = audioBuffer.getChannelData(0);
                 const right = audioBuffer.getChannelData(1);
                 for (let i = 0; i < actualFrames; i++) {
-                    left[i] = audioSamples[i * 2];
-                    right[i] = audioSamples[i * 2 + 1];
+                    left[i] = audioCopy[i * 2];
+                    right[i] = audioCopy[i * 2 + 1];
                 }
             } else {
-                audioBuffer.getChannelData(0).set(audioSamples);
+                audioBuffer.getChannelData(0).set(audioCopy);
             }
 
             this._playAudioBuffer(audioBuffer);

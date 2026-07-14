@@ -73,6 +73,36 @@ if $CLEAN; then
 fi
 
 # ------------------------------------------------------------------
+# Decompress LHa YM archives
+# ------------------------------------------------------------------
+decompress_ym_files() {
+    local lha_bin="/opt/homebrew/opt/lhasa/bin/lha"
+    if [ ! -x "$lha_bin" ]; then
+        warn "lha not installed - ym files will not be decompressed"
+        return
+    fi
+
+    # Find all .ym files that are LHa archives
+    local ym_dir="$PROJECT_DIR/Public/keygenmusic"
+    find "$ym_dir" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
+        # Check if it's an LHa archive
+        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
+            log "Decompressing: $(basename "$ymfile")"
+            local tmpdir=$(mktemp -d)
+            (cd "$tmpdir" && "$lha_bin" x "$ymfile" >/dev/null 2>&1)
+            local extracted=$(find "$tmpdir" -type f 2>/dev/null | head -1)
+            if [ -n "$extracted" ]; then
+                cp "$extracted" "$ymfile"
+                log "  -> $(wc -c < "$ymfile") bytes raw YM"
+            else
+                warn "  -> extraction failed for $(basename "$ymfile")"
+            fi
+            rm -rf "$tmpdir"
+        fi
+    done
+}
+
+# ------------------------------------------------------------------
 # Check prerequisites
 # ------------------------------------------------------------------
 check_prereqs() {
@@ -423,6 +453,8 @@ generate_wrapper() {
         "$ORZ_SRC/adplug_wrap.cpp"
         # sc68 (Atari ST YM / Amiga)
         "$ORZ_SRC/sc68_impl.c"
+        # ym6 (Atari ST YM2149 raw frames)
+        "$ORZ_SRC/ym6_impl.c"
         # v2m-player (V2M format)
         "$ORZ_SRC/v2m_wasm.cpp"
         "$ORZ_SRC/v2mplayer_wasm.cpp"
@@ -629,6 +661,9 @@ main() {
     mkdir -p "$OUTPUT_DIR" "$BUILD_DIR" "$CACHE_DIR"
 
     check_prereqs
+
+    # Decompress LHa YM archives to raw YM6
+    decompress_ym_files
 
     # ── libopenmpt ──
     local libopenmpt_dir=""
