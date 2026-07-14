@@ -28,6 +28,7 @@ let package = Package(
             "sidplayfp_impl.cpp",
             "v2m_wasm.cpp", "v2mplayer_wasm.cpp", "v2m_types.h",
             "cxx_helpers.cpp",
+            "uade_wasm.c", "score_data.h", "ahx_player_data.h",
             "include",
         ]),
 
