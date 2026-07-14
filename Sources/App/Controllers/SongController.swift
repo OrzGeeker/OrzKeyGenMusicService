@@ -82,6 +82,14 @@ struct SongController: RouteCollection {
 
         let fullPath = resolveFilePath(for: song, req: req)
 
+        // YM 文件：优先提供构建时解压的 raw YM6 版本
+        if let format = AudioFormat(rawValue: song.fileFormat), format == .ym {
+            let rawPath = resolveYmRawPath(for: song, req: req)
+            if FileManager.default.fileExists(atPath: rawPath) {
+                return try await req.fileio.asyncStreamFile(at: rawPath)
+            }
+        }
+
         guard FileManager.default.fileExists(atPath: fullPath) else {
             throw Abort(.notFound, reason: "Audio file not found on disk")
         }
@@ -99,6 +107,13 @@ struct SongController: RouteCollection {
         switch strategy {
         case .directFile(let path, _),
              .wasmDecode(let path, _):
+            // YM 文件：优先提供构建时解压的 raw YM6 版本（保持 LHa 原始归档不变）
+            if format == .ym {
+                let rawPath = resolveYmRawPath(for: song, req: req)
+                if FileManager.default.fileExists(atPath: rawPath) {
+                    return try await req.fileio.asyncStreamFile(at: rawPath)
+                }
+            }
             return try await req.fileio.asyncStreamFile(at: path)
 
         case .serverDecode(let path, let fmt):
@@ -139,5 +154,12 @@ struct SongController: RouteCollection {
 
     private func baseURL(from req: Request) -> String {
         "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
+    }
+
+    /// 构建时解压的 raw YM6 文件路径（保持原始 LHa 归档不变）
+    private func resolveYmRawPath(for song: Song, req: Request) -> String {
+        (req.application.directory.publicDirectory as NSString)
+            .appendingPathComponent("audio/ym-raw")
+            .appendingPathComponent(song.filePath)
     }
 }

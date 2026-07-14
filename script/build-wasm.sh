@@ -113,14 +113,13 @@ decompress_ym_files() {
         fi
     done
 
-    # Overwrite originals with decompressed versions (build-time only, not committed)
+    # Copy decompressed YM files to public web directory (server serves from here)
+    local public_ym_raw="$OUTPUT_DIR/ym-raw"
     if [ -d "$raw_dir" ]; then
-        log "Copying decompressed YM files to source tree..."
-        find "$raw_dir" -name "*.ym" -type f 2>/dev/null | while read -r rawfile; do
-            local relpath="${rawfile#$raw_dir/}"
-            local target="$ym_dir/$relpath"
-            cp "$rawfile" "$target"
-        done
+        mkdir -p "$public_ym_raw"
+        log "Copying decompressed YM files to web directory..."
+        cp -R "$raw_dir/"* "$public_ym_raw/" 2>/dev/null || true
+        log "  -> $(find "$public_ym_raw" -name '*.ym' -type f 2>/dev/null | wc -l) files in $public_ym_raw"
     fi
 }
 
