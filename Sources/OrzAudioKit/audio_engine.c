@@ -14,6 +14,9 @@ extern const Decoder decoder_asap;
 // libsidplayfp (SID)
 extern const Decoder decoder_sidplayfp;
 
+// libsc68 (Atari ST YM/Amiga)
+extern const Decoder decoder_sc68;
+
 
 // ── 解码器自动注册 ──
 static int registered = 0;
@@ -33,6 +36,9 @@ __attribute__((used)) void register_all() {
 
     // libsidplayfp: Commodore 64 SID 格式
     orz_register_decoder("sid", &decoder_sidplayfp);
+
+    // libsc68: Atari ST / Amiga — 暂禁用，需 replay 数据生成工具链
+    // orz_register_decoder("sc68,ym", &decoder_sc68);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──

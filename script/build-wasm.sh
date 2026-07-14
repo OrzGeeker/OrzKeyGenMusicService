@@ -255,6 +255,79 @@ build_libgme() {
 }
 
 # ------------------------------------------------------------------
+# Build libsc68 (Atari ST YM / Amiga formats: sc68, ym)
+# ------------------------------------------------------------------
+build_libsc68() {
+    log "Building libsc68 (photonstorm fork)..."
+
+    local src_dir="$BUILD_DIR/src/sc68"
+    if [ ! -d "$src_dir" ] || [ ! -f "$src_dir/api68/api68.h" ]; then
+        warn "sc68 source not available at $src_dir"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/sc68"
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || { warn "Cannot enter build dir"; echo ""; return; }
+
+    # 收集所有 .c 源文件（排除 emscripten 目录下的 adapter.c）
+    local C_FILES=()
+    for d in api68 emu68 file68 io68 unice68 sc68; do
+        for f in "$src_dir/$d"/*.c; do
+            [ -f "$f" ] && C_FILES+=("$f")
+        done
+    done
+
+    if [ ${#C_FILES[@]} -eq 0 ]; then
+        warn "No sc68 source files found"
+        popd >/dev/null
+        echo ""
+        return
+    fi
+
+    local inc_flags="-I$src_dir -I$src_dir/emscripten -I$src_dir/file68 -I$src_dir/api68"
+    log "Compiling ${#C_FILES[@]} sc68 source files..."
+    local compiled=0
+    for cfile in "${C_FILES[@]}"; do
+        local basename="${cfile##*/}"
+        local dirpart="${cfile%/*}"
+        local subdir="${dirpart##*/}"
+        # 用子目录名作前缀避免同名文件冲突（如 emu68/error68.c → emu68_error68.o）
+        local objname="${subdir}_${basename%.c}.o"
+        emcc -c "$cfile" \
+            -o "$objname" \
+            $inc_flags \
+            -Wno-pointer-sign \
+            -Wno-incompatible-function-pointer-types \
+            -O3 \
+            -D EMSCRIPTEN \
+            -D 'EMSCRIPTEN_KEEPALIVE=__attribute__((used))' \
+            -s WASM=1 2>/dev/null || {
+                warn "Failed to compile $cfile"
+                continue
+            }
+        compiled=$((compiled + 1))
+    done
+
+    # 打包为静态库
+    local objs=( *.o )
+    if [ ${#objs[@]} -gt 0 ]; then
+        emar cr libsc68.a "${objs[@]}"
+        emranlib libsc68.a
+        log "sc68 library created: libsc68.a (${#objs[@]} objects)"
+    else
+        warn "No object files produced"
+        popd >/dev/null
+        echo ""
+        return
+    fi
+
+    popd >/dev/null
+    echo "$build_dir/libsc68.a|$src_dir"
+}
+
+# ------------------------------------------------------------------
 # Build libsidplayfp (SID format)
 # ------------------------------------------------------------------
 build_libsidplayfp() {
@@ -343,11 +416,19 @@ generate_wrapper() {
         "$ORZ_SRC/openmpt_impl.c"
         "$ORZ_SRC/gme_impl.c"       # 定义 decoder_gme，libgme.a 可选链接
         "$ORZ_SRC/asap_impl.c"
+        "$ORZ_SRC/sc68_impl.c"      # 定义 decoder_sc68，libsc68.a 可选链接
         "$ORZ_SRC/audio_engine.c"
         "$ORZ_SRC/cxx_helpers.cpp"
     )
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
+    # sc68 头文件
+    if [ -d "$BUILD_DIR/src/sc68" ]; then
+        inc_dirs+=("$BUILD_DIR/src/sc68")           # api68/api68.h
+        inc_dirs+=("$BUILD_DIR/src/sc68/api68")     # api68.h (fallback)
+        inc_dirs+=("$BUILD_DIR/src/sc68/file68")    # file68/*.h
+        inc_dirs+=("$BUILD_DIR/src/sc68")           # config68.h etc
+    fi
 
     # libopenmpt
     if [ -n "$libopenmpt_dir" ]; then
@@ -393,6 +474,33 @@ generate_wrapper() {
         if [ -n "$gme_inc" ]; then
             inc_dirs+=("$gme_inc")
         fi
+    fi
+
+    # libsc68 (Atari ST YM / Amiga)
+    local sc68_result=""
+    local sc68_a=$(find "$BUILD_DIR/sc68" -name "libsc68.a" 2>/dev/null | head -1)
+    if [ -n "$sc68_a" ]; then
+        local sc68_src_dir=$(find "$BUILD_DIR/src/sc68" -maxdepth 0 -type d 2>/dev/null)
+        sc68_result="${sc68_a}|${sc68_src_dir}"
+        log "Using cached libsc68: $sc68_a"
+    else
+        sc68_result=$(build_libsc68)
+    fi
+
+    local sc68_lib=""
+    local sc68_inc=""
+    if [ -n "$sc68_result" ]; then
+        sc68_lib="${sc68_result%%|*}"
+        sc68_inc="${sc68_result#*|}"
+        libs+=("$sc68_lib")
+        if [ -n "$sc68_inc" ]; then
+            inc_dirs+=("$sc68_inc")
+            inc_dirs+=("$sc68_inc/api68")
+            inc_dirs+=("$sc68_inc/file68")
+            inc_dirs+=("$sc68_inc/emscripten")
+        fi
+    else
+        warn "libsc68 build failed, sc68/ym formats will not be available"
     fi
 
     # ASAP (Atari POKEY)
