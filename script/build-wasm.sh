@@ -418,6 +418,9 @@ generate_wrapper() {
         "$ORZ_SRC/asap_impl.c"
         "$ORZ_SRC/audio_engine.c"
         "$ORZ_SRC/cxx_helpers.cpp"
+        # adplug (AdLib OPL2/3)
+        "$ORZ_SRC/adplug_impl.c"
+        "$ORZ_SRC/adplug_wrap.cpp"
         # v2m-player (V2M format)
         "$ORZ_SRC/v2m_wasm.cpp"
         "$ORZ_SRC/v2mplayer_wasm.cpp"
@@ -431,6 +434,14 @@ generate_wrapper() {
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
     # v2m-player 头文件
+    # adplug 头文件
+    # libbinio 头文件
+    if [ -d "$BUILD_DIR/libbinio-install/include" ]; then
+        inc_dirs+=("$BUILD_DIR/libbinio-install/include")
+    fi
+    if [ -d "$BUILD_DIR/src/adplug/src" ]; then
+        inc_dirs+=("$BUILD_DIR/src/adplug/src")
+    fi
     if [ -d "$BUILD_DIR/src/v2m" ]; then
         inc_dirs+=("$BUILD_DIR/src")           # v2m/types.h, v2m/synth.h 等
         inc_dirs+=("$BUILD_DIR/src/v2m")       # types.h, synth.h, v2mplayer.h (短名引用)
@@ -544,6 +555,16 @@ generate_wrapper() {
         fi
     fi
 
+    # adplug (AdLib OPL2/3)
+    local adplug_lib="$BUILD_DIR/adplug/src/libadplug.a"
+    local binio_lib="$BUILD_DIR/libbinio/src/liblibbinio.a"
+    if [ -f "$adplug_lib" ]; then
+        libs+=("$adplug_lib")
+        log "AdPlug library found: $adplug_lib"
+        if [ -f "$binio_lib" ]; then
+            libs+=("$binio_lib")
+        fi
+    fi
     if [ ${#libs[@]} -eq 0 ]; then
         warn "No decoder libraries found, creating stub WASM binary."
         cat > "$BUILD_DIR/stub.c" << 'STUBC'
