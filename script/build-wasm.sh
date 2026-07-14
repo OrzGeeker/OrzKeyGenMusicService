@@ -414,14 +414,27 @@ generate_wrapper() {
     source_files=(
         "$ORZ_SRC/orz_dispatch.c"
         "$ORZ_SRC/openmpt_impl.c"
-        "$ORZ_SRC/gme_impl.c"       # 定义 decoder_gme，libgme.a 可选链接
+        "$ORZ_SRC/gme_impl.c"
         "$ORZ_SRC/asap_impl.c"
-        "$ORZ_SRC/sc68_impl.c"      # 定义 decoder_sc68，libsc68.a 可选链接
         "$ORZ_SRC/audio_engine.c"
         "$ORZ_SRC/cxx_helpers.cpp"
+        # v2m-player (V2M format)
+        "$ORZ_SRC/v2m_wasm.cpp"
+        "$ORZ_SRC/v2mplayer_wasm.cpp"
     )
+
+    # v2m synth_core.cpp（在 v2m 源码目录中）
+    local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
+    if [ -f "$v2m_synth_core" ]; then
+        source_files+=("$v2m_synth_core")
+    fi
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
+    # v2m-player 头文件
+    if [ -d "$BUILD_DIR/src/v2m" ]; then
+        inc_dirs+=("$BUILD_DIR/src")           # v2m/types.h, v2m/synth.h 等
+        inc_dirs+=("$BUILD_DIR/src/v2m")       # types.h, synth.h, v2mplayer.h (短名引用)
+    fi
     # sc68 头文件
     if [ -d "$BUILD_DIR/src/sc68" ]; then
         inc_dirs+=("$BUILD_DIR/src/sc68")           # api68/api68.h
@@ -572,6 +585,8 @@ STUBC
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=1 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
+        -D __stdcall= \
+        -D '__int64=long long' \
         --no-entry \
         -O3 \
         -o "$OUTPUT_DIR/orz_audio.js"
