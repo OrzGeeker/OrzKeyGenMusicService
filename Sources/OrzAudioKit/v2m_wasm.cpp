@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 #include <new>
+#include <stdio.h>
 
 #define __int64 long long
 #define __stdcall
@@ -81,3 +82,4 @@ extern "C" const Decoder decoder_v2m = {
     impl_render,
     impl_destroy
 };
+

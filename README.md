@@ -12,10 +12,16 @@ Backend Service About [KeyGen Music](http://keygenmusic.org/)
 
 | 解码方式 | 格式 | 解码库 | 数量 |
 |---------|------|--------|------|
-| 浏览器原生 | mp3, ogg, wav, flac, mid, m4a, aac | — | 186 |
-| WASM 待集成 | v2m | v2m-player | 130 |
-| WASM 待集成 | ahx, amd, fc13, fc14 | uade | 100 |
-| WASM 待集成 | rad, d00, hsc | adplug | 41 |
+| 浏览器原生 | mp3, ogg, wav, flac, mid, m4a, aac | AVFoundation | 186 |
+| WASM 已支持 | xm, mod, it, s3m, mo3, mtm, fc13, fc14 | libopenmpt 0.8 | 4863 |
+| WASM 已支持 | nsf, spc | game-music-emu | 8 |
+| WASM 已支持 | sap | ASAP | 32 |
+| WASM 已支持 | sid | libsidplayfp | 48 |
+| WASM 已支持 | rad, d00, hsc | adplug | 41 |
+| WASM 已支持 | v2m | v2m-player | 130 |
+| WASM 已支持 | sc68 | libsc68（含 replay 数据） | 120 |
+| WASM 待排查 | ym | libsc68（需 LHa 解压 + 格式转换） | 21 |
+| WASM 暂不集成 | ahx, amd | uade（Amiga 全模拟，~4 首） | 80 |
 | 服务端转码 | bp | ffmpeg | 4 |
 | **合计** | **~25 种格式** | | **~5530** |
 
@@ -48,10 +54,13 @@ open http://localhost:8080
                   │          Browser (WASM)               │
                   │  ┌──────────────────────────────┐    │
                   │  │  OrzAudioKit (WASM)           │    │
-                  │  │  ├─ libopenmpt → xm/mod/it   │    │
-                  │  │  ├─ Game Music Emu → nsf/spc │    │
-                  │  │  ├─ ASAP → sap               │    │
-                  │  │  └─ ...                      │    │
+                  │  │  ├─ libopenmpt  → xm/mod/it/s3m/mo3/mtm/fc13/fc14  │    │
+                  │  │  ├─ Game Music Emu → nsf/spc                      │    │
+                  │  │  ├─ ASAP → sap                                   │    │
+                  │  │  ├─ libsidplayfp → sid                           │    │
+                  │  │  ├─ adplug → rad/d00/hsc                        │    │
+                  │  │  ├─ v2m-player → v2m                          │    │
+                  │  │  └─ libsc68 → sc68                            │    │
                   │  └──────────────────────────────┘    │
                   └──────────┬───────────────────────────┘
                              │ HTTP API
@@ -75,4 +84,4 @@ open http://localhost:8080
 - **数据库**: PostgreSQL + Fluent
 - **前端**: Alpine.js + OrzAudioKit WASM
 - **WASM 编译**: Emscripten 6.0
-- **解码库**: libopenmpt, game-music-emu, ASAP
+- **解码库**: libopenmpt 0.8, game-music-emu, ASAP, libsidplayfp, adplug

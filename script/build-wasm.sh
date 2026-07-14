@@ -421,6 +421,8 @@ generate_wrapper() {
         # adplug (AdLib OPL2/3)
         "$ORZ_SRC/adplug_impl.c"
         "$ORZ_SRC/adplug_wrap.cpp"
+        # sc68 (Atari ST YM / Amiga)
+        "$ORZ_SRC/sc68_impl.c"
         # v2m-player (V2M format)
         "$ORZ_SRC/v2m_wasm.cpp"
         "$ORZ_SRC/v2mplayer_wasm.cpp"
@@ -605,7 +607,7 @@ STUBC
         -s WASM=1 \
         -s MODULARIZE=1 \
         -s EXPORT_NAME="OrzAudioKit" \
-        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8"]' \
+        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=1 \

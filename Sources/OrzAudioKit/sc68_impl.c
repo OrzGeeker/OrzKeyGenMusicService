@@ -53,15 +53,9 @@ static int impl_load(const unsigned char *data, int len)
     sc68 = api68_init(&init68);
     if (!sc68) return 0;
 
-    // 验证文件格式
-    if (api68_verify_mem((const void*)data, len) < 0) {
-        api68_shutdown(sc68);
-        sc68 = NULL;
-        return 0;
-    }
-
-    // 加载
-    if (api68_load_mem(sc68, (const void*)data, len)) {
+    // 验证并加载（仅 sc68 原生格式）
+    if (api68_verify_mem((const void*)data, len) < 0
+        || api68_load_mem(sc68, (const void*)data, len)) {
         api68_shutdown(sc68);
         sc68 = NULL;
         return 0;

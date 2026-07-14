@@ -371,3 +371,6 @@ sBool V2MPlayer::IsPlaying()
 {
     return m_base.valid && m_state.state==PlayerState::PLAYING;
 }
+
+// ── Diagnostic ──
+// (diag functions removed — v2m decoder confirmed working)
