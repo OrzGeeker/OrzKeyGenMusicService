@@ -11,7 +11,7 @@ extern const Decoder decoder_gme;
 // ASAP (SAP — Atari POKEY 格式)
 extern const Decoder decoder_asap;
 
-// libsidplayfp (SID) — 待 C++ 运行时兼容修复
+// libsidplayfp (SID) — C++ 运行时兼容待排查
 // extern const Decoder decoder_sidplayfp;
 
 
