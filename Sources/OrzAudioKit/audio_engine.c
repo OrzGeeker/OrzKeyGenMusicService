@@ -44,7 +44,7 @@ __attribute__((used)) void register_all() {
     orz_register_decoder("sid", &decoder_sidplayfp);
 
     // v2m-player: Farbrausch V2 合成器格式 — 框架就绪，synth 输出待排查
-    // orz_register_decoder("v2m", &decoder_v2m);
+    // orz_register_decoder("v2m", &decoder_v2m); // synth 输出待排查
 
     // adplug: AdLib OPL2/3 格式 (rad, d00, hsc)
     orz_register_decoder("rad,d00,hsc", &decoder_adplug);

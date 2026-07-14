@@ -31,7 +31,8 @@ static int sample_rate = 44100;
 static double song_duration = 0;
 
 // Temporary filename for MEMFS
-static const char *TMP_FILE = "/tmp/adplug_song.tmp";
+static int tmp_counter = 0;
+static char tmp_file_path[64] = "/tmp/adplug_song.tmp";
 
 // ── Decoder interface ──
 
@@ -41,7 +42,8 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     adplug_destroy();
 
     // Write data to MEMFS
-    FILE *f = fopen(TMP_FILE, "wb");
+    snprintf(tmp_file_path, sizeof(tmp_file_path), "/tmp/adplug_%d.hsc", ++tmp_counter);
+    FILE *f = fopen(tmp_file_path, "wb");
     if (!f) return 0;
     fwrite(data, 1, len, f);
     fclose(f);
@@ -52,10 +54,10 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     opl->init();
 
     // Load file with AdPlug factory
-    player = CAdPlug::factory(TMP_FILE, opl);
+    player = CAdPlug::factory(tmp_file_path, opl);
     if (!player) {
         delete opl; opl = NULL;
-        remove(TMP_FILE);
+        remove(tmp_file_path);
         return 0;
     }
 
@@ -63,7 +65,7 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     song_duration = player->songlength() / 1000.0;
     if (song_duration <= 0) song_duration = 120.0;
 
-    remove(TMP_FILE);
+    remove(tmp_file_path);
     return 1;
 }
 
@@ -110,5 +112,5 @@ extern "C" void adplug_destroy()
 {
     delete player; player = NULL;
     delete opl; opl = NULL;
-    remove(TMP_FILE);
+    remove(tmp_file_path);
 }
