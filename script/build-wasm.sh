@@ -83,43 +83,50 @@ decompress_ym_files() {
     fi
 
     local raw_dir="$BUILD_DIR/ym-raw"
-    mkdir -p "$raw_dir"
+    local public_ym_raw="$OUTPUT_DIR/ym-raw"
+    mkdir -p "$raw_dir" "$public_ym_raw"
 
-    # Find all .ym files that are LHa archives
-    local ym_dir="$PROJECT_DIR/Public/keygenmusic"
-    find "$ym_dir" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
-        # Check if it's an LHa archive (not already raw YM6)
-        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
-            local relpath="${ymfile#$ym_dir/}"
-            local outfile="$raw_dir/$relpath"
+    # 解压单个 YM 文件（如果是 LHa 归档）
+    decompress_one_ym() {
+        local ymfile="$1" outfile="$2"
+        if [ -f "$outfile" ] && head -c 4 "$outfile" | grep -q "YM[0-9]"; then
+            return 0  # 已解压
+        fi
+        log "Decompressing: $(basename "$ymfile")"
+        local tmpdir=$(mktemp -d)
+        (cd "$tmpdir" && "$lha_bin" x "$ymfile" >/dev/null 2>&1)
+        local extracted=$(find "$tmpdir" -type f 2>/dev/null | head -1)
+        if [ -n "$extracted" ]; then
             mkdir -p "$(dirname "$outfile")"
+            cp "$extracted" "$outfile"
+            log "  -> $(wc -c < "$outfile") bytes raw YM"
+        else
+            warn "  -> extraction failed for $(basename "$ymfile")"
+        fi
+        rm -rf "$tmpdir"
+    }
 
-            # Skip if already decompressed
-            if [ -f "$outfile" ] && head -c 4 "$outfile" | grep -q "YM[0-9]"; then
-                continue
-            fi
-
-            log "Decompressing: $(basename "$ymfile")"
-            local tmpdir=$(mktemp -d)
-            (cd "$tmpdir" && "$lha_bin" x "$ymfile" >/dev/null 2>&1)
-            local extracted=$(find "$tmpdir" -type f 2>/dev/null | head -1)
-            if [ -n "$extracted" ]; then
-                cp "$extracted" "$outfile"
-                log "  -> $(wc -c < "$outfile") bytes raw YM"
-            else
-                warn "  -> extraction failed for $(basename "$ymfile")"
-            fi
-            rm -rf "$tmpdir"
+    # 从 keygenmusic/ 解压（保留子目录结构）
+    find "$PROJECT_DIR/Public/keygenmusic" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
+        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
+            local relpath="${ymfile#$PROJECT_DIR/Public/keygenmusic/}"
+            decompress_one_ym "$ymfile" "$raw_dir/$relpath"
         fi
     done
 
-    # Copy decompressed YM files to public web directory (server serves from here)
-    local public_ym_raw="$OUTPUT_DIR/ym-raw"
+    # 从 music/ 解压（flat 文件名直接放到 ym-raw/）
+    find "$PROJECT_DIR/music" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
+        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
+            decompress_one_ym "$ymfile" "$raw_dir/$(basename "$ymfile")"
+        fi
+    done
+
+    # 复制到公开 web 目录
     if [ -d "$raw_dir" ]; then
-        mkdir -p "$public_ym_raw"
-        log "Copying decompressed YM files to web directory..."
-        cp -R "$raw_dir/"* "$public_ym_raw/" 2>/dev/null || true
-        log "  -> $(find "$public_ym_raw" -name '*.ym' -type f 2>/dev/null | wc -l) files in $public_ym_raw"
+        rm -rf "$public_ym_raw"
+        cp -R "$raw_dir" "$public_ym_raw"
+        local count=$(find "$public_ym_raw" -name '*.ym' -type f 2>/dev/null | wc -l)
+        log "Decompressed YM files: $count in $public_ym_raw"
     fi
 }
 

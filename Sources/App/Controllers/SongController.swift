@@ -157,9 +157,30 @@ struct SongController: RouteCollection {
     }
 
     /// 构建时解压的 raw YM6 文件路径（保持原始 LHa 归档不变）
+    /// 尝试多个可能的 base 路径，并去除 Public/keygenmusic/ 前缀
     private func resolveYmRawPath(for song: Song, req: Request) -> String {
-        (req.application.directory.publicDirectory as NSString)
-            .appendingPathComponent("audio/ym-raw")
-            .appendingPathComponent(song.filePath)
+        let name = (song.filePath as NSString).lastPathComponent
+
+        // 去除 Public/keygenmusic/ 前缀（ym-raw 目录结构从 KEYGENMUSiC MusicPack/ 开始）
+        var relPath = song.filePath
+        let prefix = "Public/keygenmusic/"
+        if relPath.hasPrefix(prefix) {
+            relPath = String(relPath.dropFirst(prefix.count))
+        }
+
+        let candidates = [
+            req.application.directory.publicDirectory,
+            req.application.directory.resourcesDirectory + "Public/",
+        ]
+        for base in candidates {
+            let ymDir = base + "audio/ym-raw/"
+            // 尝试去除前缀后的路径
+            let full = ymDir + relPath
+            if FileManager.default.fileExists(atPath: full) { return full }
+            // 回退：只取文件名
+            let flat = ymDir + name
+            if FileManager.default.fileExists(atPath: flat) { return flat }
+        }
+        return candidates[0] + "audio/ym-raw/" + name
     }
 }

@@ -19,7 +19,17 @@ let package = Package(
         //           模块格式 → ffmpeg CLI（通过 system lib 插件）
         //           冷门格式 → ffmpeg CLI 降级
         // WASM 路径：Emscripten 编译 libopenmpt → 浏览器端解码
-        .target(name: "OrzAudioKit"),
+        .target(name: "OrzAudioKit", exclude: [
+            "audio_engine.c", "audio_engine.h",
+            "orz_dispatch.c",
+            "openmpt_impl.c", "gme_impl.c", "asap_impl.c",
+            "adplug_impl.c", "adplug_wrap.cpp",
+            "sc68_impl.c", "ym6_impl.c",
+            "sidplayfp_impl.cpp",
+            "v2m_wasm.cpp", "v2mplayer_wasm.cpp", "v2m_types.h",
+            "cxx_helpers.cpp",
+            "include",
+        ]),
 
         // ── App ──
         .target(
