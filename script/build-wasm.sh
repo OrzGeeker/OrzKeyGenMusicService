@@ -82,24 +82,46 @@ decompress_ym_files() {
         return
     fi
 
+    local raw_dir="$BUILD_DIR/ym-raw"
+    mkdir -p "$raw_dir"
+
     # Find all .ym files that are LHa archives
     local ym_dir="$PROJECT_DIR/Public/keygenmusic"
     find "$ym_dir" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
-        # Check if it's an LHa archive
+        # Check if it's an LHa archive (not already raw YM6)
         if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
+            local relpath="${ymfile#$ym_dir/}"
+            local outfile="$raw_dir/$relpath"
+            mkdir -p "$(dirname "$outfile")"
+
+            # Skip if already decompressed
+            if [ -f "$outfile" ] && head -c 4 "$outfile" | grep -q "YM[0-9]"; then
+                continue
+            fi
+
             log "Decompressing: $(basename "$ymfile")"
             local tmpdir=$(mktemp -d)
             (cd "$tmpdir" && "$lha_bin" x "$ymfile" >/dev/null 2>&1)
             local extracted=$(find "$tmpdir" -type f 2>/dev/null | head -1)
             if [ -n "$extracted" ]; then
-                cp "$extracted" "$ymfile"
-                log "  -> $(wc -c < "$ymfile") bytes raw YM"
+                cp "$extracted" "$outfile"
+                log "  -> $(wc -c < "$outfile") bytes raw YM"
             else
                 warn "  -> extraction failed for $(basename "$ymfile")"
             fi
             rm -rf "$tmpdir"
         fi
     done
+
+    # Overwrite originals with decompressed versions (build-time only, not committed)
+    if [ -d "$raw_dir" ]; then
+        log "Copying decompressed YM files to source tree..."
+        find "$raw_dir" -name "*.ym" -type f 2>/dev/null | while read -r rawfile; do
+            local relpath="${rawfile#$raw_dir/}"
+            local target="$ym_dir/$relpath"
+            cp "$rawfile" "$target"
+        done
+    fi
 }
 
 # ------------------------------------------------------------------
