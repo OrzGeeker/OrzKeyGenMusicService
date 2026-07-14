@@ -170,8 +170,7 @@ build_libopenmpt() {
         --without-flac \
         --without-zlib \
         CC=emcc CXX=em++ \
-        --prefix="$build_dir/install" \
-        2>&1 || {
+        --prefix="$build_dir/install" || {
             warn "libopenmpt configure failed"
             popd >/dev/null
             echo ""
@@ -179,7 +178,7 @@ build_libopenmpt() {
         }
 
     log "Building libopenmpt..."
-    emmake make -j"$JOBS" 2>&1 || {
+    emmake make -j"$JOBS" || {
         warn "libopenmpt make failed"
         popd >/dev/null
         echo ""
@@ -218,8 +217,7 @@ build_libgme() {
         -DGME_ENABLE_GBS=OFF \
         -DGME_ENABLE_GYM=OFF \
         -DGME_ENABLE_HES=OFF \
-        -Wno-dev \
-        2>&1 || {
+        -Wno-dev || {
             warn "gme cmake failed"
             popd >/dev/null
             echo ""
@@ -227,7 +225,7 @@ build_libgme() {
         }
 
     log "Building game-music-emu..."
-    emmake make -j"$JOBS" 2>&1 || {
+    emmake make -j"$JOBS" || {
         warn "gme make failed"
         popd >/dev/null
         echo ""
@@ -280,8 +278,7 @@ build_libsidplayfp() {
         --enable-static \
         --disable-silent-rules \
         CC=emcc CXX=em++ \
-        --prefix="$build_dir/install" \
-        2>&1 || {
+        --prefix="$build_dir/install" || {
             warn "libsidplayfp configure failed"
             popd >/dev/null
             echo ""
@@ -289,7 +286,7 @@ build_libsidplayfp() {
         }
 
     log "Building libsidplayfp..."
-    emmake make -j"$JOBS" 2>&1 || {
+    emmake make -j"$JOBS" || {
         warn "libsidplayfp make failed"
         popd >/dev/null
         echo ""
@@ -341,7 +338,9 @@ generate_wrapper() {
     source_files=(
         "$ORZ_SRC/orz_dispatch.c"
         "$ORZ_SRC/openmpt_impl.c"
+        "$ORZ_SRC/gme_impl.c"
         "$ORZ_SRC/audio_engine.c"
+        "$ORZ_SRC/cxx_helpers.cpp"
     )
     inc_dirs+=("$ORZ_SRC/include")
 
@@ -443,7 +442,8 @@ STUBC
         -s EXPORT_NAME="OrzAudioKit" \
         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
-        -s INITIAL_MEMORY=67108864 \
+        -s INITIAL_MEMORY=268435456 \
+        -s DISABLE_EXCEPTION_CATCHING=0 \
         --no-entry \
         -O3 \
         -o "$OUTPUT_DIR/orz_audio.js"
@@ -463,7 +463,7 @@ main() {
     local libopenmpt_dir=""
     if ! $ONLY_OPENMPT; then
         # Try to build libopenmpt
-        libopenmpt_dir=$(build_libopenmpt 2>&1)
+        libopenmpt_dir=$(build_libopenmpt)
         if [ -z "$libopenmpt_dir" ] || [ ! -f "$libopenmpt_dir/libopenmpt.a" -a ! -f "$libopenmpt_dir/.libs/libopenmpt.a" ]; then
             warn "libopenmpt build failed or library not found, creating stub..."
             libopenmpt_dir=""
@@ -472,14 +472,14 @@ main() {
 
     # Try to build Game Music Emu (nsf, spc)
     local gme_result=""
-    gme_result=$(build_libgme 2>&1)
+    gme_result=$(build_libgme)
     if [ -z "$gme_result" ]; then
         warn "game-music-emu build failed, NSF/SPC formats will not be available"
     fi
 
     # Try to build libsidplayfp (sid)
     local sidplayfp_result=""
-    sidplayfp_result=$(build_libsidplayfp 2>&1)
+    sidplayfp_result=$(build_libsidplayfp)
     if [ -z "$sidplayfp_result" ]; then
         warn "libsidplayfp build failed, SID format will not be available"
     fi

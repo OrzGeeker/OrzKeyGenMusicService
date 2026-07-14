@@ -252,80 +252,107 @@ class OrzAudioPlayer {
      * 使用 WASM 模块解码并播放（统一 API）
      */
     async _playWithWasm(url, format) {
-        const resp = await fetch(url);
-        const buf = await resp.arrayBuffer();
-        const data = new Uint8Array(buf);
+        let step = 'fetch';
+        try {
+            step = 'fetch';
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+            step = 'arrayBuffer';
+            const buf = await resp.arrayBuffer();
+            step = 'Uint8Array';
+            const data = new Uint8Array(buf);
+            console.log(`WASM: fetched ${data.length} bytes for ${format}`);
 
-        // 写入 format 字符串到 WASM 堆
-        const fmtLen = this.wasmKit.lengthBytesUTF8(format) + 1;
-        const fmtPtr = this.wasmKit._malloc(fmtLen);
-        this.wasmKit.stringToUTF8(format, fmtPtr, fmtLen);
+            step = 'malloc_fmt';
+            const fmtLen = this.wasmKit.lengthBytesUTF8(format) + 1;
+            const fmtPtr = this.wasmKit._malloc(fmtLen);
+            if (!fmtPtr) throw new Error('malloc fmt failed');
+            step = 'stringToUTF8';
+            this.wasmKit.stringToUTF8(format, fmtPtr, fmtLen);
 
-        // 写入音频数据到 WASM 堆
-        const dataPtr = this.wasmKit._malloc(data.length);
-        for (let i = 0; i < data.length; i++) {
-            this.wasmKit.setValue(dataPtr + i, data[i], 'i8');
-        }
+            step = 'malloc_data';
+            const dataPtr = this.wasmKit._malloc(data.length);
+            if (!dataPtr) throw new Error('malloc data failed');
+            step = 'copy_data';
+            for (let i = 0; i < data.length; i++) {
+                this.wasmKit.setValue(dataPtr + i, data[i], 'i8');
+            }
 
-        // 统一加载入口：orz_load(format, data, len)
-        const loaded = this.wasmKit._orz_load(fmtPtr, dataPtr, data.length);
-        this.wasmKit._free(fmtPtr);
-        this.wasmKit._free(dataPtr);
+            step = 'orz_load';
+            const loaded = this.wasmKit._orz_load(fmtPtr, dataPtr, data.length);
+            this.wasmKit._free(fmtPtr);
+            this.wasmKit._free(dataPtr);
+            console.log('WASM: orz_load =', loaded);
 
-        if (!loaded) {
-            this.wasmKit._orz_destroy();
-            throw new Error('WASM: failed to load module');
-        }
+            if (!loaded) {
+                this.wasmKit._orz_destroy();
+                throw new Error('WASM: failed to load module');
+            }
 
-        const duration = this.wasmKit._orz_get_duration();
-        if (duration > 0) this.duration = duration;
+            step = 'get_duration';
+            const duration = this.wasmKit._orz_get_duration();
+            console.log('WASM: duration =', duration);
+            if (duration > 0) this.duration = duration;
 
-        // 渲染 PCM
-        const sampleRate = this.wasmKit._orz_get_sample_rate() || 44100;
-        const channels = this.wasmKit._orz_get_channels() || 2;
-        const totalFrames = Math.ceil(duration * sampleRate);
+            step = 'get_format_info';
+            const sampleRate = this.wasmKit._orz_get_sample_rate() || 44100;
+            const channels = this.wasmKit._orz_get_channels() || 2;
+            console.log('WASM: sr=', sampleRate, 'ch=', channels);
 
-        if (totalFrames <= 0 || totalFrames > 3600 * sampleRate) {
-            this.wasmKit._orz_destroy();
-            throw new Error('WASM: invalid duration');
-        }
+            const totalFrames = Math.ceil(duration * sampleRate);
+            if (totalFrames <= 0 || totalFrames > 3600 * sampleRate) {
+                this.wasmKit._orz_destroy();
+                throw new Error(`WASM: invalid duration ${duration}s (frames ${totalFrames})`);
+            }
 
-        const renderPtr = this.wasmKit._malloc(totalFrames * channels * 4); // float32 = 4 bytes
-        const rendered = this.wasmKit._orz_render(renderPtr, totalFrames);
+            step = 'malloc_render';
+            const renderBufSize = totalFrames * channels * 4;
+            console.log(`WASM: allocating ${renderBufSize} bytes for PCM output`);
+            const renderPtr = this.wasmKit._malloc(renderBufSize);
+            if (!renderPtr) throw new Error(`malloc render failed (${renderBufSize} bytes)`);
 
-        if (rendered <= 0) {
+            step = 'orz_render';
+            const rendered = this.wasmKit._orz_render(renderPtr, totalFrames);
+            console.log('WASM: orz_render =', rendered, '/', totalFrames, 'frames');
+
+            if (rendered <= 0) {
+                this.wasmKit._free(renderPtr);
+                this.wasmKit._orz_destroy();
+                throw new Error('WASM: no audio rendered');
+            }
+
+            step = 'getValue';
+            const actualFrames = rendered;
+            const audioSamples = new Float32Array(actualFrames * channels);
+            for (let i = 0; i < audioSamples.length; i++) {
+                audioSamples[i] = this.wasmKit.getValue(renderPtr + i * 4, 'float');
+            }
+
             this.wasmKit._free(renderPtr);
             this.wasmKit._orz_destroy();
-            throw new Error('WASM: no audio rendered');
-        }
+            console.log('WASM: decode complete, playing via AudioContext');
 
-        // 使用 getValue 逐个读取渲染后的浮点样本
-        const actualFrames = rendered;
-        const audioSamples = new Float32Array(actualFrames * channels);
-        for (let i = 0; i < audioSamples.length; i++) {
-            audioSamples[i] = this.wasmKit.getValue(renderPtr + i * 4, 'float');
-        }
+            step = 'createBuffer';
+            const audioBuffer = this.audioCtx.createBuffer(
+                channels, actualFrames, sampleRate
+            );
 
-        this.wasmKit._free(renderPtr);
-        this.wasmKit._orz_destroy();
-
-        // 创建 AudioBuffer 并播放
-        const audioBuffer = this.audioCtx.createBuffer(
-            channels, actualFrames, sampleRate
-        );
-
-        if (channels === 2) {
-            const left = audioBuffer.getChannelData(0);
-            const right = audioBuffer.getChannelData(1);
-            for (let i = 0; i < actualFrames; i++) {
-                left[i] = audioSamples[i * 2];
-                right[i] = audioSamples[i * 2 + 1];
+            if (channels === 2) {
+                const left = audioBuffer.getChannelData(0);
+                const right = audioBuffer.getChannelData(1);
+                for (let i = 0; i < actualFrames; i++) {
+                    left[i] = audioSamples[i * 2];
+                    right[i] = audioSamples[i * 2 + 1];
+                }
+            } else {
+                audioBuffer.getChannelData(0).set(audioSamples);
             }
-        } else {
-            audioBuffer.getChannelData(0).set(audioSamples);
-        }
 
-        this._playAudioBuffer(audioBuffer);
+            this._playAudioBuffer(audioBuffer);
+        } catch (e) {
+            console.error(`WASM decode failed at step "${step}":`, e.message, e);
+            throw e;
+        }
     }
 
     /**
@@ -385,6 +412,8 @@ class OrzAudioPlayer {
     }
 
     _onAudioError(e) {
+        // WASM 路径播放时，audio element 的 error 来自之前播放的 fallback 尝试，无害
+        if (this._usingWasm) return;
         console.error('Audio element error:', e);
         if (this.onError) this.onError(e);
     }
