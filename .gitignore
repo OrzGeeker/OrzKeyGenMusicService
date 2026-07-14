@@ -12,3 +12,4 @@ Public/**/*
 
 # WASM build artifacts
 .wasm-build/
+Resources/Public/audio/ym-raw/
