@@ -488,6 +488,21 @@ generate_wrapper() {
         "$ORZ_SRC/v2mplayer_wasm.cpp"
         # uade (Amiga: ahx, amd)
         "$ORZ_SRC/uade_wasm.c"
+        # ── UAE Amiga emulator core ──
+        "$BUILD_DIR/src/uade/newcpu.c"
+        "$BUILD_DIR/src/uade/memory.c"
+        "$BUILD_DIR/src/uade/custom.c"
+        "$BUILD_DIR/src/uade/cia.c"
+        "$BUILD_DIR/src/uade/audio.c"
+        "$BUILD_DIR/src/uade/missing.c"
+        "$BUILD_DIR/src/uade/cpustbl.c"
+        "$BUILD_DIR/src/uade/readcpu.c"
+        "$BUILD_DIR/src/uade/cpudefs.c"
+        "$BUILD_DIR/src/uade/cpuemu.c"
+        "$BUILD_DIR/src/uade/sinctable.c"
+        "$BUILD_DIR/src/uade/sd-sound-generic.c"
+        # uade_logging.c skipped — stubs provided in uade_wasm.c (libzakalwe dep)
+        "$BUILD_DIR/src/uade/machdep/support.c"
     )
 
     # v2m synth_core.cpp（在 v2m 源码目录中）
@@ -497,6 +512,13 @@ generate_wrapper() {
     fi
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
+    # ── UAE (Amiga emulator) 头文件 — 优先于 adplug（防 debug.h 冲突）──
+    if [ -d "$BUILD_DIR/src/uade" ]; then
+        inc_dirs+=("$BUILD_DIR/src/uade")           # sysconfig.h, uae.h, etc.
+        inc_dirs+=("$BUILD_DIR/src/uade/include")   # uae/*.h
+        inc_dirs+=("$BUILD_DIR/src/uade/frontends/include")  # uade/*.h
+        inc_dirs+=("$BUILD_DIR/src/uade/frontends/common")   # support.h, etc.
+    fi
     # libopenmpt 头文件（0.8.0 头文件在 libopenmpt/libopenmpt.h）
     if [ -d "$BUILD_DIR/src/libopenmpt/libopenmpt" ]; then
         inc_dirs+=("$BUILD_DIR/src/libopenmpt")
@@ -520,14 +542,6 @@ generate_wrapper() {
         inc_dirs+=("$BUILD_DIR/src/sc68/api68")     # api68.h (fallback)
         inc_dirs+=("$BUILD_DIR/src/sc68/file68")    # file68/*.h
         inc_dirs+=("$BUILD_DIR/src/sc68")           # config68.h etc
-    fi
-
-    # uade (Amiga emulator) 头文件
-    if [ -d "$BUILD_DIR/src/uade" ]; then
-        inc_dirs+=("$BUILD_DIR/src/uade")           # sysconfig.h, uae.h, etc.
-        inc_dirs+=("$BUILD_DIR/src/uade/include")   # uae/*.h
-        inc_dirs+=("$BUILD_DIR/src/uade/frontends/include")  # uade/*.h
-        inc_dirs+=("$BUILD_DIR/src/uade/frontends/common")   # support.h, etc.
     fi
 
     # libopenmpt
@@ -653,7 +667,7 @@ EMSCRIPTEN_KEEPALIVE
 const char* orz_audio_version() { return "OrzAudioKit WASM v0.1.0 (stub)"; }
 STUBC
         emcc "$BUILD_DIR/stub.c" \
-            -O3 \
+            -O1 \
             -s WASM=1 \
             -s MODULARIZE=1 \
             -s EXPORT_NAME="OrzAudioKit" \
@@ -677,7 +691,7 @@ STUBC
         -s WASM=1 \
         -s MODULARIZE=1 \
         -s EXPORT_NAME="OrzAudioKit" \
-        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32"]' \
+        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32", "HEAPF32"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=1 \
@@ -685,7 +699,7 @@ STUBC
         -D __stdcall= \
         -D '__int64=long long' \
         --no-entry \
-        -O3 \
+        -O1 \
         -o "$OUTPUT_DIR/orz_audio.js"
 
     log "WASM module created:"
