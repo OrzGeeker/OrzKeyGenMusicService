@@ -64,7 +64,6 @@ final class AppTests: XCTestCase {
         // directFile formats
         XCTAssertEqual(AudioFormat.from(fileExtension: "mp3")?.playStrategy.rawValue, "directFile")
         XCTAssertEqual(AudioFormat.from(fileExtension: "ogg")?.playStrategy.rawValue, "directFile")
-        XCTAssertEqual(AudioFormat.from(fileExtension: "wav")?.playStrategy.rawValue, "directFile")
         XCTAssertEqual(AudioFormat.from(fileExtension: "flac")?.playStrategy.rawValue, "directFile")
         XCTAssertEqual(AudioFormat.from(fileExtension: "mid")?.playStrategy.rawValue, "directFile")
 
@@ -76,7 +75,8 @@ final class AppTests: XCTestCase {
         XCTAssertEqual(AudioFormat.from(fileExtension: "sid")?.playStrategy.rawValue, "wasmDecode")
         XCTAssertEqual(AudioFormat.from(fileExtension: "nsf")?.playStrategy.rawValue, "wasmDecode")
 
-        // serverDecode formats
+        // serverDecode formats (WAV may have ADPCM/GSM encoding, needs ffmpeg)
+        XCTAssertEqual(AudioFormat.from(fileExtension: "wav")?.playStrategy.rawValue, "serverDecode")
         XCTAssertEqual(AudioFormat.from(fileExtension: "bp")?.playStrategy.rawValue, "serverDecode")
     }
 

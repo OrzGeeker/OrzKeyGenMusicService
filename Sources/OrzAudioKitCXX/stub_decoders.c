@@ -9,6 +9,9 @@
 
 #define WEAK __attribute__((weak))
 
+WEAK const Decoder decoder_openmpt = {0};
+WEAK const Decoder decoder_gme = {0};
+WEAK const Decoder decoder_sidplayfp = {0};
 WEAK const Decoder decoder_asap = {0};
 WEAK const Decoder decoder_v2m = {0};
 WEAK const Decoder decoder_sc68 = {0};

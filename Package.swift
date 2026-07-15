@@ -14,24 +14,43 @@ let package = Package(
         .package(url: "https://github.com/vapor/leaf.git", from: "4.2.4"),
     ],
     targets: [
-        // ── Audio Engine ──
-        // 解码策略：标准格式 → AVFoundation / ffmpeg CLI
-        //           模块格式 → ffmpeg CLI（通过 system lib 插件）
-        //           冷门格式 → ffmpeg CLI 降级
-        // WASM 路径：Emscripten 编译 libopenmpt → 浏览器端解码
-        .target(name: "OrzAudioKit", exclude: [
-            "audio_engine.c", "audio_engine.h",
-            "orz_dispatch.c",
-            "openmpt_impl.c", "gme_impl.c", "asap_impl.c",
-            "adplug_impl.c", "adplug_wrap.cpp",
-            "sc68_impl.c", "ym6_impl.c",
-            "sidplayfp_impl.cpp",
-            "v2m_wasm.cpp", "v2mplayer_wasm.cpp", "v2m_types.h",
-            "cxx_helpers.cpp",
-            "uade_wasm.c", "score_data.h", "ahx_player_data.h",
-            "stub_decoders.c",
-            "include",
-        ]),
+        // ── C/C++ 解码器引擎 ──
+        // 纯 C/C++ target，按格式分类组织。
+        // 同一份源码同时用于 WASM 浏览器端和原生服务端解码。
+        // Phase 1: 仅编译自包含解码器（ym6）和调度层。
+        // Phase 3+: 安装系统库后逐步取消 exclude 并加 linkedLibrary。
+        .target(
+            name: "OrzAudioKitCXX",
+            dependencies: [],
+            exclude: [
+                // 需要外部系统库的解码器（Phase 3 起逐个启用）
+                "helpers/",  // cxx_helpers.cpp 依赖 libopenmpt/GME
+                "openmpt/",
+                "gme/",
+                "sidplayfp/",
+                "sc68/",
+                "adplug/",
+                "asap/",
+                "uade/",
+                "v2m/",
+            ],
+            cSettings: [
+                .headerSearchPath("include"),
+            ],
+            cxxSettings: [
+                .headerSearchPath("include"),
+            ]
+        ),
+
+        // ── Audio Engine (Swift) ──
+        // 调用 OrzAudioKitCXX 的 C 解码器进行原生解码，
+        // 标准格式走 AVFoundation / ffmpeg CLI 降级。
+        .target(
+            name: "OrzAudioKit",
+            dependencies: [
+                .target(name: "OrzAudioKitCXX"),
+            ]
+        ),
 
         // ── App ──
         .target(

@@ -1,4 +1,8 @@
+#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#else
+#define EMSCRIPTEN_KEEPALIVE
+#endif
 #include <string.h>
 #include "audio_engine.h"
 
@@ -37,32 +41,36 @@ __attribute__((used)) void register_all() {
     if (registered) return;
     registered = 1;
 
-    // libopenmpt: 模块跟踪器格式
-    orz_register_decoder("xm,mod,it,s3m,mo3,mtm,fc13,fc14", &decoder_openmpt);
+    // 只注册有真实实现的解码器（.load != NULL 表示非存根）
+    // stub_decoders.c 提供 __attribute__((weak)) 零值存根，
+    // 未编译的解码器所有函数指针为 NULL。
 
-    // Game Music Emu: 游戏音乐格式 (nsf, spc)
-    orz_register_decoder("nsf,spc", &decoder_gme);
+    if (decoder_openmpt.load)
+        orz_register_decoder("xm,mod,it,s3m,mo3,mtm,fc13,fc14", &decoder_openmpt);
 
-    // ASAP: Atari POKEY 格式
-    orz_register_decoder("sap", &decoder_asap);
+    if (decoder_gme.load)
+        orz_register_decoder("nsf,spc", &decoder_gme);
 
-    // libsidplayfp: Commodore 64 SID 格式
-    orz_register_decoder("sid", &decoder_sidplayfp);
+    if (decoder_asap.load)
+        orz_register_decoder("sap", &decoder_asap);
 
-    // v2m-player: Farbrausch V2 合成器格式
-    orz_register_decoder("v2m", &decoder_v2m);
+    if (decoder_sidplayfp.load)
+        orz_register_decoder("sid", &decoder_sidplayfp);
 
-    // libsc68: Atari ST YM / Amiga 格式
-    orz_register_decoder("sc68", &decoder_sc68);
+    if (decoder_v2m.load)
+        orz_register_decoder("v2m", &decoder_v2m);
 
-    // ym6: Atari ST YM2149 raw frame 格式 (需 LHa 解压)
-    orz_register_decoder("ym", &decoder_ym6);
+    if (decoder_sc68.load)
+        orz_register_decoder("sc68", &decoder_sc68);
 
-    // uade (Amiga: ahx)
-    orz_register_decoder("ahx,thx", &decoder_uade_ahx);
+    if (decoder_ym6.load)
+        orz_register_decoder("ym", &decoder_ym6);
 
-    // adplug: AdLib OPL2/3 格式 (rad, d00, hsc)
-    orz_register_decoder("rad,d00,hsc", &decoder_adplug);
+    if (decoder_uade_ahx.load)
+        orz_register_decoder("ahx,thx", &decoder_uade_ahx);
+
+    if (decoder_adplug.load)
+        orz_register_decoder("rad,d00,hsc", &decoder_adplug);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──
