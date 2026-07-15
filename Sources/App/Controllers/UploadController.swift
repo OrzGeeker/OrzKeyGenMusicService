@@ -19,7 +19,6 @@ struct UploadController: RouteCollection {
         }
 
         let body = try req.content.decode(UploadBody.self)
-        let publicDir = req.application.directory.publicDirectory
 
         // 检测格式
         let ext = (body.file.filename as NSString).pathExtension.lowercased()
@@ -27,34 +26,29 @@ struct UploadController: RouteCollection {
             throw Abort(.badRequest, reason: "Unsupported file format: \(ext)")
         }
 
-        // 读取文件内容
+        // 写入临时文件
         guard let fileData = body.file.data.getData(at: 0, length: body.file.data.readableBytes) else {
             throw Abort(.badRequest, reason: "Cannot read uploaded file")
         }
+        let tmpPath = "/tmp/orz_upload_\(UUID().uuidString).\(ext)"
+        try fileData.write(to: URL(fileURLWithPath: tmpPath))
+        defer { try? FileManager.default.removeItem(atPath: tmpPath) }
 
-        // 计算 SHA-256 去重
-        let sha256 = try await computeSHA256(data: fileData)
+        // 导入 CAS
+        let cas = req.application.casStorage
+        let (sha256, _, fileSize) = try await cas.store(sourcePath: tmpPath)
 
-        // 检查是否已存在
+        // SHA-256 去重
         if let existing = try await Song.query(on: req.db).filter("sha256", .equal, sha256).first() {
             throw Abort(.conflict, reason: "Duplicate file: \(existing.title)")
         }
 
-        // 写入 Public 目录
-        let uploadDir = "\(publicDir)uploads/"
-        try FileManager.default.createDirectory(atPath: uploadDir, withIntermediateDirectories: true)
-
-        let fileName = "\(UUID().uuidString).\(ext)"
-        let filePath = "uploads/\(fileName)"
-        try fileData.write(to: URL(fileURLWithPath: "\(uploadDir)\(fileName)"))
-
         // 创建 Song 记录
         let title = body.title ?? (body.file.filename as NSString).deletingPathExtension
-        let song = Song(title: title, filePath: filePath, fileFormat: format.rawValue, fileSize: fileData.count)
-        song.sha256 = sha256
+        let song = Song(title: title, sha256: sha256, fileFormat: format.rawValue, fileSize: fileSize)
 
         // 尝试生成音频指纹
-        if let fp = try? await AudioFingerprinter().generateFingerprintFromFile(filePath: "\(uploadDir)\(fileName)") {
+        if let fp = try? await AudioFingerprinter().generateFingerprintFromFile(filePath: tmpPath) {
             song.audioFingerprint = fp
         }
 
@@ -73,31 +67,18 @@ struct UploadController: RouteCollection {
         return .created
     }
 
-    /// DELETE /api/songs/:id — 删除歌曲
+    /// DELETE /api/songs/:id — 删除歌曲及 CAS 文件
     @Sendable
     func delete(req: Request) async throws -> HTTPStatus {
         guard let song = try await Song.find(req.parameters.get("id"), on: req.db) else {
             throw Abort(.notFound)
         }
 
-        // 删除文件
-        let publicDir = req.application.directory.publicDirectory
-        let fullPath = "\(publicDir)\(song.filePath)"
-        try? FileManager.default.removeItem(atPath: fullPath)
+        // 删除 CAS 文件
+        let cas = req.application.casStorage
+        try cas.delete(sha256: song.sha256, format: song.fileFormat)
 
         try await song.delete(on: req.db)
         return .noContent
-    }
-
-    private func computeSHA256(data: Data) async throws -> String {
-        let tmpPath = "/tmp/orz_upload_\(UUID().uuidString)"
-        try data.write(to: URL(fileURLWithPath: tmpPath))
-        defer { try? FileManager.default.removeItem(atPath: tmpPath) }
-
-        let result = try await ProcessRunner.execute(arguments: ["shasum", "-a", "256", tmpPath])
-        guard let hash = result.split(separator: " ").first else {
-            throw Abort(.internalServerError, reason: "SHA-256 computation failed")
-        }
-        return String(hash)
     }
 }

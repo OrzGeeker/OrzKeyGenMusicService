@@ -17,8 +17,13 @@ public func configure(_ app: Application) throws {
     // 统一错误响应格式
     app.middleware.use(ErrorResponseMiddleware())
 
-    // 静态文件
+    // 静态文件 — Public 目录（用于前端 JS/CSS，不再用于音乐文件）
+    app.directory.publicDirectory = "\(app.directory.resourcesDirectory)Public/"
     app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
+
+    // CAS（Content-Addressed Storage）初始化
+    let casRoot = Environment.get("CAS_ROOT") ?? "./data/music"
+    app.casStorage = CasStorageService(root: casRoot)
 
     app.databases.use(
         .postgres(
@@ -39,6 +44,7 @@ public func configure(_ app: Application) throws {
     app.migrations.add(CreateSong())
     app.migrations.add(CreatePlaylist())
     app.migrations.add(CreatePlaylistSongPivot())
+    // 注意：MigrateSongToCas 仅用于从旧 schema 升级，新 DB 由 CreateSong 直接创建正确 schema
 
     app.views.use(.leaf)
 

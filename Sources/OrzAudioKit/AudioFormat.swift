@@ -36,7 +36,10 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
     /// 该格式对应的播放策略
     public var playStrategy: PlayStrategy {
         switch self {
-        case .mp3, .ogg, .wav, .flac, .mid, .m4a, .aac:
+        case .wav:
+            // WAV 可能有 ADPCM/GSM 编码，浏览器不原生支持，服务端转 PCM
+            return .serverDecode
+        case .mp3, .ogg, .flac, .mid, .m4a, .aac:
             return .directFile
         case .xm, .mod, .it, .s3m, .mo3, .mtm:
             return .wasmDecode

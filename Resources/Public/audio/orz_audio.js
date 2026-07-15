@@ -819,8 +819,6 @@ async function createWasm() {
       SYSCALLS.varargs += 4;
       return ret;
     };
-  var syscallGetVarargP = syscallGetVarargI;
-  
   
   var PATH = {
   isAbs:(path) => path.charAt(0) === '/',
@@ -890,7 +888,7 @@ var initRandomFill = () => {
       return (view) => (nodeCrypto.randomFillSync(view), 0);
     }
 
-    try { return (crypto.getRandomValues(view), 0); } catch(e) { var tmp = new Uint8Array(view.length); crypto.getRandomValues(tmp); view.set(tmp); return 0; }
+    return (view) => (crypto.getRandomValues(view), 0);
   };
 var randomFill = (view) => (randomFill = initRandomFill())(view);
 
@@ -3309,157 +3307,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
         return ret;
       },
   };
-  function ___syscall_fcntl64(fd, cmd, varargs) {
-  SYSCALLS.varargs = varargs;
-  try {
-  
-      var stream = SYSCALLS.getStreamFromFD(fd);
-      switch (cmd) {
-        case 0: {
-          var arg = syscallGetVarargI();
-          if (arg < 0) {
-            return -28;
-          }
-          while (FS.streams[arg]) {
-            arg++;
-          }
-          var newStream;
-          newStream = FS.dupStream(stream, arg);
-          return newStream.fd;
-        }
-        case 1:
-        case 2:
-          return 0;  // FD_CLOEXEC makes no sense for a single process.
-        case 3:
-          return stream.flags;
-        case 4: {
-          var arg = syscallGetVarargI();
-          var mask = 289792;
-          stream.flags = (stream.flags & ~mask) | (arg & mask);
-          return 0;
-        }
-        case 12: {
-          var arg = syscallGetVarargP();
-          var offset = 0;
-          // We're always unlocked.
-          HEAP16[(((arg)+(offset))>>1)] = 2;
-          return 0;
-        }
-        case 13:
-        case 14:
-          // Pretend that the locking is successful. These are process-level locks,
-          // and Emscripten programs are a single process. If we supported linking a
-          // filesystem between programs, we'd need to do more here.
-          // See https://github.com/emscripten-core/emscripten/issues/23697
-          return 0;
-      }
-      return -28;
-    } catch (e) {
-    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
-    return -e.errno;
-  }
-  }
-  
-
-  
-  function ___syscall_ioctl(fd, op, varargs) {
-  SYSCALLS.varargs = varargs;
-  try {
-  
-      var stream = SYSCALLS.getStreamFromFD(fd);
-      switch (op) {
-        case 21509: {
-          if (!stream.tty) return -59;
-          return 0;
-        }
-        case 21505: {
-          if (!stream.tty) return -59;
-          if (stream.tty.ops.ioctl_tcgets) {
-            var termios = stream.tty.ops.ioctl_tcgets(stream);
-            var argp = syscallGetVarargP();
-            HEAP32[((argp)>>2)] = termios.c_iflag || 0;
-            HEAP32[(((argp)+(4))>>2)] = termios.c_oflag || 0;
-            HEAP32[(((argp)+(8))>>2)] = termios.c_cflag || 0;
-            HEAP32[(((argp)+(12))>>2)] = termios.c_lflag || 0;
-            for (var i = 0; i < 32; i++) {
-              HEAP8[(argp + i)+(17)] = termios.c_cc[i] || 0;
-            }
-            return 0;
-          }
-          return 0;
-        }
-        case 21510:
-        case 21511:
-        case 21512: {
-          if (!stream.tty) return -59;
-          return 0; // no-op, not actually adjusting terminal settings
-        }
-        case 21506:
-        case 21507:
-        case 21508: {
-          if (!stream.tty) return -59;
-          if (stream.tty.ops.ioctl_tcsets) {
-            var argp = syscallGetVarargP();
-            var c_iflag = HEAP32[((argp)>>2)];
-            var c_oflag = HEAP32[(((argp)+(4))>>2)];
-            var c_cflag = HEAP32[(((argp)+(8))>>2)];
-            var c_lflag = HEAP32[(((argp)+(12))>>2)];
-            var c_cc = []
-            for (var i = 0; i < 32; i++) {
-              c_cc.push(HEAP8[(argp + i)+(17)]);
-            }
-            return stream.tty.ops.ioctl_tcsets(stream.tty, op, { c_iflag, c_oflag, c_cflag, c_lflag, c_cc });
-          }
-          return 0; // no-op, not actually adjusting terminal settings
-        }
-        case 21519: {
-          if (!stream.tty) return -59;
-          var argp = syscallGetVarargP();
-          HEAP32[((argp)>>2)] = 0;
-          return 0;
-        }
-        case 21520: {
-          if (!stream.tty) return -59;
-          return -28; // not supported
-        }
-        case 21537:
-        case 21531: {
-          var argp = syscallGetVarargP();
-          return FS.ioctl(stream, op, argp);
-        }
-        case 21523: {
-          // TODO: in theory we should write to the winsize struct that gets
-          // passed in, but for now musl doesn't read anything on it
-          if (!stream.tty) return -59;
-          if (stream.tty.ops.ioctl_tiocgwinsz) {
-            var winsize = stream.tty.ops.ioctl_tiocgwinsz(stream.tty);
-            var argp = syscallGetVarargP();
-            HEAP16[((argp)>>1)] = winsize[0];
-            HEAP16[(((argp)+(2))>>1)] = winsize[1];
-          }
-          return 0;
-        }
-        case 21524: {
-          // TODO: technically, this ioctl call should change the window size.
-          // but, since emscripten doesn't have any concept of a terminal window
-          // yet, we'll just silently throw it away as we do TIOCGWINSZ
-          if (!stream.tty) return -59;
-          return 0;
-        }
-        case 21515: {
-          if (!stream.tty) return -59;
-          return 0;
-        }
-        default: return -28; // not supported
-      }
-    } catch (e) {
-    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
-    return -e.errno;
-  }
-  }
-  
-
-  
   function ___syscall_openat(dirfd, path, flags, varargs) {
   SYSCALLS.varargs = varargs;
   try {
@@ -3478,88 +3325,8 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
   }
   
 
-  function ___syscall_rmdir(path) {
-  try {
-  
-      path = SYSCALLS.getStr(path);
-      FS.rmdir(path);
-      return 0;
-    } catch (e) {
-    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
-    return -e.errno;
-  }
-  }
-  
-
-  function ___syscall_unlinkat(dirfd, path, flags) {
-  try {
-  
-      path = SYSCALLS.getStr(path);
-      path = SYSCALLS.calculateAt(dirfd, path);
-      if (!flags) {
-        FS.unlink(path);
-      } else if (flags === 512) {
-        FS.rmdir(path);
-      } else {
-        return -28;
-      }
-      return 0;
-    } catch (e) {
-    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
-    return -e.errno;
-  }
-  }
-  
-
   var __abort_js = () =>
       abort('');
-
-  var isLeapYear = (year) => year%4 === 0 && (year%100 !== 0 || year%400 === 0);
-  
-  var MONTH_DAYS_LEAP_CUMULATIVE = [0,31,60,91,121,152,182,213,244,274,305,335];
-  
-  var MONTH_DAYS_REGULAR_CUMULATIVE = [0,31,59,90,120,151,181,212,243,273,304,334];
-  var ydayFromDate = (date) => {
-      var leap = isLeapYear(date.getFullYear());
-      var monthDaysCumulative = (leap ? MONTH_DAYS_LEAP_CUMULATIVE : MONTH_DAYS_REGULAR_CUMULATIVE);
-      var yday = monthDaysCumulative[date.getMonth()] + date.getDate() - 1; // -1 since it's days since Jan 1
-  
-      return yday;
-    };
-  
-  var INT53_MAX = 9007199254740992;
-  
-  var INT53_MIN = -9007199254740992;
-  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
-  function __localtime_js(time, tmPtr) {
-    time = bigintToI53Checked(time);
-  
-  
-      var date = new Date(time*1000);
-      if (isNaN(date.getTime())) {
-        return 1;
-      }
-      HEAP32[((tmPtr)>>2)] = date.getSeconds();
-      HEAP32[(((tmPtr)+(4))>>2)] = date.getMinutes();
-      HEAP32[(((tmPtr)+(8))>>2)] = date.getHours();
-      HEAP32[(((tmPtr)+(12))>>2)] = date.getDate();
-      HEAP32[(((tmPtr)+(16))>>2)] = date.getMonth();
-      HEAP32[(((tmPtr)+(20))>>2)] = date.getFullYear()-1900;
-      HEAP32[(((tmPtr)+(24))>>2)] = date.getDay();
-  
-      var yday = ydayFromDate(date)|0;
-      HEAP32[(((tmPtr)+(28))>>2)] = yday;
-      HEAP32[(((tmPtr)+(36))>>2)] = -(date.getTimezoneOffset() * 60);
-  
-      // Attention: DST is in December in South, and some regions don't have DST at all.
-      var start = new Date(date.getFullYear(), 0, 1);
-      var summerOffset = new Date(date.getFullYear(), 6, 1).getTimezoneOffset();
-      var winterOffset = start.getTimezoneOffset();
-      var dst = (summerOffset != winterOffset && date.getTimezoneOffset() == Math.min(winterOffset, summerOffset))|0;
-      HEAP32[(((tmPtr)+(32))>>2)] = dst;
-      return 0;
-    ;
-  }
 
   var stringToUTF8 = (str, outPtr, maxBytesToWrite) => {
       return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
@@ -3621,6 +3388,10 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
   
   var checkWasiClock = (clock_id) => clock_id >= 0 && clock_id <= 3;
   
+  var INT53_MAX = 9007199254740992;
+  
+  var INT53_MIN = -9007199254740992;
+  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
   function _clock_time_get(clk_id, ignored_precision, ptime) {
     ignored_precision = bigintToI53Checked(ignored_precision);
   
@@ -4006,135 +3777,25 @@ var _orz_load,
   _orz_render,
   _orz_destroy,
   _orz_can_decode,
-  _free,
   _orz_audio_can_decode,
   _openmpt_module_create_from_memory2,
   _openmpt_module_get_duration_seconds,
   _openmpt_module_read_float_stereo,
   _openmpt_module_destroy,
-  _register_players,
+  _free,
   _malloc,
-  _openmpt_get_library_version,
-  _openmpt_get_core_version,
-  _openmpt_free_string,
-  _openmpt_get_string,
-  _openmpt_get_supported_extensions,
-  _openmpt_is_extension_supported,
-  _openmpt_log_func_default,
-  _openmpt_log_func_silent,
-  _openmpt_error_is_transient,
-  _openmpt_error_string,
-  _openmpt_error_func_default,
-  _openmpt_error_func_log,
-  _openmpt_error_func_store,
-  _openmpt_error_func_ignore,
-  _openmpt_error_func_errno,
-  _openmpt_error_func_errno_userdata,
-  _openmpt_could_open_probability,
-  _openmpt_could_open_probability2,
-  _openmpt_could_open_propability,
-  _openmpt_probe_file_header_get_recommended_size,
-  _openmpt_probe_file_header,
-  _openmpt_probe_file_header_without_filesize,
-  _openmpt_probe_file_header_from_stream,
-  _openmpt_module_create,
-  _openmpt_module_create2,
-  _openmpt_module_create_from_memory,
-  __ZN7openmpt19get_library_versionEv,
-  __ZN7openmpt16get_core_versionEv,
-  __ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE,
-  __ZN7openmpt9exceptionD2Ev,
-  _openmpt_module_set_log_func,
-  _openmpt_module_set_error_func,
-  _openmpt_module_error_get_last,
-  _openmpt_module_error_get_last_message,
-  _openmpt_module_error_set_last,
-  _openmpt_module_error_clear,
-  _openmpt_module_select_subsong,
-  _openmpt_module_get_selected_subsong,
-  _openmpt_module_get_restart_order,
-  _openmpt_module_get_restart_row,
-  _openmpt_module_set_repeat_count,
-  _openmpt_module_get_repeat_count,
-  _openmpt_module_get_time_at_position,
-  _openmpt_module_set_position_seconds,
-  _openmpt_module_get_position_seconds,
-  _openmpt_module_set_position_order_row,
-  _openmpt_module_get_render_param,
-  _openmpt_module_set_render_param,
-  _openmpt_module_read_mono,
-  _openmpt_module_read_stereo,
-  _openmpt_module_read_quad,
-  _openmpt_module_read_float_mono,
-  _openmpt_module_read_float_quad,
-  _openmpt_module_read_interleaved_stereo,
-  _openmpt_module_read_interleaved_quad,
-  _openmpt_module_read_interleaved_float_stereo,
-  _openmpt_module_read_interleaved_float_quad,
-  _openmpt_module_get_metadata_keys,
-  _openmpt_module_get_metadata,
-  _openmpt_module_get_current_estimated_bpm,
-  _openmpt_module_get_current_speed,
-  _openmpt_module_get_current_tempo,
-  _openmpt_module_get_current_tempo2,
-  _openmpt_module_get_current_order,
-  _openmpt_module_get_current_pattern,
-  _openmpt_module_get_current_row,
-  _openmpt_module_get_current_playing_channels,
-  _openmpt_module_get_current_channel_vu_mono,
-  _openmpt_module_get_current_channel_vu_left,
-  _openmpt_module_get_current_channel_vu_right,
-  _openmpt_module_get_current_channel_vu_rear_left,
-  _openmpt_module_get_current_channel_vu_rear_right,
-  _openmpt_module_get_num_subsongs,
-  _openmpt_module_get_num_channels,
-  _openmpt_module_get_num_orders,
-  _openmpt_module_get_num_patterns,
-  _openmpt_module_get_num_instruments,
-  _openmpt_module_get_num_samples,
-  _openmpt_module_get_subsong_name,
-  _openmpt_module_get_channel_name,
-  _openmpt_module_get_order_name,
-  _openmpt_module_get_pattern_name,
-  _openmpt_module_get_instrument_name,
-  _openmpt_module_get_sample_name,
-  _openmpt_module_get_order_pattern,
-  _openmpt_module_is_order_skip_entry,
-  _openmpt_module_is_pattern_skip_item,
-  _openmpt_module_is_order_stop_entry,
-  _openmpt_module_is_pattern_stop_item,
-  _openmpt_module_get_pattern_num_rows,
-  _openmpt_module_get_pattern_rows_per_beat,
-  _openmpt_module_get_pattern_rows_per_measure,
-  _openmpt_module_get_pattern_row_channel_command,
-  _openmpt_module_format_pattern_row_channel_command,
-  _openmpt_module_highlight_pattern_row_channel_command,
-  _openmpt_module_format_pattern_row_channel,
-  _openmpt_module_highlight_pattern_row_channel,
-  _openmpt_module_get_ctls,
-  _openmpt_module_ctl_get,
-  _openmpt_module_ctl_get_boolean,
-  _openmpt_module_ctl_get_integer,
-  _openmpt_module_ctl_get_floatingpoint,
-  _openmpt_module_ctl_get_text,
-  _openmpt_module_ctl_set,
-  _openmpt_module_ctl_set_boolean,
-  _openmpt_module_ctl_set_integer,
-  _openmpt_module_ctl_set_floatingpoint,
-  _openmpt_module_ctl_set_text,
-  _openmpt_module_ext_create,
-  _openmpt_module_ext_create_from_memory,
-  _openmpt_module_ext_destroy,
-  _openmpt_module_ext_get_module,
-  _openmpt_module_ext_get_interface,
   __ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE,
-  __ZNK7openmpt9exception4whatEv,
   __ZN7openmpt9exceptionC2ERKS0_,
   __ZN7openmpt9exceptionC2EOS0_,
   __ZN7openmpt9exceptionaSERKS0_,
   __ZN7openmpt9exceptionaSEOS0_,
+  __ZN7openmpt9exceptionD2Ev,
   __ZN7openmpt9exceptionD0Ev,
   __ZN7openmpt9exceptionD1Ev,
+  __ZNK7openmpt9exception4whatEv,
+  __ZN7openmpt19get_library_versionEv,
+  __ZN7openmpt16get_core_versionEv,
+  __ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE,
   __ZN7openmpt24get_supported_extensionsEv,
   __ZN7openmpt22is_extension_supportedERKNSt3__212basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE,
   __ZN7openmpt23is_extension_supported2ENSt3__217basic_string_viewIcNS0_11char_traitsIcEEEE,
@@ -4271,14 +3932,115 @@ var _orz_load,
   __ZN7openmpt6moduleC1ERNSt3__213basic_istreamIcNS1_11char_traitsIcEEEERNS1_13basic_ostreamIcS4_EERKNS1_3mapINS1_12basic_stringIcS4_NS1_9allocatorIcEEEESE_NS1_4lessISE_EENSC_INS1_4pairIKSE_SE_EEEEEE,
   __ZN7openmpt9exceptionC1EOS0_,
   __ZN7openmpt9exceptionC1ERKS0_,
-  _getPlayerBuf,
-  _getPlayerBufLen,
-  _hash_new,
-  _hashKey,
-  _hash_index,
-  _hash_insert,
-  _hash_lookup,
-  _hash_lookup_len,
+  _openmpt_get_library_version,
+  _openmpt_get_core_version,
+  _openmpt_free_string,
+  _openmpt_get_string,
+  _openmpt_get_supported_extensions,
+  _openmpt_is_extension_supported,
+  _openmpt_log_func_default,
+  _openmpt_log_func_silent,
+  _openmpt_error_is_transient,
+  _openmpt_error_string,
+  _openmpt_error_func_default,
+  _openmpt_error_func_log,
+  _openmpt_error_func_store,
+  _openmpt_error_func_ignore,
+  _openmpt_error_func_errno,
+  _openmpt_error_func_errno_userdata,
+  _openmpt_could_open_probability,
+  _openmpt_could_open_probability2,
+  _openmpt_could_open_propability,
+  _openmpt_probe_file_header_get_recommended_size,
+  _openmpt_probe_file_header,
+  _openmpt_probe_file_header_without_filesize,
+  _openmpt_probe_file_header_from_stream,
+  _openmpt_module_create,
+  _openmpt_module_create2,
+  _openmpt_module_create_from_memory,
+  _openmpt_module_set_log_func,
+  _openmpt_module_set_error_func,
+  _openmpt_module_error_get_last,
+  _openmpt_module_error_get_last_message,
+  _openmpt_module_error_set_last,
+  _openmpt_module_error_clear,
+  _openmpt_module_select_subsong,
+  _openmpt_module_get_selected_subsong,
+  _openmpt_module_get_restart_order,
+  _openmpt_module_get_restart_row,
+  _openmpt_module_set_repeat_count,
+  _openmpt_module_get_repeat_count,
+  _openmpt_module_get_time_at_position,
+  _openmpt_module_set_position_seconds,
+  _openmpt_module_get_position_seconds,
+  _openmpt_module_set_position_order_row,
+  _openmpt_module_get_render_param,
+  _openmpt_module_set_render_param,
+  _openmpt_module_read_mono,
+  _openmpt_module_read_stereo,
+  _openmpt_module_read_quad,
+  _openmpt_module_read_float_mono,
+  _openmpt_module_read_float_quad,
+  _openmpt_module_read_interleaved_stereo,
+  _openmpt_module_read_interleaved_quad,
+  _openmpt_module_read_interleaved_float_stereo,
+  _openmpt_module_read_interleaved_float_quad,
+  _openmpt_module_get_metadata_keys,
+  _openmpt_module_get_metadata,
+  _openmpt_module_get_current_estimated_bpm,
+  _openmpt_module_get_current_speed,
+  _openmpt_module_get_current_tempo,
+  _openmpt_module_get_current_tempo2,
+  _openmpt_module_get_current_order,
+  _openmpt_module_get_current_pattern,
+  _openmpt_module_get_current_row,
+  _openmpt_module_get_current_playing_channels,
+  _openmpt_module_get_current_channel_vu_mono,
+  _openmpt_module_get_current_channel_vu_left,
+  _openmpt_module_get_current_channel_vu_right,
+  _openmpt_module_get_current_channel_vu_rear_left,
+  _openmpt_module_get_current_channel_vu_rear_right,
+  _openmpt_module_get_num_subsongs,
+  _openmpt_module_get_num_channels,
+  _openmpt_module_get_num_orders,
+  _openmpt_module_get_num_patterns,
+  _openmpt_module_get_num_instruments,
+  _openmpt_module_get_num_samples,
+  _openmpt_module_get_subsong_name,
+  _openmpt_module_get_channel_name,
+  _openmpt_module_get_order_name,
+  _openmpt_module_get_pattern_name,
+  _openmpt_module_get_instrument_name,
+  _openmpt_module_get_sample_name,
+  _openmpt_module_get_order_pattern,
+  _openmpt_module_is_order_skip_entry,
+  _openmpt_module_is_pattern_skip_item,
+  _openmpt_module_is_order_stop_entry,
+  _openmpt_module_is_pattern_stop_item,
+  _openmpt_module_get_pattern_num_rows,
+  _openmpt_module_get_pattern_rows_per_beat,
+  _openmpt_module_get_pattern_rows_per_measure,
+  _openmpt_module_get_pattern_row_channel_command,
+  _openmpt_module_format_pattern_row_channel_command,
+  _openmpt_module_highlight_pattern_row_channel_command,
+  _openmpt_module_format_pattern_row_channel,
+  _openmpt_module_highlight_pattern_row_channel,
+  _openmpt_module_get_ctls,
+  _openmpt_module_ctl_get,
+  _openmpt_module_ctl_get_boolean,
+  _openmpt_module_ctl_get_integer,
+  _openmpt_module_ctl_get_floatingpoint,
+  _openmpt_module_ctl_get_text,
+  _openmpt_module_ctl_set,
+  _openmpt_module_ctl_set_boolean,
+  _openmpt_module_ctl_set_integer,
+  _openmpt_module_ctl_set_floatingpoint,
+  _openmpt_module_ctl_set_text,
+  _openmpt_module_ext_create,
+  _openmpt_module_ext_create_from_memory,
+  _openmpt_module_ext_destroy,
+  _openmpt_module_ext_get_module,
+  _openmpt_module_ext_get_interface,
   _setThrew,
   __emscripten_tempret_set,
   __emscripten_stack_restore,
@@ -4303,135 +4065,25 @@ function assignWasmExports(wasmExports) {
   _orz_render = Module['_orz_render'] = wasmExports['orz_render'];
   _orz_destroy = Module['_orz_destroy'] = wasmExports['orz_destroy'];
   _orz_can_decode = Module['_orz_can_decode'] = wasmExports['orz_can_decode'];
-  _free = Module['_free'] = wasmExports['free'];
   _orz_audio_can_decode = Module['_orz_audio_can_decode'] = wasmExports['orz_audio_can_decode'];
   _openmpt_module_create_from_memory2 = Module['_openmpt_module_create_from_memory2'] = wasmExports['openmpt_module_create_from_memory2'];
   _openmpt_module_get_duration_seconds = Module['_openmpt_module_get_duration_seconds'] = wasmExports['openmpt_module_get_duration_seconds'];
   _openmpt_module_read_float_stereo = Module['_openmpt_module_read_float_stereo'] = wasmExports['openmpt_module_read_float_stereo'];
   _openmpt_module_destroy = Module['_openmpt_module_destroy'] = wasmExports['openmpt_module_destroy'];
-  _register_players = Module['_register_players'] = wasmExports['register_players'];
+  _free = Module['_free'] = wasmExports['free'];
   _malloc = Module['_malloc'] = wasmExports['malloc'];
-  _openmpt_get_library_version = Module['_openmpt_get_library_version'] = wasmExports['openmpt_get_library_version'];
-  _openmpt_get_core_version = Module['_openmpt_get_core_version'] = wasmExports['openmpt_get_core_version'];
-  _openmpt_free_string = Module['_openmpt_free_string'] = wasmExports['openmpt_free_string'];
-  _openmpt_get_string = Module['_openmpt_get_string'] = wasmExports['openmpt_get_string'];
-  _openmpt_get_supported_extensions = Module['_openmpt_get_supported_extensions'] = wasmExports['openmpt_get_supported_extensions'];
-  _openmpt_is_extension_supported = Module['_openmpt_is_extension_supported'] = wasmExports['openmpt_is_extension_supported'];
-  _openmpt_log_func_default = Module['_openmpt_log_func_default'] = wasmExports['openmpt_log_func_default'];
-  _openmpt_log_func_silent = Module['_openmpt_log_func_silent'] = wasmExports['openmpt_log_func_silent'];
-  _openmpt_error_is_transient = Module['_openmpt_error_is_transient'] = wasmExports['openmpt_error_is_transient'];
-  _openmpt_error_string = Module['_openmpt_error_string'] = wasmExports['openmpt_error_string'];
-  _openmpt_error_func_default = Module['_openmpt_error_func_default'] = wasmExports['openmpt_error_func_default'];
-  _openmpt_error_func_log = Module['_openmpt_error_func_log'] = wasmExports['openmpt_error_func_log'];
-  _openmpt_error_func_store = Module['_openmpt_error_func_store'] = wasmExports['openmpt_error_func_store'];
-  _openmpt_error_func_ignore = Module['_openmpt_error_func_ignore'] = wasmExports['openmpt_error_func_ignore'];
-  _openmpt_error_func_errno = Module['_openmpt_error_func_errno'] = wasmExports['openmpt_error_func_errno'];
-  _openmpt_error_func_errno_userdata = Module['_openmpt_error_func_errno_userdata'] = wasmExports['openmpt_error_func_errno_userdata'];
-  _openmpt_could_open_probability = Module['_openmpt_could_open_probability'] = wasmExports['openmpt_could_open_probability'];
-  _openmpt_could_open_probability2 = Module['_openmpt_could_open_probability2'] = wasmExports['openmpt_could_open_probability2'];
-  _openmpt_could_open_propability = Module['_openmpt_could_open_propability'] = wasmExports['openmpt_could_open_propability'];
-  _openmpt_probe_file_header_get_recommended_size = Module['_openmpt_probe_file_header_get_recommended_size'] = wasmExports['openmpt_probe_file_header_get_recommended_size'];
-  _openmpt_probe_file_header = Module['_openmpt_probe_file_header'] = wasmExports['openmpt_probe_file_header'];
-  _openmpt_probe_file_header_without_filesize = Module['_openmpt_probe_file_header_without_filesize'] = wasmExports['openmpt_probe_file_header_without_filesize'];
-  _openmpt_probe_file_header_from_stream = Module['_openmpt_probe_file_header_from_stream'] = wasmExports['openmpt_probe_file_header_from_stream'];
-  _openmpt_module_create = Module['_openmpt_module_create'] = wasmExports['openmpt_module_create'];
-  _openmpt_module_create2 = Module['_openmpt_module_create2'] = wasmExports['openmpt_module_create2'];
-  _openmpt_module_create_from_memory = Module['_openmpt_module_create_from_memory'] = wasmExports['openmpt_module_create_from_memory'];
-  __ZN7openmpt19get_library_versionEv = Module['__ZN7openmpt19get_library_versionEv'] = wasmExports['_ZN7openmpt19get_library_versionEv'];
-  __ZN7openmpt16get_core_versionEv = Module['__ZN7openmpt16get_core_versionEv'] = wasmExports['_ZN7openmpt16get_core_versionEv'];
-  __ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE = Module['__ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'] = wasmExports['_ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'];
-  __ZN7openmpt9exceptionD2Ev = Module['__ZN7openmpt9exceptionD2Ev'] = wasmExports['_ZN7openmpt9exceptionD2Ev'];
-  _openmpt_module_set_log_func = Module['_openmpt_module_set_log_func'] = wasmExports['openmpt_module_set_log_func'];
-  _openmpt_module_set_error_func = Module['_openmpt_module_set_error_func'] = wasmExports['openmpt_module_set_error_func'];
-  _openmpt_module_error_get_last = Module['_openmpt_module_error_get_last'] = wasmExports['openmpt_module_error_get_last'];
-  _openmpt_module_error_get_last_message = Module['_openmpt_module_error_get_last_message'] = wasmExports['openmpt_module_error_get_last_message'];
-  _openmpt_module_error_set_last = Module['_openmpt_module_error_set_last'] = wasmExports['openmpt_module_error_set_last'];
-  _openmpt_module_error_clear = Module['_openmpt_module_error_clear'] = wasmExports['openmpt_module_error_clear'];
-  _openmpt_module_select_subsong = Module['_openmpt_module_select_subsong'] = wasmExports['openmpt_module_select_subsong'];
-  _openmpt_module_get_selected_subsong = Module['_openmpt_module_get_selected_subsong'] = wasmExports['openmpt_module_get_selected_subsong'];
-  _openmpt_module_get_restart_order = Module['_openmpt_module_get_restart_order'] = wasmExports['openmpt_module_get_restart_order'];
-  _openmpt_module_get_restart_row = Module['_openmpt_module_get_restart_row'] = wasmExports['openmpt_module_get_restart_row'];
-  _openmpt_module_set_repeat_count = Module['_openmpt_module_set_repeat_count'] = wasmExports['openmpt_module_set_repeat_count'];
-  _openmpt_module_get_repeat_count = Module['_openmpt_module_get_repeat_count'] = wasmExports['openmpt_module_get_repeat_count'];
-  _openmpt_module_get_time_at_position = Module['_openmpt_module_get_time_at_position'] = wasmExports['openmpt_module_get_time_at_position'];
-  _openmpt_module_set_position_seconds = Module['_openmpt_module_set_position_seconds'] = wasmExports['openmpt_module_set_position_seconds'];
-  _openmpt_module_get_position_seconds = Module['_openmpt_module_get_position_seconds'] = wasmExports['openmpt_module_get_position_seconds'];
-  _openmpt_module_set_position_order_row = Module['_openmpt_module_set_position_order_row'] = wasmExports['openmpt_module_set_position_order_row'];
-  _openmpt_module_get_render_param = Module['_openmpt_module_get_render_param'] = wasmExports['openmpt_module_get_render_param'];
-  _openmpt_module_set_render_param = Module['_openmpt_module_set_render_param'] = wasmExports['openmpt_module_set_render_param'];
-  _openmpt_module_read_mono = Module['_openmpt_module_read_mono'] = wasmExports['openmpt_module_read_mono'];
-  _openmpt_module_read_stereo = Module['_openmpt_module_read_stereo'] = wasmExports['openmpt_module_read_stereo'];
-  _openmpt_module_read_quad = Module['_openmpt_module_read_quad'] = wasmExports['openmpt_module_read_quad'];
-  _openmpt_module_read_float_mono = Module['_openmpt_module_read_float_mono'] = wasmExports['openmpt_module_read_float_mono'];
-  _openmpt_module_read_float_quad = Module['_openmpt_module_read_float_quad'] = wasmExports['openmpt_module_read_float_quad'];
-  _openmpt_module_read_interleaved_stereo = Module['_openmpt_module_read_interleaved_stereo'] = wasmExports['openmpt_module_read_interleaved_stereo'];
-  _openmpt_module_read_interleaved_quad = Module['_openmpt_module_read_interleaved_quad'] = wasmExports['openmpt_module_read_interleaved_quad'];
-  _openmpt_module_read_interleaved_float_stereo = Module['_openmpt_module_read_interleaved_float_stereo'] = wasmExports['openmpt_module_read_interleaved_float_stereo'];
-  _openmpt_module_read_interleaved_float_quad = Module['_openmpt_module_read_interleaved_float_quad'] = wasmExports['openmpt_module_read_interleaved_float_quad'];
-  _openmpt_module_get_metadata_keys = Module['_openmpt_module_get_metadata_keys'] = wasmExports['openmpt_module_get_metadata_keys'];
-  _openmpt_module_get_metadata = Module['_openmpt_module_get_metadata'] = wasmExports['openmpt_module_get_metadata'];
-  _openmpt_module_get_current_estimated_bpm = Module['_openmpt_module_get_current_estimated_bpm'] = wasmExports['openmpt_module_get_current_estimated_bpm'];
-  _openmpt_module_get_current_speed = Module['_openmpt_module_get_current_speed'] = wasmExports['openmpt_module_get_current_speed'];
-  _openmpt_module_get_current_tempo = Module['_openmpt_module_get_current_tempo'] = wasmExports['openmpt_module_get_current_tempo'];
-  _openmpt_module_get_current_tempo2 = Module['_openmpt_module_get_current_tempo2'] = wasmExports['openmpt_module_get_current_tempo2'];
-  _openmpt_module_get_current_order = Module['_openmpt_module_get_current_order'] = wasmExports['openmpt_module_get_current_order'];
-  _openmpt_module_get_current_pattern = Module['_openmpt_module_get_current_pattern'] = wasmExports['openmpt_module_get_current_pattern'];
-  _openmpt_module_get_current_row = Module['_openmpt_module_get_current_row'] = wasmExports['openmpt_module_get_current_row'];
-  _openmpt_module_get_current_playing_channels = Module['_openmpt_module_get_current_playing_channels'] = wasmExports['openmpt_module_get_current_playing_channels'];
-  _openmpt_module_get_current_channel_vu_mono = Module['_openmpt_module_get_current_channel_vu_mono'] = wasmExports['openmpt_module_get_current_channel_vu_mono'];
-  _openmpt_module_get_current_channel_vu_left = Module['_openmpt_module_get_current_channel_vu_left'] = wasmExports['openmpt_module_get_current_channel_vu_left'];
-  _openmpt_module_get_current_channel_vu_right = Module['_openmpt_module_get_current_channel_vu_right'] = wasmExports['openmpt_module_get_current_channel_vu_right'];
-  _openmpt_module_get_current_channel_vu_rear_left = Module['_openmpt_module_get_current_channel_vu_rear_left'] = wasmExports['openmpt_module_get_current_channel_vu_rear_left'];
-  _openmpt_module_get_current_channel_vu_rear_right = Module['_openmpt_module_get_current_channel_vu_rear_right'] = wasmExports['openmpt_module_get_current_channel_vu_rear_right'];
-  _openmpt_module_get_num_subsongs = Module['_openmpt_module_get_num_subsongs'] = wasmExports['openmpt_module_get_num_subsongs'];
-  _openmpt_module_get_num_channels = Module['_openmpt_module_get_num_channels'] = wasmExports['openmpt_module_get_num_channels'];
-  _openmpt_module_get_num_orders = Module['_openmpt_module_get_num_orders'] = wasmExports['openmpt_module_get_num_orders'];
-  _openmpt_module_get_num_patterns = Module['_openmpt_module_get_num_patterns'] = wasmExports['openmpt_module_get_num_patterns'];
-  _openmpt_module_get_num_instruments = Module['_openmpt_module_get_num_instruments'] = wasmExports['openmpt_module_get_num_instruments'];
-  _openmpt_module_get_num_samples = Module['_openmpt_module_get_num_samples'] = wasmExports['openmpt_module_get_num_samples'];
-  _openmpt_module_get_subsong_name = Module['_openmpt_module_get_subsong_name'] = wasmExports['openmpt_module_get_subsong_name'];
-  _openmpt_module_get_channel_name = Module['_openmpt_module_get_channel_name'] = wasmExports['openmpt_module_get_channel_name'];
-  _openmpt_module_get_order_name = Module['_openmpt_module_get_order_name'] = wasmExports['openmpt_module_get_order_name'];
-  _openmpt_module_get_pattern_name = Module['_openmpt_module_get_pattern_name'] = wasmExports['openmpt_module_get_pattern_name'];
-  _openmpt_module_get_instrument_name = Module['_openmpt_module_get_instrument_name'] = wasmExports['openmpt_module_get_instrument_name'];
-  _openmpt_module_get_sample_name = Module['_openmpt_module_get_sample_name'] = wasmExports['openmpt_module_get_sample_name'];
-  _openmpt_module_get_order_pattern = Module['_openmpt_module_get_order_pattern'] = wasmExports['openmpt_module_get_order_pattern'];
-  _openmpt_module_is_order_skip_entry = Module['_openmpt_module_is_order_skip_entry'] = wasmExports['openmpt_module_is_order_skip_entry'];
-  _openmpt_module_is_pattern_skip_item = Module['_openmpt_module_is_pattern_skip_item'] = wasmExports['openmpt_module_is_pattern_skip_item'];
-  _openmpt_module_is_order_stop_entry = Module['_openmpt_module_is_order_stop_entry'] = wasmExports['openmpt_module_is_order_stop_entry'];
-  _openmpt_module_is_pattern_stop_item = Module['_openmpt_module_is_pattern_stop_item'] = wasmExports['openmpt_module_is_pattern_stop_item'];
-  _openmpt_module_get_pattern_num_rows = Module['_openmpt_module_get_pattern_num_rows'] = wasmExports['openmpt_module_get_pattern_num_rows'];
-  _openmpt_module_get_pattern_rows_per_beat = Module['_openmpt_module_get_pattern_rows_per_beat'] = wasmExports['openmpt_module_get_pattern_rows_per_beat'];
-  _openmpt_module_get_pattern_rows_per_measure = Module['_openmpt_module_get_pattern_rows_per_measure'] = wasmExports['openmpt_module_get_pattern_rows_per_measure'];
-  _openmpt_module_get_pattern_row_channel_command = Module['_openmpt_module_get_pattern_row_channel_command'] = wasmExports['openmpt_module_get_pattern_row_channel_command'];
-  _openmpt_module_format_pattern_row_channel_command = Module['_openmpt_module_format_pattern_row_channel_command'] = wasmExports['openmpt_module_format_pattern_row_channel_command'];
-  _openmpt_module_highlight_pattern_row_channel_command = Module['_openmpt_module_highlight_pattern_row_channel_command'] = wasmExports['openmpt_module_highlight_pattern_row_channel_command'];
-  _openmpt_module_format_pattern_row_channel = Module['_openmpt_module_format_pattern_row_channel'] = wasmExports['openmpt_module_format_pattern_row_channel'];
-  _openmpt_module_highlight_pattern_row_channel = Module['_openmpt_module_highlight_pattern_row_channel'] = wasmExports['openmpt_module_highlight_pattern_row_channel'];
-  _openmpt_module_get_ctls = Module['_openmpt_module_get_ctls'] = wasmExports['openmpt_module_get_ctls'];
-  _openmpt_module_ctl_get = Module['_openmpt_module_ctl_get'] = wasmExports['openmpt_module_ctl_get'];
-  _openmpt_module_ctl_get_boolean = Module['_openmpt_module_ctl_get_boolean'] = wasmExports['openmpt_module_ctl_get_boolean'];
-  _openmpt_module_ctl_get_integer = Module['_openmpt_module_ctl_get_integer'] = wasmExports['openmpt_module_ctl_get_integer'];
-  _openmpt_module_ctl_get_floatingpoint = Module['_openmpt_module_ctl_get_floatingpoint'] = wasmExports['openmpt_module_ctl_get_floatingpoint'];
-  _openmpt_module_ctl_get_text = Module['_openmpt_module_ctl_get_text'] = wasmExports['openmpt_module_ctl_get_text'];
-  _openmpt_module_ctl_set = Module['_openmpt_module_ctl_set'] = wasmExports['openmpt_module_ctl_set'];
-  _openmpt_module_ctl_set_boolean = Module['_openmpt_module_ctl_set_boolean'] = wasmExports['openmpt_module_ctl_set_boolean'];
-  _openmpt_module_ctl_set_integer = Module['_openmpt_module_ctl_set_integer'] = wasmExports['openmpt_module_ctl_set_integer'];
-  _openmpt_module_ctl_set_floatingpoint = Module['_openmpt_module_ctl_set_floatingpoint'] = wasmExports['openmpt_module_ctl_set_floatingpoint'];
-  _openmpt_module_ctl_set_text = Module['_openmpt_module_ctl_set_text'] = wasmExports['openmpt_module_ctl_set_text'];
-  _openmpt_module_ext_create = Module['_openmpt_module_ext_create'] = wasmExports['openmpt_module_ext_create'];
-  _openmpt_module_ext_create_from_memory = Module['_openmpt_module_ext_create_from_memory'] = wasmExports['openmpt_module_ext_create_from_memory'];
-  _openmpt_module_ext_destroy = Module['_openmpt_module_ext_destroy'] = wasmExports['openmpt_module_ext_destroy'];
-  _openmpt_module_ext_get_module = Module['_openmpt_module_ext_get_module'] = wasmExports['openmpt_module_ext_get_module'];
-  _openmpt_module_ext_get_interface = Module['_openmpt_module_ext_get_interface'] = wasmExports['openmpt_module_ext_get_interface'];
   __ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE = Module['__ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'] = wasmExports['_ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'];
-  __ZNK7openmpt9exception4whatEv = Module['__ZNK7openmpt9exception4whatEv'] = wasmExports['_ZNK7openmpt9exception4whatEv'];
   __ZN7openmpt9exceptionC2ERKS0_ = Module['__ZN7openmpt9exceptionC2ERKS0_'] = wasmExports['_ZN7openmpt9exceptionC2ERKS0_'];
   __ZN7openmpt9exceptionC2EOS0_ = Module['__ZN7openmpt9exceptionC2EOS0_'] = wasmExports['_ZN7openmpt9exceptionC2EOS0_'];
   __ZN7openmpt9exceptionaSERKS0_ = Module['__ZN7openmpt9exceptionaSERKS0_'] = wasmExports['_ZN7openmpt9exceptionaSERKS0_'];
   __ZN7openmpt9exceptionaSEOS0_ = Module['__ZN7openmpt9exceptionaSEOS0_'] = wasmExports['_ZN7openmpt9exceptionaSEOS0_'];
+  __ZN7openmpt9exceptionD2Ev = Module['__ZN7openmpt9exceptionD2Ev'] = wasmExports['_ZN7openmpt9exceptionD2Ev'];
   __ZN7openmpt9exceptionD0Ev = Module['__ZN7openmpt9exceptionD0Ev'] = wasmExports['_ZN7openmpt9exceptionD0Ev'];
   __ZN7openmpt9exceptionD1Ev = Module['__ZN7openmpt9exceptionD1Ev'] = wasmExports['_ZN7openmpt9exceptionD1Ev'];
+  __ZNK7openmpt9exception4whatEv = Module['__ZNK7openmpt9exception4whatEv'] = wasmExports['_ZNK7openmpt9exception4whatEv'];
+  __ZN7openmpt19get_library_versionEv = Module['__ZN7openmpt19get_library_versionEv'] = wasmExports['_ZN7openmpt19get_library_versionEv'];
+  __ZN7openmpt16get_core_versionEv = Module['__ZN7openmpt16get_core_versionEv'] = wasmExports['_ZN7openmpt16get_core_versionEv'];
+  __ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE = Module['__ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'] = wasmExports['_ZN7openmpt6string3getERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'];
   __ZN7openmpt24get_supported_extensionsEv = Module['__ZN7openmpt24get_supported_extensionsEv'] = wasmExports['_ZN7openmpt24get_supported_extensionsEv'];
   __ZN7openmpt22is_extension_supportedERKNSt3__212basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE = Module['__ZN7openmpt22is_extension_supportedERKNSt3__212basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE'] = wasmExports['_ZN7openmpt22is_extension_supportedERKNSt3__212basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE'];
   __ZN7openmpt23is_extension_supported2ENSt3__217basic_string_viewIcNS0_11char_traitsIcEEEE = Module['__ZN7openmpt23is_extension_supported2ENSt3__217basic_string_viewIcNS0_11char_traitsIcEEEE'] = wasmExports['_ZN7openmpt23is_extension_supported2ENSt3__217basic_string_viewIcNS0_11char_traitsIcEEEE'];
@@ -4568,14 +4220,115 @@ function assignWasmExports(wasmExports) {
   __ZN7openmpt6moduleC1ERNSt3__213basic_istreamIcNS1_11char_traitsIcEEEERNS1_13basic_ostreamIcS4_EERKNS1_3mapINS1_12basic_stringIcS4_NS1_9allocatorIcEEEESE_NS1_4lessISE_EENSC_INS1_4pairIKSE_SE_EEEEEE = Module['__ZN7openmpt6moduleC1ERNSt3__213basic_istreamIcNS1_11char_traitsIcEEEERNS1_13basic_ostreamIcS4_EERKNS1_3mapINS1_12basic_stringIcS4_NS1_9allocatorIcEEEESE_NS1_4lessISE_EENSC_INS1_4pairIKSE_SE_EEEEEE'] = wasmExports['_ZN7openmpt6moduleC1ERNSt3__213basic_istreamIcNS1_11char_traitsIcEEEERNS1_13basic_ostreamIcS4_EERKNS1_3mapINS1_12basic_stringIcS4_NS1_9allocatorIcEEEESE_NS1_4lessISE_EENSC_INS1_4pairIKSE_SE_EEEEEE'];
   __ZN7openmpt9exceptionC1EOS0_ = Module['__ZN7openmpt9exceptionC1EOS0_'] = wasmExports['_ZN7openmpt9exceptionC1EOS0_'];
   __ZN7openmpt9exceptionC1ERKS0_ = Module['__ZN7openmpt9exceptionC1ERKS0_'] = wasmExports['_ZN7openmpt9exceptionC1ERKS0_'];
-  _getPlayerBuf = Module['_getPlayerBuf'] = wasmExports['getPlayerBuf'];
-  _getPlayerBufLen = Module['_getPlayerBufLen'] = wasmExports['getPlayerBufLen'];
-  _hash_new = Module['_hash_new'] = wasmExports['hash_new'];
-  _hashKey = Module['_hashKey'] = wasmExports['hashKey'];
-  _hash_index = Module['_hash_index'] = wasmExports['hash_index'];
-  _hash_insert = Module['_hash_insert'] = wasmExports['hash_insert'];
-  _hash_lookup = Module['_hash_lookup'] = wasmExports['hash_lookup'];
-  _hash_lookup_len = Module['_hash_lookup_len'] = wasmExports['hash_lookup_len'];
+  _openmpt_get_library_version = Module['_openmpt_get_library_version'] = wasmExports['openmpt_get_library_version'];
+  _openmpt_get_core_version = Module['_openmpt_get_core_version'] = wasmExports['openmpt_get_core_version'];
+  _openmpt_free_string = Module['_openmpt_free_string'] = wasmExports['openmpt_free_string'];
+  _openmpt_get_string = Module['_openmpt_get_string'] = wasmExports['openmpt_get_string'];
+  _openmpt_get_supported_extensions = Module['_openmpt_get_supported_extensions'] = wasmExports['openmpt_get_supported_extensions'];
+  _openmpt_is_extension_supported = Module['_openmpt_is_extension_supported'] = wasmExports['openmpt_is_extension_supported'];
+  _openmpt_log_func_default = Module['_openmpt_log_func_default'] = wasmExports['openmpt_log_func_default'];
+  _openmpt_log_func_silent = Module['_openmpt_log_func_silent'] = wasmExports['openmpt_log_func_silent'];
+  _openmpt_error_is_transient = Module['_openmpt_error_is_transient'] = wasmExports['openmpt_error_is_transient'];
+  _openmpt_error_string = Module['_openmpt_error_string'] = wasmExports['openmpt_error_string'];
+  _openmpt_error_func_default = Module['_openmpt_error_func_default'] = wasmExports['openmpt_error_func_default'];
+  _openmpt_error_func_log = Module['_openmpt_error_func_log'] = wasmExports['openmpt_error_func_log'];
+  _openmpt_error_func_store = Module['_openmpt_error_func_store'] = wasmExports['openmpt_error_func_store'];
+  _openmpt_error_func_ignore = Module['_openmpt_error_func_ignore'] = wasmExports['openmpt_error_func_ignore'];
+  _openmpt_error_func_errno = Module['_openmpt_error_func_errno'] = wasmExports['openmpt_error_func_errno'];
+  _openmpt_error_func_errno_userdata = Module['_openmpt_error_func_errno_userdata'] = wasmExports['openmpt_error_func_errno_userdata'];
+  _openmpt_could_open_probability = Module['_openmpt_could_open_probability'] = wasmExports['openmpt_could_open_probability'];
+  _openmpt_could_open_probability2 = Module['_openmpt_could_open_probability2'] = wasmExports['openmpt_could_open_probability2'];
+  _openmpt_could_open_propability = Module['_openmpt_could_open_propability'] = wasmExports['openmpt_could_open_propability'];
+  _openmpt_probe_file_header_get_recommended_size = Module['_openmpt_probe_file_header_get_recommended_size'] = wasmExports['openmpt_probe_file_header_get_recommended_size'];
+  _openmpt_probe_file_header = Module['_openmpt_probe_file_header'] = wasmExports['openmpt_probe_file_header'];
+  _openmpt_probe_file_header_without_filesize = Module['_openmpt_probe_file_header_without_filesize'] = wasmExports['openmpt_probe_file_header_without_filesize'];
+  _openmpt_probe_file_header_from_stream = Module['_openmpt_probe_file_header_from_stream'] = wasmExports['openmpt_probe_file_header_from_stream'];
+  _openmpt_module_create = Module['_openmpt_module_create'] = wasmExports['openmpt_module_create'];
+  _openmpt_module_create2 = Module['_openmpt_module_create2'] = wasmExports['openmpt_module_create2'];
+  _openmpt_module_create_from_memory = Module['_openmpt_module_create_from_memory'] = wasmExports['openmpt_module_create_from_memory'];
+  _openmpt_module_set_log_func = Module['_openmpt_module_set_log_func'] = wasmExports['openmpt_module_set_log_func'];
+  _openmpt_module_set_error_func = Module['_openmpt_module_set_error_func'] = wasmExports['openmpt_module_set_error_func'];
+  _openmpt_module_error_get_last = Module['_openmpt_module_error_get_last'] = wasmExports['openmpt_module_error_get_last'];
+  _openmpt_module_error_get_last_message = Module['_openmpt_module_error_get_last_message'] = wasmExports['openmpt_module_error_get_last_message'];
+  _openmpt_module_error_set_last = Module['_openmpt_module_error_set_last'] = wasmExports['openmpt_module_error_set_last'];
+  _openmpt_module_error_clear = Module['_openmpt_module_error_clear'] = wasmExports['openmpt_module_error_clear'];
+  _openmpt_module_select_subsong = Module['_openmpt_module_select_subsong'] = wasmExports['openmpt_module_select_subsong'];
+  _openmpt_module_get_selected_subsong = Module['_openmpt_module_get_selected_subsong'] = wasmExports['openmpt_module_get_selected_subsong'];
+  _openmpt_module_get_restart_order = Module['_openmpt_module_get_restart_order'] = wasmExports['openmpt_module_get_restart_order'];
+  _openmpt_module_get_restart_row = Module['_openmpt_module_get_restart_row'] = wasmExports['openmpt_module_get_restart_row'];
+  _openmpt_module_set_repeat_count = Module['_openmpt_module_set_repeat_count'] = wasmExports['openmpt_module_set_repeat_count'];
+  _openmpt_module_get_repeat_count = Module['_openmpt_module_get_repeat_count'] = wasmExports['openmpt_module_get_repeat_count'];
+  _openmpt_module_get_time_at_position = Module['_openmpt_module_get_time_at_position'] = wasmExports['openmpt_module_get_time_at_position'];
+  _openmpt_module_set_position_seconds = Module['_openmpt_module_set_position_seconds'] = wasmExports['openmpt_module_set_position_seconds'];
+  _openmpt_module_get_position_seconds = Module['_openmpt_module_get_position_seconds'] = wasmExports['openmpt_module_get_position_seconds'];
+  _openmpt_module_set_position_order_row = Module['_openmpt_module_set_position_order_row'] = wasmExports['openmpt_module_set_position_order_row'];
+  _openmpt_module_get_render_param = Module['_openmpt_module_get_render_param'] = wasmExports['openmpt_module_get_render_param'];
+  _openmpt_module_set_render_param = Module['_openmpt_module_set_render_param'] = wasmExports['openmpt_module_set_render_param'];
+  _openmpt_module_read_mono = Module['_openmpt_module_read_mono'] = wasmExports['openmpt_module_read_mono'];
+  _openmpt_module_read_stereo = Module['_openmpt_module_read_stereo'] = wasmExports['openmpt_module_read_stereo'];
+  _openmpt_module_read_quad = Module['_openmpt_module_read_quad'] = wasmExports['openmpt_module_read_quad'];
+  _openmpt_module_read_float_mono = Module['_openmpt_module_read_float_mono'] = wasmExports['openmpt_module_read_float_mono'];
+  _openmpt_module_read_float_quad = Module['_openmpt_module_read_float_quad'] = wasmExports['openmpt_module_read_float_quad'];
+  _openmpt_module_read_interleaved_stereo = Module['_openmpt_module_read_interleaved_stereo'] = wasmExports['openmpt_module_read_interleaved_stereo'];
+  _openmpt_module_read_interleaved_quad = Module['_openmpt_module_read_interleaved_quad'] = wasmExports['openmpt_module_read_interleaved_quad'];
+  _openmpt_module_read_interleaved_float_stereo = Module['_openmpt_module_read_interleaved_float_stereo'] = wasmExports['openmpt_module_read_interleaved_float_stereo'];
+  _openmpt_module_read_interleaved_float_quad = Module['_openmpt_module_read_interleaved_float_quad'] = wasmExports['openmpt_module_read_interleaved_float_quad'];
+  _openmpt_module_get_metadata_keys = Module['_openmpt_module_get_metadata_keys'] = wasmExports['openmpt_module_get_metadata_keys'];
+  _openmpt_module_get_metadata = Module['_openmpt_module_get_metadata'] = wasmExports['openmpt_module_get_metadata'];
+  _openmpt_module_get_current_estimated_bpm = Module['_openmpt_module_get_current_estimated_bpm'] = wasmExports['openmpt_module_get_current_estimated_bpm'];
+  _openmpt_module_get_current_speed = Module['_openmpt_module_get_current_speed'] = wasmExports['openmpt_module_get_current_speed'];
+  _openmpt_module_get_current_tempo = Module['_openmpt_module_get_current_tempo'] = wasmExports['openmpt_module_get_current_tempo'];
+  _openmpt_module_get_current_tempo2 = Module['_openmpt_module_get_current_tempo2'] = wasmExports['openmpt_module_get_current_tempo2'];
+  _openmpt_module_get_current_order = Module['_openmpt_module_get_current_order'] = wasmExports['openmpt_module_get_current_order'];
+  _openmpt_module_get_current_pattern = Module['_openmpt_module_get_current_pattern'] = wasmExports['openmpt_module_get_current_pattern'];
+  _openmpt_module_get_current_row = Module['_openmpt_module_get_current_row'] = wasmExports['openmpt_module_get_current_row'];
+  _openmpt_module_get_current_playing_channels = Module['_openmpt_module_get_current_playing_channels'] = wasmExports['openmpt_module_get_current_playing_channels'];
+  _openmpt_module_get_current_channel_vu_mono = Module['_openmpt_module_get_current_channel_vu_mono'] = wasmExports['openmpt_module_get_current_channel_vu_mono'];
+  _openmpt_module_get_current_channel_vu_left = Module['_openmpt_module_get_current_channel_vu_left'] = wasmExports['openmpt_module_get_current_channel_vu_left'];
+  _openmpt_module_get_current_channel_vu_right = Module['_openmpt_module_get_current_channel_vu_right'] = wasmExports['openmpt_module_get_current_channel_vu_right'];
+  _openmpt_module_get_current_channel_vu_rear_left = Module['_openmpt_module_get_current_channel_vu_rear_left'] = wasmExports['openmpt_module_get_current_channel_vu_rear_left'];
+  _openmpt_module_get_current_channel_vu_rear_right = Module['_openmpt_module_get_current_channel_vu_rear_right'] = wasmExports['openmpt_module_get_current_channel_vu_rear_right'];
+  _openmpt_module_get_num_subsongs = Module['_openmpt_module_get_num_subsongs'] = wasmExports['openmpt_module_get_num_subsongs'];
+  _openmpt_module_get_num_channels = Module['_openmpt_module_get_num_channels'] = wasmExports['openmpt_module_get_num_channels'];
+  _openmpt_module_get_num_orders = Module['_openmpt_module_get_num_orders'] = wasmExports['openmpt_module_get_num_orders'];
+  _openmpt_module_get_num_patterns = Module['_openmpt_module_get_num_patterns'] = wasmExports['openmpt_module_get_num_patterns'];
+  _openmpt_module_get_num_instruments = Module['_openmpt_module_get_num_instruments'] = wasmExports['openmpt_module_get_num_instruments'];
+  _openmpt_module_get_num_samples = Module['_openmpt_module_get_num_samples'] = wasmExports['openmpt_module_get_num_samples'];
+  _openmpt_module_get_subsong_name = Module['_openmpt_module_get_subsong_name'] = wasmExports['openmpt_module_get_subsong_name'];
+  _openmpt_module_get_channel_name = Module['_openmpt_module_get_channel_name'] = wasmExports['openmpt_module_get_channel_name'];
+  _openmpt_module_get_order_name = Module['_openmpt_module_get_order_name'] = wasmExports['openmpt_module_get_order_name'];
+  _openmpt_module_get_pattern_name = Module['_openmpt_module_get_pattern_name'] = wasmExports['openmpt_module_get_pattern_name'];
+  _openmpt_module_get_instrument_name = Module['_openmpt_module_get_instrument_name'] = wasmExports['openmpt_module_get_instrument_name'];
+  _openmpt_module_get_sample_name = Module['_openmpt_module_get_sample_name'] = wasmExports['openmpt_module_get_sample_name'];
+  _openmpt_module_get_order_pattern = Module['_openmpt_module_get_order_pattern'] = wasmExports['openmpt_module_get_order_pattern'];
+  _openmpt_module_is_order_skip_entry = Module['_openmpt_module_is_order_skip_entry'] = wasmExports['openmpt_module_is_order_skip_entry'];
+  _openmpt_module_is_pattern_skip_item = Module['_openmpt_module_is_pattern_skip_item'] = wasmExports['openmpt_module_is_pattern_skip_item'];
+  _openmpt_module_is_order_stop_entry = Module['_openmpt_module_is_order_stop_entry'] = wasmExports['openmpt_module_is_order_stop_entry'];
+  _openmpt_module_is_pattern_stop_item = Module['_openmpt_module_is_pattern_stop_item'] = wasmExports['openmpt_module_is_pattern_stop_item'];
+  _openmpt_module_get_pattern_num_rows = Module['_openmpt_module_get_pattern_num_rows'] = wasmExports['openmpt_module_get_pattern_num_rows'];
+  _openmpt_module_get_pattern_rows_per_beat = Module['_openmpt_module_get_pattern_rows_per_beat'] = wasmExports['openmpt_module_get_pattern_rows_per_beat'];
+  _openmpt_module_get_pattern_rows_per_measure = Module['_openmpt_module_get_pattern_rows_per_measure'] = wasmExports['openmpt_module_get_pattern_rows_per_measure'];
+  _openmpt_module_get_pattern_row_channel_command = Module['_openmpt_module_get_pattern_row_channel_command'] = wasmExports['openmpt_module_get_pattern_row_channel_command'];
+  _openmpt_module_format_pattern_row_channel_command = Module['_openmpt_module_format_pattern_row_channel_command'] = wasmExports['openmpt_module_format_pattern_row_channel_command'];
+  _openmpt_module_highlight_pattern_row_channel_command = Module['_openmpt_module_highlight_pattern_row_channel_command'] = wasmExports['openmpt_module_highlight_pattern_row_channel_command'];
+  _openmpt_module_format_pattern_row_channel = Module['_openmpt_module_format_pattern_row_channel'] = wasmExports['openmpt_module_format_pattern_row_channel'];
+  _openmpt_module_highlight_pattern_row_channel = Module['_openmpt_module_highlight_pattern_row_channel'] = wasmExports['openmpt_module_highlight_pattern_row_channel'];
+  _openmpt_module_get_ctls = Module['_openmpt_module_get_ctls'] = wasmExports['openmpt_module_get_ctls'];
+  _openmpt_module_ctl_get = Module['_openmpt_module_ctl_get'] = wasmExports['openmpt_module_ctl_get'];
+  _openmpt_module_ctl_get_boolean = Module['_openmpt_module_ctl_get_boolean'] = wasmExports['openmpt_module_ctl_get_boolean'];
+  _openmpt_module_ctl_get_integer = Module['_openmpt_module_ctl_get_integer'] = wasmExports['openmpt_module_ctl_get_integer'];
+  _openmpt_module_ctl_get_floatingpoint = Module['_openmpt_module_ctl_get_floatingpoint'] = wasmExports['openmpt_module_ctl_get_floatingpoint'];
+  _openmpt_module_ctl_get_text = Module['_openmpt_module_ctl_get_text'] = wasmExports['openmpt_module_ctl_get_text'];
+  _openmpt_module_ctl_set = Module['_openmpt_module_ctl_set'] = wasmExports['openmpt_module_ctl_set'];
+  _openmpt_module_ctl_set_boolean = Module['_openmpt_module_ctl_set_boolean'] = wasmExports['openmpt_module_ctl_set_boolean'];
+  _openmpt_module_ctl_set_integer = Module['_openmpt_module_ctl_set_integer'] = wasmExports['openmpt_module_ctl_set_integer'];
+  _openmpt_module_ctl_set_floatingpoint = Module['_openmpt_module_ctl_set_floatingpoint'] = wasmExports['openmpt_module_ctl_set_floatingpoint'];
+  _openmpt_module_ctl_set_text = Module['_openmpt_module_ctl_set_text'] = wasmExports['openmpt_module_ctl_set_text'];
+  _openmpt_module_ext_create = Module['_openmpt_module_ext_create'] = wasmExports['openmpt_module_ext_create'];
+  _openmpt_module_ext_create_from_memory = Module['_openmpt_module_ext_create_from_memory'] = wasmExports['openmpt_module_ext_create_from_memory'];
+  _openmpt_module_ext_destroy = Module['_openmpt_module_ext_destroy'] = wasmExports['openmpt_module_ext_destroy'];
+  _openmpt_module_ext_get_module = Module['_openmpt_module_ext_get_module'] = wasmExports['openmpt_module_ext_get_module'];
+  _openmpt_module_ext_get_interface = Module['_openmpt_module_ext_get_interface'] = wasmExports['openmpt_module_ext_get_interface'];
   _setThrew = wasmExports['setThrew'];
   __emscripten_tempret_set = wasmExports['_emscripten_tempret_set'];
   __emscripten_stack_restore = wasmExports['_emscripten_stack_restore'];
@@ -4609,19 +4362,9 @@ var wasmImports = {
   /** @export */
   __resumeException: ___resumeException,
   /** @export */
-  __syscall_fcntl64: ___syscall_fcntl64,
-  /** @export */
-  __syscall_ioctl: ___syscall_ioctl,
-  /** @export */
   __syscall_openat: ___syscall_openat,
   /** @export */
-  __syscall_rmdir: ___syscall_rmdir,
-  /** @export */
-  __syscall_unlinkat: ___syscall_unlinkat,
-  /** @export */
   _abort_js: __abort_js,
-  /** @export */
-  _localtime_js: __localtime_js,
   /** @export */
   _tzset_js: __tzset_js,
   /** @export */

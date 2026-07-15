@@ -16,14 +16,19 @@ struct SongController: RouteCollection {
         }
     }
 
-    /// GET /api/songs — 歌曲列表（分页）
+    /// GET /api/songs — 歌曲列表（分页，支持 &format= 过滤）
     @Sendable
     func index(req: Request) async throws -> Page<SongResponse> {
-        let page = try await Song.query(on: req.db)
+        var query = Song.query(on: req.db)
             .with(\.$artist)
             .with(\.$album)
             .sort(\.$createdAt, .descending)
-            .paginate(for: req)
+
+        if let format = req.query[String.self, at: "format"], !format.isEmpty {
+            query = query.filter(\.$fileFormat == format.lowercased())
+        }
+
+        let page = try await query.paginate(for: req)
 
         let baseURL = baseURL(from: req)
         return .init(
@@ -39,13 +44,11 @@ struct SongController: RouteCollection {
             return []
         }
 
-        // 安全过滤：移除可能破坏 SQL 的特殊字符，保留字母、数字、空格和基本标点
         let safeQuery = rawQuery.replacingOccurrences(of: "'", with: "''")
             .trimmingCharacters(in: .whitespaces)
 
         guard !safeQuery.isEmpty else { return [] }
 
-        // 同时搜索歌曲标题和艺术家名称（使用 LOWER 兼容 PostgreSQL 和 SQLite）
         let songs = try await Song.query(on: req.db)
             .join(Artist.self, on: \Artist.$id == \Song.$artist.$id, method: .left)
             .filter(.sql(unsafeRaw: "LOWER(title) LIKE '%\(safeQuery.lowercased())%' OR LOWER(\"artists\".\"name\") LIKE '%\(safeQuery.lowercased())%'"))
@@ -53,7 +56,6 @@ struct SongController: RouteCollection {
             .all()
 
         let baseURL = baseURL(from: req)
-        // 预加载关联
         for song in songs {
             try await song.$artist.load(on: req.db)
             try await song.$album.load(on: req.db)
@@ -80,49 +82,62 @@ struct SongController: RouteCollection {
             throw Abort(.notFound)
         }
 
-        let fullPath = resolveFilePath(for: song, req: req)
-
-        // YM 文件：优先提供构建时解压的 raw YM6 版本
-        if let format = AudioFormat(rawValue: song.fileFormat), format == .ym {
-            let rawPath = resolveYmRawPath(for: song, req: req)
-            if FileManager.default.fileExists(atPath: rawPath) {
-                return try await req.fileio.asyncStreamFile(at: rawPath)
-            }
-        }
-
-        guard FileManager.default.fileExists(atPath: fullPath) else {
-            throw Abort(.notFound, reason: "Audio file not found on disk")
-        }
-
         guard let format = AudioFormat(rawValue: song.fileFormat) else {
             throw Abort(.badRequest, reason: "Unknown format: \(song.fileFormat)")
         }
 
+        let cas = req.application.casStorage
+
+        // YM 文件：原始 LHa 压缩，按需解压为 raw YM6
+        if format == .ym {
+            return try await streamYM(cas: cas, req: req, song: song)
+        }
+
+        let fullPath = cas.resolve(sha256: song.sha256, format: song.fileFormat)
+
+        guard FileManager.default.fileExists(atPath: fullPath) else {
+            throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
+        }
+
         let engine = AudioEngine()
-        let strategy = engine.resolveStreamStrategy(
-            filePath: fullPath,
-            format: format
-        )
+        let strategy = engine.resolveStreamStrategy(filePath: fullPath, format: format)
 
         switch strategy {
-        case .directFile(let path, _),
-             .wasmDecode(let path, _):
-            // YM 文件：优先提供构建时解压的 raw YM6 版本（保持 LHa 原始归档不变）
-            if format == .ym {
-                let rawPath = resolveYmRawPath(for: song, req: req)
-                if FileManager.default.fileExists(atPath: rawPath) {
-                    return try await req.fileio.asyncStreamFile(at: rawPath)
-                }
-            }
+        case .directFile(let path, let mime):
+            var res = try await req.fileio.asyncStreamFile(at: path)
+            res.headers.replaceOrAdd(name: .contentType, value: mime)
+            return res
+
+        case .wasmDecode(let path, _):
             return try await req.fileio.asyncStreamFile(at: path)
 
         case .serverDecode(let path, let fmt):
-            let wav = try await engine.decodeToWAV(filePath: path, format: fmt)
-            var headers = HTTPHeaders()
-            headers.add(name: "Content-Type", value: "audio/wav")
-            headers.add(name: "Content-Length", value: "\(wav.count)")
-            return Response(status: .ok, headers: headers, body: .init(data: wav))
+            // 尝试从转码缓存读取（避免重复 ffmpeg）
+            let cachePath = try await cachedDecode(originalPath: path, sha256: song.sha256, format: fmt, cas: req.application.casStorage)
+            var res = try await req.fileio.asyncStreamFile(at: cachePath)
+            res.headers.replaceOrAdd(name: .contentType, value: "audio/wav")
+            return res
         }
+    }
+
+    /// YM 文件：用 lhasa 解压 LHa 归档，返回 raw YM6 数据
+    private func streamYM(cas: CasStorageService, req: Request, song: Song) async throws -> Response {
+        let ymPath = cas.resolve(sha256: song.sha256, format: song.fileFormat)
+
+        guard FileManager.default.fileExists(atPath: ymPath) else {
+            throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
+        }
+
+        // lha x {path} -p 将解压内容以原始二进制输出到 stdout
+        let wavData = try await ProcessRunner.executeRaw(
+            "/opt/homebrew/opt/lhasa/bin/lha",
+            arguments: ["x", ymPath, "-p"]
+        )
+
+        var headers = HTTPHeaders()
+        headers.add(name: "Content-Type", value: "audio/ym")
+        headers.add(name: "Content-Length", value: "\(wavData.count)")
+        return Response(status: .ok, headers: headers, body: .init(data: wavData))
     }
 
     /// GET /api/songs/:id/raw — 原始文件下载
@@ -132,7 +147,9 @@ struct SongController: RouteCollection {
             throw Abort(.notFound)
         }
 
-        let fullPath = resolveFilePath(for: song, req: req)
+        let cas = req.application.casStorage
+        let fullPath = cas.resolve(sha256: song.sha256, format: song.fileFormat)
+
         guard FileManager.default.fileExists(atPath: fullPath) else {
             throw Abort(.notFound)
         }
@@ -142,45 +159,38 @@ struct SongController: RouteCollection {
 
     // MARK: - Helpers
 
-    /// 解析歌曲文件的完整磁盘路径
-    ///
-    /// 优先使用 MUSIC_PATH 环境变量（与扫描器一致），否则回退到 publicDirectory。
-    /// 修复：扫描器与流式端点路径不匹配的问题。
-    private func resolveFilePath(for song: Song, req: Request) -> String {
-        let musicPath = Environment.get("MUSIC_PATH")
-            ?? req.application.directory.publicDirectory
-        return (musicPath as NSString).appendingPathComponent(song.filePath)
+    /// 服务端解码，并将结果缓存到 CAS 缓存目录
+    /// 首次请求转码，后续直接读缓存文件，避免重复 ffmpeg
+    private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, cas: CasStorageService) async throws -> String {
+        let cacheDir = "\(cas.root)/.cache/wav/"
+        let cachePath = "\(cacheDir)\(sha256).wav"
+
+        let fm = FileManager.default
+        if fm.fileExists(atPath: cachePath) {
+            return cachePath
+        }
+
+        // 首次：ffmpeg 转码为 PCM WAV 并缓存
+        try queue.sync {
+            try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
+        }
+
+        let tmpPath = "/tmp/orz_server_decode_\(UUID().uuidString).wav"
+        defer { try? fm.removeItem(atPath: tmpPath) }
+
+        _ = try await ProcessRunner.execute(
+            arguments: ["ffmpeg", "-y", "-i", originalPath, "-f", "wav", "-acodec", "pcm_s16le", tmpPath]
+        )
+
+        try queue.sync {
+            try fm.copyItem(atPath: tmpPath, toPath: cachePath)
+        }
+        return cachePath
     }
+
+    private let queue = DispatchQueue(label: "com.orzplayer.cache")
 
     private func baseURL(from req: Request) -> String {
         "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
-    }
-
-    /// 构建时解压的 raw YM6 文件路径（保持原始 LHa 归档不变）
-    /// 尝试多个可能的 base 路径，并去除 Public/keygenmusic/ 前缀
-    private func resolveYmRawPath(for song: Song, req: Request) -> String {
-        let name = (song.filePath as NSString).lastPathComponent
-
-        // 去除 Public/keygenmusic/ 前缀（ym-raw 目录结构从 KEYGENMUSiC MusicPack/ 开始）
-        var relPath = song.filePath
-        let prefix = "Public/keygenmusic/"
-        if relPath.hasPrefix(prefix) {
-            relPath = String(relPath.dropFirst(prefix.count))
-        }
-
-        let candidates = [
-            req.application.directory.publicDirectory,
-            req.application.directory.resourcesDirectory + "Public/",
-        ]
-        for base in candidates {
-            let ymDir = base + "audio/ym-raw/"
-            // 尝试去除前缀后的路径
-            let full = ymDir + relPath
-            if FileManager.default.fileExists(atPath: full) { return full }
-            // 回退：只取文件名
-            let flat = ymDir + name
-            if FileManager.default.fileExists(atPath: flat) { return flat }
-        }
-        return candidates[0] + "audio/ym-raw/" + name
     }
 }

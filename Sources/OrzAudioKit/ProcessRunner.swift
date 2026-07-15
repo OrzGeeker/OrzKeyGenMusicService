@@ -73,4 +73,21 @@ public enum ProcessRunner {
         let result = try await run(process)
         return (result.stdoutString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// 异步运行一个进程并返回 stdout 原始字节（用于二进制输出，如解压数据）
+    /// - Parameters:
+    ///   - executable: 可执行文件路径
+    ///   - arguments: 参数列表
+    /// - Returns: stdout 的原始 Data
+    public static func executeRaw(
+        _ executable: String,
+        arguments: [String]
+    ) async throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let result = try await run(process)
+        return result.stdout
+    }
 }

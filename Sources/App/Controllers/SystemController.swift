@@ -292,7 +292,7 @@ struct SystemController: RouteCollection {
                 "/api/scan": [
                     "post": [
                         "summary": "Scan music library",
-                        "description": "Scans MUSIC_PATH (or Public directory) for new and removed audio files, upserts database records",
+                        "description": "Scans one or more source directories, imports files into CAS (content-addressed storage), creates Song records",
                         "responses": [
                             "200": ["description": "Scan result with counts"]
                         ]

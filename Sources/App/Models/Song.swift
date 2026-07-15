@@ -19,8 +19,8 @@ final class Song: Model, Content, @unchecked Sendable {
     @OptionalField(key: "track_number")
     var trackNumber: Int?
 
-    @Field(key: "file_path")
-    var filePath: String
+    @Field(key: "sha256")
+    var sha256: String
 
     @Field(key: "file_format")
     var fileFormat: String
@@ -34,9 +34,6 @@ final class Song: Model, Content, @unchecked Sendable {
     @OptionalField(key: "audio_fingerprint")
     var audioFingerprint: String?
 
-    @OptionalField(key: "sha256")
-    var sha256: String?
-
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 
@@ -45,11 +42,11 @@ final class Song: Model, Content, @unchecked Sendable {
 
     init() {}
 
-    init(id: UUID? = nil, title: String, filePath: String, fileFormat: String,
+    init(id: UUID? = nil, title: String, sha256: String, fileFormat: String,
          fileSize: Int, duration: Double? = nil) {
         self.id = id
         self.title = title
-        self.filePath = filePath
+        self.sha256 = sha256
         self.fileFormat = fileFormat
         self.fileSize = fileSize
         self.duration = duration

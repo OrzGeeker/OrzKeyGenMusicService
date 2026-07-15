@@ -3,149 +3,87 @@ import Vapor
 import Fluent
 import OrzAudioKit
 
-/// 音乐文件扫描服务
+/// 音乐文件扫描服务（CAS 版）
 ///
 /// 负责：
-/// 1. 递归扫描目录，识别所有支持的音频格式
-/// 2. 从文件路径和命名解析元数据（artist, title, trackType）
-/// 3. 两层去重（SHA-256 文件级、音频指纹内容级）
-/// 4. 数据库 upsert
-/// 5. 清理已删除文件
+/// 1. 扫描一个或多个源目录，识别所有支持的音频格式
+/// 2. 将文件导入 CAS（按 SHA-256 内容寻址存储）
+/// 3. SHA-256 去重
+/// 4. 创建 Song 记录（不含 file_path）
 public struct MusicScannerService {
 
     public struct ScanResult: Content {
         public let totalScanned: Int
-        public let artistsCreated: Int
         public let songsCreated: Int
-        public let songsUpdated: Int
         public let duplicatesSkipped: Int
-        public let filesRemoved: Int
         public let elapsed: String
 
-        public init(totalScanned: Int, artistsCreated: Int, songsCreated: Int,
-                    songsUpdated: Int, duplicatesSkipped: Int, filesRemoved: Int, elapsed: String) {
+        public init(totalScanned: Int, songsCreated: Int, duplicatesSkipped: Int, elapsed: String) {
             self.totalScanned = totalScanned
-            self.artistsCreated = artistsCreated
             self.songsCreated = songsCreated
-            self.songsUpdated = songsUpdated
             self.duplicatesSkipped = duplicatesSkipped
-            self.filesRemoved = filesRemoved
             self.elapsed = elapsed
         }
     }
 
-    private let basePath: String
+    private let sourcePaths: [String]
+    private let cas: CasStorageService
     private let db: any Database
     private let fileManager = FileManager.default
-    private let audioEngine = AudioEngine()
 
-    public init(basePath: String, db: any Database) {
-        self.basePath = basePath
+    public init(sourcePaths: [String], cas: CasStorageService, db: any Database) {
+        self.sourcePaths = sourcePaths
+        self.cas = cas
         self.db = db
     }
 
     /// 执行全量扫描
     public func scan() async throws -> ScanResult {
         let start = Date()
-
-        // 1. 收集所有音频文件
-        let audioFiles = collectAudioFiles()
-
-        // 2. 处理每个文件（去重 + upsert）
+        var totalScanned = 0
         var songsCreated = 0
-        var songsUpdated = 0
         var duplicatesSkipped = 0
 
-        for file in audioFiles {
-            // 计算 SHA-256（文件级去重）
-            let sha256 = try? await computeSHA256(filePath: file.fullPath)
-
-            // 检查 SHA-256 是否已存在
-            if let sha = sha256,
-               try await Song.query(on: db).filter("sha256", .equal, sha).first() != nil {
-                duplicatesSkipped += 1
-                continue
-            }
-
-            // 解析元数据
-            let info = parseMetadata(from: file)
-
-            // Upsert Artist
-            let artist = try await upsertArtist(name: info.artistName)
-
-            // 创建 Song
-            if let artist = artist {
-                let existingSong = try await Song.query(on: db)
-                    .filter("file_path", .equal, file.relativePath)
-                    .first()
-
-                if let existing = existingSong {
-                    existing.title = info.songTitle
-                    existing.fileSize = file.fileSize
-                    existing.$artist.id = artist.id
-                    existing.sha256 = sha256
-                    existing.duration = await extractDuration(filePath: file.fullPath)
-                    try await existing.update(on: db)
-                    songsUpdated += 1
-                } else {
-                    let song = Song(
-                        id: nil,
-                        title: info.songTitle,
-                        filePath: file.relativePath,
-                        fileFormat: file.fileFormat,
-                        fileSize: file.fileSize
-                    )
-                    song.$artist.id = artist.id
-                    song.sha256 = sha256
-                    song.duration = await extractDuration(filePath: file.fullPath)
-                    // 尝试生成音频指纹（fpcalc 不可用时静默跳过）
-                    if let fp = try? await generateFingerprint(filePath: file.fullPath) {
-                        song.audioFingerprint = fp
-                    }
-                    try await song.create(on: db)
-                    songsCreated += 1
-                }
-            }
+        for sourcePath in sourcePaths {
+            let result = try await scanSource(sourcePath: sourcePath)
+            totalScanned += result.scanned
+            songsCreated += result.created
+            duplicatesSkipped += result.skipped
         }
 
-        // 3. 清理已删除文件
-        let filesRemoved = try await cleanupRemovedFiles(activeFiles: Set(audioFiles.map { $0.relativePath }))
+        // 不再需要 cleanupRemovedFiles — CAS 模式下 DB 是 append-only 的元数据仓库，
+        // 源文件可以随时删除，不影响已有 Song 记录。
+        // 播放永远从 CAS 读取。
 
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(start))
 
         return ScanResult(
-            totalScanned: audioFiles.count,
-            artistsCreated: 0,
+            totalScanned: totalScanned,
             songsCreated: songsCreated,
-            songsUpdated: songsUpdated,
             duplicatesSkipped: duplicatesSkipped,
-            filesRemoved: filesRemoved,
             elapsed: elapsed
         )
     }
 
-    // MARK: - Internal
+    // MARK: - Source Scanner
 
-    struct AudioFileInfo {
-        let fullPath: String
-        let relativePath: String
-        let fileName: String
-        let fileFormat: String
-        let fileSize: Int
+    private struct SourceScanResult {
+        let scanned: Int
+        let created: Int
+        let skipped: Int
     }
 
-    struct ParsedMetadata {
-        let artistName: String
-        let songTitle: String
-        let trackType: String?
-    }
+    private func scanSource(sourcePath: String) async throws -> SourceScanResult {
+        var scanned = 0
+        var created = 0
+        var skipped = 0
 
-    func collectAudioFiles() -> [AudioFileInfo] {
-        var files: [AudioFileInfo] = []
-        guard let enumerator = fileManager.enumerator(atPath: basePath) else { return [] }
+        guard let enumerator = fileManager.enumerator(atPath: sourcePath) else {
+            return SourceScanResult(scanned: 0, created: 0, skipped: 0)
+        }
 
         while let relativePath = enumerator.nextObject() as? String {
-            let fullPath = (basePath as NSString).appendingPathComponent(relativePath)
+            let fullPath = (sourcePath as NSString).appendingPathComponent(relativePath)
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue else {
                 continue
@@ -154,28 +92,65 @@ public struct MusicScannerService {
             let ext = (relativePath as NSString).pathExtension.lowercased()
             guard AudioFormat.from(fileExtension: ext) != nil else { continue }
 
-            let attrs = try? fileManager.attributesOfItem(atPath: fullPath)
-            let fileSize = (attrs?[.size] as? Int) ?? 0
+            scanned += 1
 
-            files.append(AudioFileInfo(
-                fullPath: fullPath,
-                relativePath: relativePath,
-                fileName: (relativePath as NSString).lastPathComponent,
-                fileFormat: ext,
-                fileSize: fileSize
-            ))
+            do {
+                // 1. 导入 CAS（复制到内容寻址存储）
+                let (sha256, _, fileSize) = try await cas.store(sourcePath: fullPath)
+
+                // 2. SHA-256 去重
+                if try await Song.query(on: db).filter("sha256", .equal, sha256).first() != nil {
+                    skipped += 1
+                    continue
+                }
+
+                // 3. 解析元数据
+                let info = parseMetadata(relativePath: relativePath, fileName: (relativePath as NSString).lastPathComponent)
+
+                // 4. Upsert Artist
+                let artist = try await upsertArtist(name: info.artistName)
+
+                // 5. 创建 Song
+                let song = Song(
+                    title: info.songTitle,
+                    sha256: sha256,
+                    fileFormat: ext,
+                    fileSize: fileSize
+                )
+                song.$artist.id = artist?.id
+                song.duration = await extractDuration(filePath: fullPath)
+
+                // 尝试生成音频指纹（可选，静默跳过失败）
+                if let fp = try? await generateFingerprint(filePath: fullPath) {
+                    song.audioFingerprint = fp
+                }
+
+                try await song.create(on: db)
+                created += 1
+
+            } catch {
+                // 单个文件失败不影响扫描继续
+                continue
+            }
         }
 
-        return files
+        return SourceScanResult(scanned: scanned, created: created, skipped: skipped)
     }
 
-    func parseMetadata(from file: AudioFileInfo) -> ParsedMetadata {
-        let fileName = (file.fileName as NSString).deletingPathExtension
+    // MARK: - Metadata Parsing
+
+    struct ParsedMetadata {
+        let artistName: String
+        let songTitle: String
+        let trackType: String?
+    }
+
+    func parseMetadata(relativePath: String, fileName: String) -> ParsedMetadata {
+        let name = (fileName as NSString).deletingPathExtension
 
         // 获取父目录名作为 artist
-        let parentDir = ((file.relativePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        let parentDir = ((relativePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
 
-        // 如果父目录是 KEYGENMUSiC MusicPack 或 !Others，尝试从文件名解析
         let artistFromDir: String
         if parentDir == "KEYGENMUSiC MusicPack" || parentDir == "!Others" || parentDir == "." || parentDir.hasPrefix(".") {
             artistFromDir = "Unknown"
@@ -183,46 +158,43 @@ public struct MusicScannerService {
             artistFromDir = parentDir
         }
 
-        // 解析文件名：尝试 "{Artist} - {Title} {type}" 模式
-        var songTitle = fileName
+        var songTitle = name
         var trackType: String? = nil
         var artistName = artistFromDir
 
-        if let range = fileName.range(of: " - ") {
-            let prefix = String(fileName[..<range.lowerBound])
-            var suffix = String(fileName[range.upperBound...])
+        if let range = name.range(of: " - ") {
+            let prefix = String(name[..<range.lowerBound])
+            var suffix = String(name[range.upperBound...])
 
-            // 检查 suffix 是否以 artistName 开头（大多数文件如此）
             if prefix.count > 0 && prefix.count < 20 {
-                // 检查 prefix 是否可能是 artist 缩写
-                // 在 !Others 目录中，prefix 就是 artist
-                if artistFromDir == "Unknown" || !fileName.hasPrefix(artistFromDir) {
+                if artistFromDir == "Unknown" || !name.hasPrefix(artistFromDir) {
                     artistName = prefix
-                    suffix = String(fileName[range.upperBound...])
+                    suffix = String(name[range.upperBound...])
                 }
             }
 
             songTitle = suffix
         }
 
-        // 提取 track type
         let typeKeywords = ["intro", "kg", "crk", "trn", "trainer", "installer", "keygen", "activator", "launcher"]
         for keyword in typeKeywords {
             if let typeRange = songTitle.range(of: "\\b\(keyword)\\b", options: [.regularExpression, .caseInsensitive]) {
                 trackType = keyword
                 var cleanChars = CharacterSet.whitespacesAndNewlines
-cleanChars.formUnion(.punctuationCharacters)
-songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cleanChars)
+                cleanChars.formUnion(.punctuationCharacters)
+                songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cleanChars)
                 break
             }
         }
 
         return ParsedMetadata(
             artistName: artistName,
-            songTitle: songTitle.isEmpty ? fileName : songTitle,
+            songTitle: songTitle.isEmpty ? name : songTitle,
             trackType: trackType
         )
     }
+
+    // MARK: - Helpers
 
     func upsertArtist(name: String) async throws -> Artist? {
         if let existing = try await Artist.query(on: db).filter("name", .equal, name).first() {
@@ -233,15 +205,6 @@ songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cl
         return artist
     }
 
-    func computeSHA256(filePath: String) async throws -> String {
-        let result = try await ProcessRunner.execute(arguments: ["shasum", "-a", "256", filePath])
-        guard let hash = result.split(separator: " ").first else {
-            throw AudioError.decodeFailed("SHA-256 failed")
-        }
-        return String(hash)
-    }
-
-    /// 使用 ffprobe 提取音频时长（秒）
     func extractDuration(filePath: String) async -> Double? {
         do {
             let result = try await ProcessRunner.execute(arguments: [
@@ -257,23 +220,8 @@ songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cl
         }
     }
 
-    /// 尝试生成音频指纹（fpcalc 不可用时静默失败）
     func generateFingerprint(filePath: String) async throws -> String? {
         let fingerprinter = AudioFingerprinter()
         return try? await fingerprinter.generateFingerprintFromFile(filePath: filePath)
-    }
-
-    func cleanupRemovedFiles(activeFiles: Set<String>) async throws -> Int {
-        let dbSongs = try await Song.query(on: db).all()
-        var removed = 0
-
-        for song in dbSongs {
-            if !activeFiles.contains(song.filePath) {
-                try await song.delete(on: db)
-                removed += 1
-            }
-        }
-
-        return removed
     }
 }

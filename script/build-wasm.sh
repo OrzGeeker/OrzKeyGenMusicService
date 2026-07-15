@@ -15,8 +15,8 @@
 #   ./script/build-wasm.sh --clean            # Clean build artifacts
 #
 # Output:
-#   Resources/Public/audio/orz_audio.wasm     # WASM binary
-#   Resources/Public/audio/orz_audio.js       # JS glue code
+#   Resources/Public/audio/orz_audio.wasm      # WASM binary
+#   Resources/Public/audio/orz_audio.js        # JS glue code
 # ============================================================================
 
 set -euo pipefail
@@ -35,7 +35,20 @@ GME_URL="https://github.com/libgme/game-music-emu/archive/refs/tags/${GME_VERSIO
 
 # libsidplayfp — 用于 SID (Commodore 64) 格式
 SIDPLAYFP_VERSION="3.0.2"
-SIDPLAYFP_URL="https://github.com/libsidplayfp/libsidplayfp/releases/download/v${SIDPLAYFP_VERSION}/libsidplayfp-${SIDPLAYFP_VERSION}.tar.gz"
+
+# mpg123 — 用于 MO3 中 MP3 压缩采样的解码
+MPG123_VERSION="1.32.6"
+MPG123_URL="https://www.mpg123.de/download/mpg123-${MPG123_VERSION}.tar.bz2"
+
+# libogg / libvorbis — 用于 MO3 中 Ogg Vorbis 压缩采样的解码
+OGG_VERSION="1.3.5"
+OGG_URL="https://downloads.xiph.org/releases/ogg/libogg-${OGG_VERSION}.tar.gz"
+VORBIS_VERSION="1.3.7"
+VORBIS_URL="https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VERSION}.tar.gz"
+
+# uade — UAE Amiga 模拟器核心（AHX/FC14 等 Amiga 格式解码）
+UADE_VERSION="3.05"
+UADE_URL="https://gitlab.com/uade-music-player/uade/-/archive/uade-${UADE_VERSION}/uade-${UADE_VERSION}.tar.gz"
 
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 
@@ -66,8 +79,12 @@ done
 # Clean
 # ------------------------------------------------------------------
 if $CLEAN; then
-    log "Cleaning build directory..."
-    rm -rf "$BUILD_DIR"
+    log "Cleaning build directory (keeping cache)..."
+    # 保留 cache/ 避免重复下载，只删除编译产物
+    for item in "$BUILD_DIR"/*; do
+        [ "$item" = "$CACHE_DIR" ] && continue
+        rm -rf "$item"
+    done
     log "Done."
     exit 0
 fi
@@ -107,9 +124,9 @@ decompress_ym_files() {
     }
 
     # 从 keygenmusic/ 解压（保留子目录结构）
-    find "$PROJECT_DIR/Public/keygenmusic" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
+    find "$PROJECT_DIR/Resources/Public/keygenmusic" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
         if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
-            local relpath="${ymfile#$PROJECT_DIR/Public/keygenmusic/}"
+            local relpath="${ymfile#$PROJECT_DIR/Resources/Public/keygenmusic/}"
             decompress_one_ym "$ymfile" "$raw_dir/$relpath"
         fi
     done
@@ -189,6 +206,9 @@ download_source() {
 # Build libopenmpt (module player: .xm, .mod, .it, .s3m, etc.)
 # ------------------------------------------------------------------
 build_libopenmpt() {
+    local mpg123_prefix="$1"
+    local ogg_prefix="$2"
+    local vorbis_prefix="$3"
     log "Building libopenmpt ${LIBOPENMPT_VERSION}..."
 
     local src_dir
@@ -211,18 +231,58 @@ build_libopenmpt() {
     pushd "$build_dir" >/dev/null || err "Cannot enter build dir"
 
     # Configure with Emscripten (autotools, not CMake)
+    local mpg123_flag="--without-mpg123"
+    if [ -n "$mpg123_prefix" ] && [ -f "$mpg123_prefix/lib/libmpg123.a" ]; then
+        mpg123_flag="--with-mpg123=$mpg123_prefix"
+        log "mpg123 enabled: $mpg123_prefix"
+    fi
+
+    local ogg_flag="--without-ogg"
+    local vorbis_flag="--without-vorbis"
+    local vorbisfile_flag="--without-vorbisfile"
+    if [ -n "$ogg_prefix" ] && [ -f "$ogg_prefix/lib/libogg.a" ]; then
+        ogg_flag="--with-ogg=$ogg_prefix"
+        log "ogg enabled: $ogg_prefix"
+    fi
+    if [ -n "$vorbis_prefix" ] && [ -f "$vorbis_prefix/lib/libvorbis.a" ]; then
+        vorbis_flag="--with-vorbis=$vorbis_prefix"
+        log "vorbis enabled: $vorbis_prefix"
+    fi
+    if [ -n "$vorbis_prefix" ] && [ -f "$vorbis_prefix/lib/libvorbisfile.a" ]; then
+        vorbisfile_flag="--with-vorbisfile=$vorbis_prefix"
+    fi
+
     log "Configuring libopenmpt with Emscripten..."
-    emconfigure "$src_dir/configure" \
+
+    # 设置 PKG_CONFIG_PATH 让 configure 能找到 mpg123/ogg/vorbis
+    local pkg_config_path=""
+    [ -d "$BUILD_DIR/mpg123/install/lib/pkgconfig" ] && \
+        pkg_config_path="$BUILD_DIR/mpg123/install/lib/pkgconfig"
+    [ -d "$BUILD_DIR/ogg/install/lib/pkgconfig" ] && \
+        pkg_config_path="${pkg_config_path:+$pkg_config_path:}$BUILD_DIR/ogg/install/lib/pkgconfig"
+    [ -d "$BUILD_DIR/vorbis/install/lib/pkgconfig" ] && \
+        pkg_config_path="${pkg_config_path:+$pkg_config_path:}$BUILD_DIR/vorbis/install/lib/pkgconfig"
+
+    # emconfigure 会清理 PKG_CONFIG_PATH，直接手动设置编译环境
+    local pkg_conf_path=""
+    for dir in "$BUILD_DIR/mpg123/install" "$BUILD_DIR/ogg/install" "$BUILD_DIR/vorbis/install"; do
+        if [ -d "$dir/lib/pkgconfig" ]; then
+            pkg_conf_path="${pkg_conf_path:+$pkg_conf_path:}$dir/lib/pkgconfig"
+        fi
+    done
+
+    CC=emcc CXX=em++ PKG_CONFIG_PATH="$pkg_conf_path" \
+    "$src_dir/configure" \
         --host=wasm32-unknown-emscripten \
         --disable-shared \
         --enable-static \
         --disable-examples \
         --disable-tests \
         --disable-openmpt123 \
-        --without-mpg123 \
-        --without-ogg \
-        --without-vorbis \
-        --without-vorbisfile \
+        $mpg123_flag \
+        $ogg_flag \
+        $vorbis_flag \
+        $vorbisfile_flag \
         --without-portaudio \
         --without-sdl2 \
         --without-flac \
@@ -447,6 +507,249 @@ build_libsidplayfp() {
 }
 
 # ------------------------------------------------------------------
+# Build mpg123 (MO3 MP3-compressed sample decoder)
+# ------------------------------------------------------------------
+build_mpg123() {
+    log "Building mpg123 ${MPG123_VERSION}..."
+
+    local src_dir
+    src_dir=$(download_source "$MPG123_URL" "mpg123" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/configure" ]; then
+        warn "mpg123 source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/mpg123"
+    local prefix="$build_dir/install"
+    mkdir -p "$build_dir"
+
+    pushd "$build_dir" >/dev/null || err "Cannot enter build dir"
+
+    emconfigure "$src_dir/configure" \
+        --host=wasm32-unknown-emscripten \
+        --disable-shared \
+        --enable-static \
+        --enable-libmpg123 \
+        --disable-programs \
+        --disable-examples \
+        --disable-modules \
+        --with-cpu=generic \
+        --enable-int-quality=no \
+        --prefix="$prefix" 2>&1 | tail -5
+
+    log "Building mpg123..."
+    emmake make -j"$JOBS" install 2>&1 | tail -5
+
+    local lib="$prefix/lib/libmpg123.a"
+    if [ -f "$lib" ]; then
+        log "mpg123 built: $(wc -c < "$lib") bytes"
+        echo "$prefix"
+    else
+        warn "mpg123 build failed, MO3 compressed samples may not load"
+        echo ""
+    fi
+
+    popd >/dev/null || true
+}
+
+# ------------------------------------------------------------------
+# Build libogg (Ogg container, required by libvorbis)
+# ------------------------------------------------------------------
+build_ogg() {
+    log "Building libogg ${OGG_VERSION}..."
+
+    local src_dir
+    src_dir=$(download_source "$OGG_URL" "ogg" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/configure" ]; then
+        warn "libogg source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/ogg"
+    local prefix="$build_dir/install"
+    mkdir -p "$build_dir"
+
+    pushd "$build_dir" >/dev/null || err "Cannot enter build dir"
+
+    # 旧版 config.sub 不认识 emscripten host triple，用更通用的
+    local host_triple="wasm32"
+    if grep -q "emscripten" "$src_dir/config.sub" 2>/dev/null; then
+        host_triple="wasm32-unknown-emscripten"
+    fi
+
+    emconfigure "$src_dir/configure" \
+        --host="$host_triple" \
+        --disable-shared --enable-static \
+        --prefix="$prefix" 2>&1 | tail -5
+
+    emmake make -j"$JOBS" install 2>&1 | tail -5
+
+    local lib="$prefix/lib/libogg.a"
+    if [ -f "$lib" ]; then
+        log "libogg built: $(wc -c < "$lib") bytes"
+        echo "$prefix"
+    else
+        warn "libogg build failed"
+        echo ""
+    fi
+
+    popd >/dev/null || true
+}
+
+# ------------------------------------------------------------------
+# Build libvorbis (Vorbis audio codec, for MO3 compressed samples)
+# ------------------------------------------------------------------
+build_vorbis() {
+    local ogg_prefix="$1"
+    log "Building libvorbis ${VORBIS_VERSION}..."
+
+    local src_dir
+    src_dir=$(download_source "$VORBIS_URL" "vorbis" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -f "$src_dir/configure" ]; then
+        warn "libvorbis source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/vorbis"
+    local prefix="$build_dir/install"
+    mkdir -p "$build_dir"
+
+    pushd "$build_dir" >/dev/null || err "Cannot enter build dir"
+
+    local host_triple="wasm32"
+    if grep -q "emscripten" "$src_dir/config.sub" 2>/dev/null; then
+        host_triple="wasm32-unknown-emscripten"
+    fi
+
+    PKG_CONFIG_PATH="$ogg_prefix/lib/pkgconfig" \
+    emconfigure "$src_dir/configure" \
+        --host="$host_triple" \
+        --disable-shared --enable-static \
+        --with-ogg="$ogg_prefix" \
+        --prefix="$prefix" 2>&1 | tail -5
+
+    emmake make -j"$JOBS" install 2>&1 | tail -5
+
+    local lib="$prefix/lib/libvorbis.a"
+    local libfile="$prefix/lib/libvorbisfile.a"
+    if [ -f "$lib" ] && [ -f "$libfile" ]; then
+        log "libvorbis built: $(wc -c < "$lib") + $(wc -c < "$libfile") bytes"
+        echo "$prefix"
+    else
+        warn "libvorbis build failed"
+        echo ""
+    fi
+
+    popd >/dev/null || true
+}
+
+# ------------------------------------------------------------------
+# Setup uade source (UAE Amiga emulator core for AHX/FC14)
+# ------------------------------------------------------------------
+setup_uade_source() {
+    local src_dir
+    src_dir=$(download_source "$UADE_URL" "uade-${UADE_VERSION}" 2>/dev/null || echo "")
+
+    if [ -z "$src_dir" ] || [ ! -d "$src_dir" ]; then
+        warn "uade source not available"
+        return 1
+    fi
+
+    local uade_dst="$BUILD_DIR/src/uade"
+    if [ -f "$uade_dst/newcpu.c" ]; then
+        log "uade source already set up at $uade_dst"
+        return 0
+    fi
+
+    log "Setting up uade source from $src_dir..."
+    mkdir -p "$uade_dst"
+
+    # uade 3.x 源文件在 src/ 子目录下
+    local uade_src="$src_dir/src"
+    if [ ! -d "$uade_src" ]; then
+        warn "uade source src/ directory not found"
+        return 1
+    fi
+
+    # 复制 UAE 核心源文件
+    for f in newcpu.c memory.c custom.c cia.c audio.c missing.c \
+             readcpu.c sinctable.c sd-sound-generic.c; do
+        cp "$uade_src/$f" "$uade_dst/" 2>/dev/null || true
+    done
+    # machdep/support.c
+    mkdir -p "$uade_dst/machdep"
+    cp "$uade_src/machdep/support.c" "$uade_dst/machdep/" 2>/dev/null || true
+
+    # ── 生成 CPU 表文件 ──
+    # 编译 build68k（主机编译器，非 emscripten）
+    local build68k_bin="$BUILD_DIR/build68k"
+    if [ ! -f "$build68k_bin" ]; then
+        log "Compiling build68k generator (host compiler)..."
+        local b68k_inc="-I$uade_src -I$uade_src/include"
+        gcc -o "$build68k_bin" "$uade_src/build68k.c" $b68k_inc -lm 2>&1 || \
+            clang -o "$build68k_bin" "$uade_src/build68k.c" $b68k_inc -lm 2>&1 || \
+            warn "Cannot compile build68k, CPU table files may be missing"
+    fi
+
+    if [ -x "$build68k_bin" ]; then
+        log "Generating CPU table files..."
+        # build68k 输出 cpustbl.c cpudefs.c cpuemu.c 到当前目录
+        (cd "$uade_dst" && "$build68k_bin" 2>/dev/null) || warn "build68k generation failed"
+    fi
+
+    # 复制 uade 头文件
+    local inc_src="$uade_src/include"
+    if [ -d "$inc_src" ]; then
+        mkdir -p "$uade_dst/include"
+        cp -r "$inc_src"/* "$uade_dst/include/" 2>/dev/null || true
+    fi
+    # 复制 frontends/include
+    local frontend_inc=$(find "$src_dir" -type d -name "include" -path "*/frontends/include" 2>/dev/null | head -1)
+    if [ -n "$frontend_inc" ]; then
+        mkdir -p "$uade_dst/frontends"
+        cp -r "$frontend_inc" "$uade_dst/frontends/" 2>/dev/null || true
+    fi
+    # 复制 frontends/common
+    local common_src=$(find "$src_dir" -type d -name "common" -path "*/frontends/common" 2>/dev/null | head -1)
+    if [ -n "$common_src" ]; then
+        mkdir -p "$uade_dst/frontends"
+        cp -r "$common_src" "$uade_dst/frontends/" 2>/dev/null || true
+    fi
+
+    # 生成 sysconfig.h（如果不存在）
+    if [ ! -f "$uade_dst/sysconfig.h" ]; then
+        cat > "$uade_dst/sysconfig.h" << 'SYSCONFIG'
+#ifndef SYSCONFIG_H
+#define SYSCONFIG_H
+#define HAVE_STDLIB_H 1
+#define HAVE_STRING_H 1
+#define HAVE_MEMSET 1
+#define WORDS_BIGENDIAN 0
+#endif
+SYSCONFIG
+    fi
+
+    # 检查关键文件
+    if [ -f "$uade_dst/newcpu.c" ]; then
+        local c_count=$(find "$uade_dst" -maxdepth 1 -name '*.c' | wc -l)
+        log "uade source ready: $c_count source files"
+        find "$uade_dst" -maxdepth 1 -name '*.c' -o -name '*.h' | sort | while read -r f; do
+            log "  $(basename "$f")"
+        done
+        return 0
+    else
+        warn "uade source setup failed - newcpu.c not found"
+        return 1
+    fi
+}
+
+# ------------------------------------------------------------------
 # Generate WASM wrapper
 # ------------------------------------------------------------------
 generate_wrapper() {
@@ -471,41 +774,59 @@ generate_wrapper() {
     local ORZ_SRC="$PROJECT_DIR/Sources/OrzAudioKit"
     source_files=(
         "$ORZ_SRC/orz_dispatch.c"
-        "$ORZ_SRC/openmpt_impl.c"
-        "$ORZ_SRC/gme_impl.c"
-        "$ORZ_SRC/asap_impl.c"
         "$ORZ_SRC/audio_engine.c"
         "$ORZ_SRC/cxx_helpers.cpp"
-        # adplug (AdLib OPL2/3)
-        "$ORZ_SRC/adplug_impl.c"
-        "$ORZ_SRC/adplug_wrap.cpp"
-        # sc68 (Atari ST YM / Amiga)
-        "$ORZ_SRC/sc68_impl.c"
-        # ym6 (Atari ST YM2149 raw frames)
+        "$ORZ_SRC/openmpt_impl.c"
+        "$ORZ_SRC/gme_impl.c"
         "$ORZ_SRC/ym6_impl.c"
-        # v2m-player (V2M format)
-        "$ORZ_SRC/v2m_wasm.cpp"
-        "$ORZ_SRC/v2mplayer_wasm.cpp"
-        # uade (Amiga: ahx, amd)
-        "$ORZ_SRC/uade_wasm.c"
-        # ── UAE Amiga emulator core ──
-        "$BUILD_DIR/src/uade/newcpu.c"
-        "$BUILD_DIR/src/uade/memory.c"
-        "$BUILD_DIR/src/uade/custom.c"
-        "$BUILD_DIR/src/uade/cia.c"
-        "$BUILD_DIR/src/uade/audio.c"
-        "$BUILD_DIR/src/uade/missing.c"
-        "$BUILD_DIR/src/uade/cpustbl.c"
-        "$BUILD_DIR/src/uade/readcpu.c"
-        "$BUILD_DIR/src/uade/cpudefs.c"
-        "$BUILD_DIR/src/uade/cpuemu.c"
-        "$BUILD_DIR/src/uade/sinctable.c"
-        "$BUILD_DIR/src/uade/sd-sound-generic.c"
-        # uade_logging.c skipped — stubs provided in uade_wasm.c (libzakalwe dep)
-        "$BUILD_DIR/src/uade/machdep/support.c"
+        "$ORZ_SRC/stub_decoders.c"
     )
 
-    # v2m synth_core.cpp（在 v2m 源码目录中）
+    # ── 条件编译其他解码器（仅在其依赖库可用时加入）──
+
+    # ASAP (sap) — 需要 libasap_wasm.a
+    if [ -f "$BUILD_DIR/libasap_wasm.a" ]; then
+        source_files+=("$ORZ_SRC/asap_impl.c")
+    fi
+
+    # adplug (rad, d00, hsc) — 需要 libadplug + libbinio
+    if [ -d "$BUILD_DIR/src/adplug/src" ] && [ -f "$BUILD_DIR/adplug/src/libadplug.a" ]; then
+        source_files+=("$ORZ_SRC/adplug_impl.c" "$ORZ_SRC/adplug_wrap.cpp")
+    fi
+
+    # sc68 (sc68, ym) — 需要 sc68 源码
+    if [ -d "$BUILD_DIR/src/sc68" ] && [ -f "$BUILD_DIR/src/sc68/api68/api68.h" ]; then
+        source_files+=("$ORZ_SRC/sc68_impl.c")
+    fi
+
+    # v2m-player (V2M format) — 需要 v2m 源码
+    if [ -d "$BUILD_DIR/src/v2m" ]; then
+        source_files+=("$ORZ_SRC/v2m_wasm.cpp" "$ORZ_SRC/v2mplayer_wasm.cpp")
+        local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
+        [ -f "$v2m_synth_core" ] && source_files+=("$v2m_synth_core")
+    fi
+
+    # uade (AHX, FC14) — 需要 UAE Amiga 模拟器核心
+
+    # ── UAE Amiga emulator core（文件不存在时跳过）──
+    local uade_core_files=(
+        newcpu.c memory.c custom.c cia.c audio.c missing.c
+        cpustbl.c readcpu.c cpudefs.c cpuemu.c sinctable.c
+        sd-sound-generic.c machdep/support.c
+    )
+    local uade_dir="$BUILD_DIR/src/uade"
+    if [ -d "$uade_dir" ] && [ -f "$uade_dir/newcpu.c" ] && [ -f "$uade_dir/cpustbl.c" ]; then
+        source_files+=("$ORZ_SRC/uade_wasm.c")
+        for f in "${uade_core_files[@]}"; do
+            [ -f "$uade_dir/$f" ] && source_files+=("$uade_dir/$f")
+        done
+        inc_dirs+=("$uade_dir")
+        [ -d "$uade_dir/include" ] && inc_dirs+=("$uade_dir/include")
+        [ -d "$uade_dir/frontends/include" ] && inc_dirs+=("$uade_dir/frontends/include")
+        [ -d "$uade_dir/frontends/common" ] && inc_dirs+=("$uade_dir/frontends/common")
+    else
+        log "UAE core not available, uade formats (AHX/FC14) disabled"
+    fi
     local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
     if [ -f "$v2m_synth_core" ]; then
         source_files+=("$v2m_synth_core")
@@ -581,6 +902,18 @@ generate_wrapper() {
             inc_dirs+=("$openmpt_inc")
         fi
     fi
+
+    # mpg123 (MO3 MP3 压缩采样解码)
+    local mpg123_lib="$BUILD_DIR/mpg123/install/lib/libmpg123.a"
+    if [ -f "$mpg123_lib" ]; then libs+=("$mpg123_lib"); fi
+
+    # Ogg/Vorbis (MO3 压缩采样解码，通过 libopenmpt 调用)
+    local ogg_lib="$BUILD_DIR/ogg/install/lib/libogg.a"
+    local vorbis_lib="$BUILD_DIR/vorbis/install/lib/libvorbis.a"
+    local vorbisfile_lib="$BUILD_DIR/vorbis/install/lib/libvorbisfile.a"
+    if [ -f "$ogg_lib" ]; then libs+=("$ogg_lib"); fi
+    if [ -f "$vorbisfile_lib" ]; then libs+=("$vorbisfile_lib"); fi
+    if [ -f "$vorbis_lib" ]; then libs+=("$vorbis_lib"); fi
 
     # Game Music Emu
     if [ -n "$gme_lib" ]; then
@@ -717,6 +1050,39 @@ main() {
     # Decompress LHa YM archives to raw YM6
     decompress_ym_files
 
+    # ── mpg123 (MO3 MP3 压缩采样解码) ──
+    local mpg123_prefix=""
+    local mpg123_lib=$(find "$BUILD_DIR/mpg123/install" -name "libmpg123.a" 2>/dev/null | head -1)
+    if [ -n "$mpg123_lib" ]; then
+        mpg123_prefix="$(dirname "$(dirname "$mpg123_lib")")"
+        log "Using cached mpg123: $mpg123_lib"
+    else
+        log "mpg123 not cached, building from source..."
+        mpg123_prefix=$(build_mpg123)
+    fi
+
+    # ── libogg (MO3 Ogg Vorbis 压缩采样解码) ──
+    local ogg_prefix=""
+    local ogg_lib=$(find "$BUILD_DIR/ogg/install" -name "libogg.a" 2>/dev/null | head -1)
+    if [ -n "$ogg_lib" ]; then
+        ogg_prefix="$(dirname "$(dirname "$ogg_lib")")"
+        log "Using cached libogg: $ogg_lib"
+    else
+        log "libogg not cached, building from source..."
+        ogg_prefix=$(build_ogg)
+    fi
+
+    # ── libvorbis (MO3 Ogg Vorbis 压缩采样解码) ──
+    local vorbis_prefix=""
+    local vorbis_lib=$(find "$BUILD_DIR/vorbis/install" -name "libvorbis.a" 2>/dev/null | head -1)
+    if [ -n "$vorbis_lib" ]; then
+        vorbis_prefix="$(dirname "$(dirname "$vorbis_lib")")"
+        log "Using cached libvorbis: $vorbis_lib"
+    else
+        log "libvorbis not cached, building from source..."
+        vorbis_prefix=$(build_vorbis "$ogg_prefix")
+    fi
+
     # ── libopenmpt ──
     local libopenmpt_dir=""
     local libopenmpt_a=""
@@ -729,7 +1095,6 @@ main() {
         if [ -f "$f" ]; then
             libopenmpt_a="$f"
             libopenmpt_dir="$(dirname "$f")"
-            # 如果 .libs 下找到，目录同级
             if [[ "$f" == *"/.libs/"* ]]; then
                 libopenmpt_dir="$(dirname "$(dirname "$f")")"
             elif [[ "$f" == */install/lib/* ]]; then
@@ -740,7 +1105,7 @@ main() {
     done
     if [ -z "$libopenmpt_a" ]; then
         log "libopenmpt .a not cached, building from source..."
-        libopenmpt_dir=$(build_libopenmpt)
+        libopenmpt_dir=$(build_libopenmpt "$mpg123_prefix" "$ogg_prefix" "$vorbis_prefix")
         if [ -z "$libopenmpt_dir" ] || [ ! -f "$libopenmpt_dir/.libs/libopenmpt.a" -a ! -f "$libopenmpt_dir/libopenmpt.a" ]; then
             warn "libopenmpt build failed, stub only"
             libopenmpt_dir=""
@@ -804,6 +1169,17 @@ main() {
     fi
     if [ -z "$sidplayfp_result" ]; then
         warn "libsidplayfp build failed, SID format will not be available"
+    fi
+
+    # ── uade (UAE Amiga emulator for AHX/FC14) ──
+    if [ ! -f "$BUILD_DIR/src/uade/newcpu.c" ]; then
+        log "Attempting to set up uade source..."
+        setup_uade_source || true
+    else
+        log "uade source already present"
+    fi
+    if [ ! -f "$BUILD_DIR/src/uade/cpustbl.c" ]; then
+        log "UAE CPU tables not found, uade formats will be disabled"
     fi
 
     generate_wrapper "$libopenmpt_dir" "$gme_result" "$sidplayfp_result"

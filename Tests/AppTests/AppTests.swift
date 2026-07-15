@@ -22,6 +22,9 @@ final class AppTests: XCTestCase {
         // Register routes (without static file middleware)
         try routes(app)
 
+        // Configure CAS storage for test
+        app.casStorage = CasStorageService(root: NSTemporaryDirectory() + "cas-test-\(UUID().uuidString)")
+
         // Run migrations
         try app.autoMigrate().wait()
 
@@ -291,7 +294,7 @@ final class AppTests: XCTestCase {
         let artist = Artist(name: "Artist")
         try artist.create(on: app.db).wait()
 
-        let song = Song(title: "Test Song", filePath: "/test.mp3", fileFormat: "mp3", fileSize: 1234)
+        let song = Song(title: "Test Song", sha256: "abcdef1234567890abcdef1234567890abcdef12", fileFormat: "mp3", fileSize: 1234)
         song.$artist.id = artist.id!
         try song.create(on: app.db).wait()
 
@@ -316,11 +319,11 @@ final class AppTests: XCTestCase {
         let artist = Artist(name: "Test Band")
         try artist.create(on: app.db).wait()
 
-        let song1 = Song(title: "Rock Anthem", filePath: "/rock.mp3", fileFormat: "mp3", fileSize: 100)
+        let song1 = Song(title: "Rock Anthem", sha256: "aaaabbbbccccddddeeeeffff0000111122223333", fileFormat: "mp3", fileSize: 100)
         song1.$artist.id = artist.id!
         try song1.create(on: app.db).wait()
 
-        let song2 = Song(title: "Jazz Vibes", filePath: "/jazz.mp3", fileFormat: "mp3", fileSize: 200)
+        let song2 = Song(title: "Jazz Vibes", sha256: "bbbbccccddddeeeeffff00001111222233334444", fileFormat: "mp3", fileSize: 200)
         song2.$artist.id = artist.id!
         try song2.create(on: app.db).wait()
 
@@ -369,11 +372,11 @@ final class AppTests: XCTestCase {
         let artist = Artist(name: "Artist")
         try artist.create(on: app.db).wait()
 
-        let song1 = Song(title: "S1", filePath: "/1.mp3", fileFormat: "mp3", fileSize: 100)
+        let song1 = Song(title: "S1", sha256: "1111222233334444555566667777888899990000", fileFormat: "mp3", fileSize: 100)
         song1.$artist.id = artist.id!
         try song1.create(on: app.db).wait()
 
-        let song2 = Song(title: "S2", filePath: "/2.mp3", fileFormat: "mp3", fileSize: 200)
+        let song2 = Song(title: "S2", sha256: "2222333344445555666677778888999900001111", fileFormat: "mp3", fileSize: 200)
         song2.$artist.id = artist.id!
         try song2.create(on: app.db).wait()
 
@@ -460,11 +463,11 @@ final class AppTests: XCTestCase {
         let artist = Artist(name: "Detail Artist")
         try artist.create(on: app.db).wait()
 
-        let song1 = Song(title: "S1", filePath: "/1.mp3", fileFormat: "mp3", fileSize: 100)
+        let song1 = Song(title: "S1", sha256: "33334444555566667777888899990000aaaa1111", fileFormat: "mp3", fileSize: 100)
         song1.$artist.id = artist.id!
         try song1.create(on: app.db).wait()
 
-        let song2 = Song(title: "S2", filePath: "/2.mp3", fileFormat: "mp3", fileSize: 200)
+        let song2 = Song(title: "S2", sha256: "4444555566667777888899990000aaaa1111bbbb", fileFormat: "mp3", fileSize: 200)
         song2.$artist.id = artist.id!
         try song2.create(on: app.db).wait()
 
@@ -491,7 +494,7 @@ final class AppTests: XCTestCase {
         let artist = Artist(name: "A")
         try artist.create(on: app.db).wait()
 
-        let song = Song(title: "Delete Me", filePath: "/del.mp3", fileFormat: "mp3", fileSize: 100)
+        let song = Song(title: "Delete Me", sha256: "555566667777888899990000aaaa1111bbbb2222", fileFormat: "mp3", fileSize: 100)
         song.$artist.id = artist.id!
         try song.create(on: app.db).wait()
 
@@ -525,7 +528,7 @@ final class AppTests: XCTestCase {
         try artist.create(on: app.db).wait()
 
         let songs = (1...3).map { i in
-            let s = Song(title: "S\(i)", filePath: "/\(i).mp3", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(title: "S\(i)", sha256: "song-hash-\(String(format: "%040x", i))", fileFormat: "mp3", fileSize: i * 100)
             s.$artist.id = artist.id!
             try! s.create(on: app.db).wait()
             return s

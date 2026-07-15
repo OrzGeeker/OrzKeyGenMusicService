@@ -214,12 +214,32 @@
                    x-model="searchQuery" @input.debounce="search" @keydown.escape="searchQuery='';search()">
             <select class="filter-select" x-model="formatFilter" @change="loadSongs()">
                 <option value="">所有格式</option>
-                <option value="xm">XM</option>
-                <option value="mod">MOD</option>
-                <option value="it">IT</option>
-                <option value="s3m">S3M</option>
+                <option value="xm">XM (模块)</option>
+                <option value="mod">MOD (模块)</option>
+                <option value="it">IT (模块)</option>
+                <option value="s3m">S3M (模块)</option>
+                <option value="mo3">MO3 (模块)</option>
+                <option value="mtm">MTM (模块)</option>
                 <option value="mp3">MP3</option>
                 <option value="ogg">OGG</option>
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+                <option value="mid">MIDI</option>
+                <option value="ahx">AHX (Amiga)</option>
+                <option value="amd">AMD (Amiga)</option>
+                <option value="fc13">FC13 (Amiga)</option>
+                <option value="fc14">FC14 (Amiga)</option>
+                <option value="sid">SID (C64)</option>
+                <option value="nsf">NSF (NES)</option>
+                <option value="spc">SPC (SNES)</option>
+                <option value="sc68">SC68 (Atari ST)</option>
+                <option value="hsc">HSC (Atari ST)</option>
+                <option value="ym">YM (Atari ST)</option>
+                <option value="sap">SAP (Atari POKEY)</option>
+                <option value="rad">RAD (AdLib)</option>
+                <option value="d00">D00 (AdLib)</option>
+                <option value="v2m">V2M</option>
+                <option value="bp">BP</option>
             </select>
             <button class="queue-btn" @click="playlistOpen = !playlistOpen" title="播放队列">
                 &#9776;
@@ -229,7 +249,7 @@
     </div>
 
     <!-- Song List -->
-    <div class="song-list" id="songList" @scroll="onScroll">
+    <div class="song-list" id="songList">
         <template x-for="song in songs" :key="song.id">
             <div class="song-item" :class="{ active: currentSong?.id === song.id }"
                  @dblclick="playSong(song)">
@@ -343,6 +363,8 @@
                 }
                 await this.loadSongs();
                 await this.loadPlaylists();
+                // 原生 JS 监听窗口滚动，触发加载更多
+                window.addEventListener('scroll', () => this.onScroll(), { passive: true });
             },
 
             get timeDisplay() {
@@ -363,7 +385,8 @@
                     const res = await fetch(url);
                     const data = await res.json();
                     this.songs = data.items || [];
-                    this.hasMore = data.metadata?.page < data.metadata?.totalPages;
+                    const { page, per, total } = data.metadata || {};
+                    this.hasMore = (page * per) < total;
                 } catch (e) { console.error(e); }
                 this.isLoading = false;
             },
@@ -378,14 +401,17 @@
                     const res = await fetch(url);
                     const data = await res.json();
                     this.songs = [...this.songs, ...(data.items || [])];
-                    this.hasMore = data.metadata?.page < data.metadata?.totalPages;
+                    const { page, per, total } = data.metadata || {};
+                    this.hasMore = (page * per) < total;
                 } catch (e) { console.error(e); }
                 this.isLoading = false;
             },
 
-            onScroll(e) {
-                const el = e.target;
-                if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+            onScroll() {
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = window.innerHeight;
+                if (scrollHeight - scrollTop - clientHeight < 200) {
                     this.loadMore();
                 }
             },
