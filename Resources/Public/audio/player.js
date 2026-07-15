@@ -55,7 +55,7 @@ class OrzAudioPlayer {
                 if (typeof OrzAudioKit === 'undefined') {
                     // 动态加载
                     const script = document.createElement('script');
-                    script.src = '/audio/orz_audio.js';
+                    script.src = '/audio/orz_audio.js?v=' + Date.now();
                     await new Promise((resolve, reject) => {
                         script.onload = resolve;
                         script.onerror = reject;

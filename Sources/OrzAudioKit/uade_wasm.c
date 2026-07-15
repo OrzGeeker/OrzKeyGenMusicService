@@ -43,7 +43,8 @@
 
 /* ── Embedded binary data ── */
 #include "score_data.h"
-#include "ahx_player_data.h"
+#include "ahx_player_data.h"   /* AbyssHighestExperience — .ahx/.thx */
+/* Note: AMD (.amd) files don't match any uade player — format unsupported */
 
 /* ══════════════════════════════════════════════════════════════════
    UAE Core Global Variables (normally in uademain.c / uade.c)
@@ -325,11 +326,18 @@ static int init_uae_core(void)
    Load song into Amiga memory (replaces uadecore_reset minus IPC)
    ══════════════════════════════════════════════════════════════════ */
 
-static int load_song(const unsigned char *module_data, int module_len)
-{
-    if (!uae_initialised) return 0;
+/* Player data — pointer + length extracted from embedded binary arrays */
+struct player_info {
+    const unsigned char *data;
+    int                  len;
+    const char          *ext;       /* file extension for module name */
+};
 
-    /* Protect the stack areas */
+static int load_song(const unsigned char *module_data, int module_len,
+                     const struct player_info *player)
+{
+    if (!uae_initialised || !player) return 0;
+
     const uae_u8 wall[] = {'W','A','L','L'};
 
     /* Clear Amiga memory */
@@ -341,10 +349,8 @@ static int load_song(const unsigned char *module_data, int module_len)
     memcpy(chipmemory + USER_STACK_ADDR,  wall, 4);
 
     /* ── Load player binary at PLAYER_ADDR (0x9000) ── */
-    int player_size = ahx_player_bin_len;
-    if (!player_size) return 0;
-
-    int copied = uade_safe_copy(PLAYER_ADDR, ahx_player_bin, (size_t)player_size);
+    if (!player->data || player->len <= 0) return 0;
+    int copied = uade_safe_copy(PLAYER_ADDR, player->data, (size_t)player->len);
     if (copied <= 0) return 0;
 
     /* Set player address for relocator */
@@ -354,7 +360,6 @@ static int load_song(const unsigned char *module_data, int module_len)
     int reloc_size = calc_reloc_size(
         (const uae_u32 *)(chipmemory + PLAYER_ADDR),
         (const uae_u32 *)(chipmemory + PLAYER_ADDR + copied));
-
     if (!reloc_size) return 0;
 
     /* Calculate module address (rounded up from end of player + reloc) */
@@ -372,8 +377,9 @@ static int load_song(const unsigned char *module_data, int module_len)
         if (copied <= 0) return 0;
         uade_put_long(SCORE_MODULE_LEN, copied);
 
-        /* Write module name */
-        const char *mod_name = "song.ahx";
+        /* Write module name with correct extension */
+        char mod_name[64];
+        snprintf(mod_name, sizeof(mod_name), "song.%s", player->ext ? player->ext : "mod");
         if (mod_addr > MODULE_NAME_ADDR) {
             memcpy(chipmemory + MODULE_NAME_ADDR, mod_name, strlen(mod_name) + 1);
             uade_put_long(SCORE_MODULE_NAME_ADDR, MODULE_NAME_ADDR);
@@ -385,8 +391,8 @@ static int load_song(const unsigned char *module_data, int module_len)
     if (copied <= 0) return 0;
 
     /* ── Set up CPU state for score execution ── */
-    m68k_areg(regs, 7) = SCORE_ADDR;            /* A7 = stack */
-    m68k_setpc(SCORE_ADDR);                      /* PC = score entry */
+    m68k_areg(regs, 7) = SCORE_ADDR;
+    m68k_setpc(SCORE_ADDR);
 
     /* Configuration for score */
     uade_put_long(SCORE_EXEC_DEBUG, 0);
@@ -405,7 +411,7 @@ static int load_song(const unsigned char *module_data, int module_len)
     /* Reset state */
     uadecore_audio_output = 0;
     uadecore_reboot = 0;
-    uadecore_read_size = 4096;   /* request 4096 bytes = 1024 stereo frames */
+    uadecore_read_size = 4096;
     set_sound_freq(44100);
     flush_sound();
 
@@ -423,36 +429,41 @@ static struct {
     int            loaded;
 } uade_state = {NULL, 0, 0};
 
-static int impl_load(const unsigned char *data, int len)
+/* Player data — pointer + length extracted from embedded binary arrays */
+
+/* Generic load: initialise UAE core + run the specified player */
+static int uade_wasm_load(const unsigned char *data, int len,
+                          const struct player_info *player)
 {
-    /* Free previous module */
     if (uade_state.module) {
         free(uade_state.module);
         uade_state.module = NULL;
     }
 
-    /* Initialise UAE core on first load */
     if (!init_uae_core()) return 0;
 
-    /* Copy module data (WASM heap may be freed by caller) */
     uade_state.module = (unsigned char *)malloc((size_t)len);
     if (!uade_state.module) return 0;
     memcpy(uade_state.module, data, (size_t)len);
     uade_state.module_len = len;
 
-    /* Load song into Amiga emulator memory */
-    if (!load_song(uade_state.module, uade_state.module_len)) {
+    if (!load_song(uade_state.module, uade_state.module_len, player)) {
         free(uade_state.module);
         uade_state.module = NULL;
         return 0;
     }
 
-    /* Reset CPU and custom chips (same as original m68k_go sequence) */
     m68k_reset();
     customreset();
 
     uade_state.loaded = 1;
     return 1;
+}
+
+static int impl_load_ahx(const unsigned char *data, int len)
+{
+    struct player_info p = { ahx_player_bin, (int)ahx_player_bin_len, "ahx" };
+    return uade_wasm_load(data, len, &p);
 }
 
 static double impl_get_duration(void)
@@ -588,12 +599,12 @@ void fsave_opp(uae_u32 opcode) { (void)opcode; }
 void frestore_opp(uae_u32 opcode) { (void)opcode; }
 
 /* ══════════════════════════════════════════════════════════════════
-   Decoder Interface
+   Decoder Interface — separate entry for each format
    ══════════════════════════════════════════════════════════════════ */
 
-const Decoder decoder_uade = {
+const Decoder decoder_uade_ahx = {
     "uade",
-    impl_load, impl_get_duration,
+    impl_load_ahx, impl_get_duration,
     impl_get_sample_rate, impl_get_channels,
     impl_render, impl_destroy
 };

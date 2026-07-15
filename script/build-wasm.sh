@@ -694,7 +694,7 @@ STUBC
         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32", "HEAPF32"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
-        -s ALLOW_MEMORY_GROWTH=1 \
+        -s ALLOW_MEMORY_GROWTH=0 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
         -D __stdcall= \
         -D '__int64=long long' \
