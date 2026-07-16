@@ -106,24 +106,21 @@ static int impl_render(float *out, int frames)
 {
     if (!sc68) return 0;
 
-    // 歌曲已结束（上次调用已返回 API68_END），返回 0 让 JS 流式循环退出
+    // 歌曲已结束，返回 0 让 JS 流式循环退出
     if (sc68_ended) return 0;
 
-    // 使用 static 内部缓冲区 + 固定 512 帧（与 emscripten adapter 一致）
-    // api68_process 内部循环直到填满请求帧数或遇到结束才返回
-    static int pcm[512];
-    int to_process = 512;
+    // api68_process 在 WASM 中 68K 模拟极慢（每帧 160K cycles），
+    // 每次只处理 16 帧以确保快速返回 (<5ms)，避免卡死浏览器主线程
+    static int pcm[16];
+    int to_process = 16;
     if (frames < to_process) to_process = frames;
 
     int status = api68_process(sc68, pcm, to_process);
 
     if (status & API68_END) {
-        int real_ms = 0;
         int seek_pos = api68_seek(sc68, -1);
-        if (seek_pos > 0) real_ms = seek_pos;
-        if (real_ms <= 0) real_ms = (int)((unsigned long long)to_process * 1000 / sample_rate);
+        int real_ms = (seek_pos > 0) ? seek_pos : (int)((unsigned long long)to_process * 1000 / sample_rate);
         if (real_ms > 0 && real_ms < duration_ms) duration_ms = real_ms;
-        // 标记已结束，下次 render 返回 0 让 JS 流式循环退出
         sc68_ended = 1;
     }
     if (status == API68_MIX_ERROR) return 0;
