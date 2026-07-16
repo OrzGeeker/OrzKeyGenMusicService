@@ -130,14 +130,6 @@ decompress_ym_files() {
             decompress_one_ym "$ymfile" "$raw_dir/$relpath"
         fi
     done
-
-    # 从 music/ 解压（flat 文件名直接放到 ym-raw/）
-    find "$PROJECT_DIR/music" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
-        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
-            decompress_one_ym "$ymfile" "$raw_dir/$(basename "$ymfile")"
-        fi
-    done
-
     # 复制到公开 web 目录
     if [ -d "$raw_dir" ]; then
         rm -rf "$public_ym_raw"

@@ -54,20 +54,19 @@ services:
       context: .
     environment:
       <<: *shared_environment
-      # 源目录：挂载到容器内 /sources/ 下，每个来源一个子目录
+      # 源目录：挂载到容器内 /sources/ 下
       # docker compose run --rm scan \
       #   serve --env production --hostname 0.0.0.0 --port 8081
       # 然后用 curl 触发扫描:
       # curl -X POST http://localhost:8081/api/scan \
       #   -H "Content-Type: application/json" \
-      #   -d '{"sources": ["/sources/keygen", "/sources/music"]}'
+      #   -d '{"sources": ["/sources/keygen"]}'
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - cas_data:/data/music
       - ${KEYGEN_DIR:-./Resources/Public/keygenmusic}:/sources/keygen:ro
-      - ${MUSIC_DIR:-./music}:/sources/music:ro
     ports:
       - '8081:8081'
     command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8081"]
