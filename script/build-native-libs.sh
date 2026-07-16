@@ -388,6 +388,8 @@ build_libsc68() {
             [ -f "$f" ] && C_FILES+=("$f")
         done
     done
+    # 添加 rsc68 存根（替换原版 rsc68，避免依赖原始 SC68 资源管理）
+    [ -f "$src_dir/file68/rsc68_stub.c" ] && C_FILES+=("$src_dir/file68/rsc68_stub.c")
 
     if [ ${#C_FILES[@]} -eq 0 ]; then
         warn "No sc68 source files found"
@@ -395,14 +397,15 @@ build_libsc68() {
     fi
 
     local inc_flags="-I$src_dir -I$src_dir/file68 -I$src_dir/api68"
+    # EMSCRIPTEN_KEEPALIVE 在原生编译时定义为空
+    local cflags="-Wno-pointer-sign -Wno-incompatible-function-pointer-types -O3 -DEMSCRIPTEN_KEEPALIVE= -DEMSCRIPTEN=1"
     local compile_ok=0
     for cfile in "${C_FILES[@]}"; do
         local basename="${cfile##*/}"
         local dirpart="${cfile%/*}"
         local subdir="${dirpart##*/}"
         local objname="${subdir}_${basename%.c}.o"
-        $HOST_CC -c "$cfile" -o "$objname" $inc_flags \
-            -Wno-pointer-sign -Wno-incompatible-function-pointer-types -O3 2>/dev/null && compile_ok=$((compile_ok + 1))
+        $HOST_CC -c "$cfile" -o "$objname" $inc_flags $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
     done
 
     local objs=( *.o )

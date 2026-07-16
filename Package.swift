@@ -25,7 +25,6 @@ let package = Package(
             dependencies: [],
             exclude: [
                 // 需特殊源码配置的解码器（暂不启用）
-                "sc68/",   // photonstorm fork 与原生库结构不兼容
                 "uade/",   // UAE Amiga 仿真核心，头文件树复杂
                 "v2m/",    // 需原始 Farbrausch Windows 类型头文件
             ],
@@ -35,6 +34,7 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
                 .define("ORZ_HAVE_OPENMPT"),
                 .define("ORZ_HAVE_GME"),
             ],
@@ -44,6 +44,7 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
                 .define("ORZ_HAVE_OPENMPT"),
                 .define("ORZ_HAVE_GME"),
             ],
@@ -55,6 +56,7 @@ let package = Package(
                 .linkedLibrary("adplug"),
                 .linkedLibrary("binio"),
                 .linkedLibrary("asap"),
+                .linkedLibrary("sc68"),
             ]
         ),
 
