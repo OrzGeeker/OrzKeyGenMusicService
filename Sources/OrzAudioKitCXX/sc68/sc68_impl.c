@@ -66,14 +66,14 @@ static int impl_load(const unsigned char *data, int len)
         return 0;
     }
 
-    // 限制最大播放时长 — WASM 中 68K 模拟极慢，限 8 秒避免页面卡死
+    // 限制最大播放时长 — WASM 中 68K 模拟极慢（每帧 160K cycles），
+    // 限 8 秒避免页面卡死
     api68_override_max_playtime(8000);
 
     // 默认第一轨（关联播放器，必须在 music_info 前启动）
     api68_play(sc68, 0);
 
-    // 获取时长 — 大多数 sc68 keygen 文件没有内嵌时长信息
-    // 注意：WASM 中 68K 模拟速度较慢（每帧 160K cycles），限制为 30 秒避免卡死
+    // 获取时长
     api68_music_info_t info;
     for (int try_track = 0; try_track >= -1 && duration_ms <= 0; try_track--) {
         memset(&info, 0, sizeof(info));
@@ -82,7 +82,8 @@ static int impl_load(const unsigned char *data, int len)
             duration_ms = info.time_ms;
         }
     }
-    if (duration_ms <= 0) duration_ms = 30000; // WASM 默认 30 秒
+    // 不超过 max_playtime
+    if (duration_ms <= 0 || duration_ms > 8000) duration_ms = 8000;
 
     return 1;
 }
