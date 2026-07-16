@@ -23,9 +23,7 @@ let package = Package(
         .target(
             name: "OrzAudioKitCXX",
             dependencies: [],
-            exclude: [
-                "uade/",   // 需要完整 UAE CPU 生成管线（build68k + gencpu）
-            ],
+            exclude: [],
             cSettings: [
                 .headerSearchPath("include"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty"),
@@ -35,6 +33,7 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/ahx2play"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
@@ -50,6 +49,7 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/ahx2play"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
@@ -66,6 +66,7 @@ let package = Package(
                 .linkedLibrary("asap"),
                 .linkedLibrary("sc68"),
                 .linkedLibrary("v2m"),
+                .linkedLibrary("ahx2play"),
             ]
         ),
 
