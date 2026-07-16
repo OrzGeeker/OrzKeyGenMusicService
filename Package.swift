@@ -24,8 +24,7 @@ let package = Package(
             name: "OrzAudioKitCXX",
             dependencies: [],
             exclude: [
-                "uade/",  // 需 build68k 生成 68000 CPU 指令表
-                "v2m/",   // 需原生兼容的包装器（当前使用 Windows 类型 sU32）
+                "uade/",   // 需要完整 UAE CPU 生成管线（build68k + gencpu）
             ],
             cSettings: [
                 .headerSearchPath("include"),
@@ -34,6 +33,8 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
@@ -47,6 +48,8 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
@@ -62,7 +65,7 @@ let package = Package(
                 .linkedLibrary("binio"),
                 .linkedLibrary("asap"),
                 .linkedLibrary("sc68"),
-                .linkedLibrary("uade"),
+                .linkedLibrary("v2m"),
             ]
         ),
 
