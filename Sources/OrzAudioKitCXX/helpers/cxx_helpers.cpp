@@ -1,10 +1,11 @@
 // C++ 辅助层 — 包裹 C++ 库调用，异常安全
+// 条件编译：各解码器包装仅在对应库头文件可用时编译
+
 extern "C" {
 
-#include <libopenmpt/libopenmpt.h>
-#include <gme/gme.h>
-
 // ── libopenmpt 安全包装 ──
+#ifdef ORZ_HAVE_OPENMPT
+#include <libopenmpt/libopenmpt.h>
 
 openmpt_module* safe_openmpt_create(const unsigned char* data, size_t len) {
     try {
@@ -28,8 +29,11 @@ void safe_openmpt_destroy(openmpt_module* mod) {
     try { openmpt_module_destroy(mod); }
     catch (...) {}
 }
+#endif // ORZ_HAVE_OPENMPT
 
 // ── GME 安全包装 ──
+#ifdef ORZ_HAVE_GME
+#include <gme/gme.h>
 
 gme_err_t safe_gme_open_data(const unsigned char* data, int len,
                              Music_Emu** emu, int rate) {
@@ -61,5 +65,6 @@ void safe_gme_delete(Music_Emu* emu) {
     try { gme_delete(emu); }
     catch (...) {}
 }
+#endif // ORZ_HAVE_GME
 
 } // extern "C"

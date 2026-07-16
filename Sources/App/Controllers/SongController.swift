@@ -160,7 +160,7 @@ struct SongController: RouteCollection {
     // MARK: - Helpers
 
     /// 服务端解码，并将结果缓存到 CAS 缓存目录
-    /// 首次请求转码，后续直接读缓存文件，避免重复 ffmpeg
+    /// 首次请求转码（AudioEngine → C 解码器 / ffmpeg），后续直接读缓存
     private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, cas: CasStorageService) async throws -> String {
         let cacheDir = "\(cas.root)/.cache/wav/"
         let cachePath = "\(cacheDir)\(sha256).wav"
@@ -170,20 +170,13 @@ struct SongController: RouteCollection {
             return cachePath
         }
 
-        // 首次：ffmpeg 转码为 PCM WAV 并缓存
+        // 首次：通过 AudioEngine 解码为 PCM WAV 并缓存
+        let engine = AudioEngine()
+        let wavData = try await engine.decodeToWAV(filePath: originalPath, format: format)
+
         try queue.sync {
             try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
-        }
-
-        let tmpPath = "/tmp/orz_server_decode_\(UUID().uuidString).wav"
-        defer { try? fm.removeItem(atPath: tmpPath) }
-
-        _ = try await ProcessRunner.execute(
-            arguments: ["ffmpeg", "-y", "-i", originalPath, "-f", "wav", "-acodec", "pcm_s16le", tmpPath]
-        )
-
-        try queue.sync {
-            try fm.copyItem(atPath: tmpPath, toPath: cachePath)
+            try wavData.write(to: URL(fileURLWithPath: cachePath))
         }
         return cachePath
     }

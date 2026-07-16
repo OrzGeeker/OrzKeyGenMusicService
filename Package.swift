@@ -17,28 +17,44 @@ let package = Package(
         // ── C/C++ 解码器引擎 ──
         // 纯 C/C++ target，按格式分类组织。
         // 同一份源码同时用于 WASM 浏览器端和原生服务端解码。
-        // Phase 1: 仅编译自包含解码器（ym6）和调度层。
-        // Phase 3+: 安装系统库后逐步取消 exclude 并加 linkedLibrary。
+        // Phase 3（进行中）：已启用 openmpt，逐个增补解码器。
+        // 解码器目录通过 exclude 控制编译与否，对应的库、头文件路径、
+        // 以及链接器标志通过 cSettings/linkerSettings 逐项添加。
         .target(
             name: "OrzAudioKitCXX",
             dependencies: [],
             exclude: [
-                // 需要外部系统库的解码器（Phase 3 起逐个启用）
-                "helpers/",  // cxx_helpers.cpp 依赖 libopenmpt/GME
-                "openmpt/",
-                "gme/",
-                "sidplayfp/",
+                // 尚未编译的解码器（逐步启用中）
                 "sc68/",
-                "adplug/",
                 "asap/",
                 "uade/",
                 "v2m/",
             ],
             cSettings: [
                 .headerSearchPath("include"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
+                .define("ORZ_HAVE_OPENMPT"),
+                .define("ORZ_HAVE_GME"),
             ],
             cxxSettings: [
                 .headerSearchPath("include"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
+                .define("ORZ_HAVE_OPENMPT"),
+                .define("ORZ_HAVE_GME"),
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-L../../Libraries/OrzAudioKit/native"]),
+                .linkedLibrary("openmpt"),
+                .linkedLibrary("gme"),
+                .linkedLibrary("sidplayfp"),
+                .linkedLibrary("adplug"),
+                .linkedLibrary("binio"),
             ]
         ),
 

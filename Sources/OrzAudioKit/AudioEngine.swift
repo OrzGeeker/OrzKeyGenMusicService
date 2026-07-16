@@ -55,13 +55,36 @@ public class AudioEngine: @unchecked Sendable {
 
     public func decodeToPCM(filePath: String, format: AudioFormat) async throws -> PCMData {
         switch format {
+        // 模块/芯片音乐格式 — 优先使用 C 解码器（Phase 2+），降级 ffmpeg
         case .xm, .mod, .it, .s3m, .mo3, .mtm,
              .nsf, .spc, .sid, .sc68, .hsc, .ym,
              .ahx, .amd, .fc13, .fc14, .sap,
-             .rad, .d00, .v2m, .bp:
+             .rad, .d00, .v2m:
+            // 尝试 C 解码器
+            if CDecoderBridge.canDecode(format: format.rawValue) {
+                do {
+                    return try CDecoderBridge.decode(filePath: filePath, format: format)
+                } catch {
+                    // C 解码失败，降级 ffmpeg
+                    return try await moduleDecoder.decode(filePath: filePath, format: format)
+                }
+            }
             return try await moduleDecoder.decode(filePath: filePath, format: format)
+
+        // 标准格式 — AVFoundation / ffmpeg CLI
         case .mp3, .ogg, .wav, .flac, .mid, .m4a, .aac:
             return try await standardDecoder.decode(filePath: filePath, format: format)
+
+        // 自定义格式 — 尝试 C 解码器，降级 ffmpeg
+        case .bp:
+            if CDecoderBridge.canDecode(format: format.rawValue) {
+                do {
+                    return try CDecoderBridge.decode(filePath: filePath, format: format)
+                } catch {
+                    return try await moduleDecoder.decode(filePath: filePath, format: format)
+                }
+            }
+            return try await moduleDecoder.decode(filePath: filePath, format: format)
         }
     }
 
