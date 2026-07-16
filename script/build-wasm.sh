@@ -888,9 +888,12 @@ generate_wrapper() {
 
     # ── 条件编译其他解码器（仅在其依赖库可用时加入）──
 
-    # ASAP (sap) — 需要 libasap_wasm.a
-    if [ -f "$BUILD_DIR/libasap_wasm.a" ]; then
-        source_files+=("$ORZ_SRC/asap/asap_impl.c")
+    # ASAP (sap) — 直接编译 asap.c（预生成 C 源码，无需 .a）
+    if [ -f "$BUILD_DIR/src/asap/asap.c" ]; then
+        source_files+=("$ORZ_SRC/asap/asap_impl.c" "$BUILD_DIR/src/asap/asap.c")
+
+
+
     fi
 
     # adplug (rad, d00, hsc, amd) — 需要 libadplug + libbinio
@@ -925,7 +928,7 @@ generate_wrapper() {
         log "ahx2play not available, AHX format disabled"
     fi
     inc_dirs+=("$ORZ_SRC/include")
-    inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
+    inc_dirs+=("$BUILD_DIR/src/asap")  # ASAP 头文件 (asap.h)
     # libopenmpt 头文件（0.8.0 头文件在 libopenmpt/libopenmpt.h）
     if [ -d "$BUILD_DIR/src/libopenmpt/libopenmpt" ]; then
         inc_dirs+=("$BUILD_DIR/src/libopenmpt")
@@ -1038,14 +1041,7 @@ generate_wrapper() {
         warn "libsc68 build failed, sc68/ym formats will not be available"
     fi
 
-    # ASAP (Atari POKEY)
-    local asap_lib="$BUILD_DIR/libasap_wasm.a"
-    if [ -f "$asap_lib" ]; then
-        libs+=("$asap_lib")
-        log "ASAP library found: $asap_lib"
-    else
-        warn "ASAP library not found at $asap_lib, sap format will not be available"
-    fi
+    # ASAP (Atari POKEY) — 已作为源文件编译 in source_files
 
     # libsidplayfp (C++ wrapper)
     local sidplayfp_lib=""
@@ -1116,19 +1112,51 @@ STUBC
     # 生成 sc68 paula 存根（避免与 ahx2play 的 paula 符号冲突）
     # sc68 的 api68 在 .sc68 格式（YM2149）下不使用 paula 音频输出，
     # 因此只需提供符号占位，不定义实际的 paula[] 数组（由 ahx2play 提供）。
+    # 注意：paula_io 必须是 io68_t 类型（非自定义的 paula_io_t），否则 EMU68
+    # I/O 插件系统遍历函数指针时会读到垃圾值导致 "null function" crash。
     local paula_stubs="$BUILD_DIR/src/paula_stubs.c"
     cat > "$paula_stubs" << 'PAULA_STUBS'
 #include <stdint.h>
 #include <string.h>
-/* paula_io — 寄存器 I/O 结构（由 api68 引用） */
-typedef struct { int unused; } paula_io_t;
-paula_io_t paula_io;
-/* paula[] 和 paulav[] 不由存根提供 — 它们由 ahx2play 的 paula.o 定义 */
-/* PL (Paula Mixer) 存根 — sc68 格式（YM2149）不需要实际 Paula 音频输出 */
+/* io68_t 结构体定义（from emu68/struct68.h） */
+typedef unsigned int cycle68_t;
+typedef unsigned int u32;
+typedef struct _int68_s { int vector; int level; } int68_t;
+#define IO68_NO_INT (0x80000000)
+typedef u32 (*memrfunc68_t)(u32 addr, cycle68_t cycle);
+typedef void (*memwfunc68_t)(u32 addr, u32 value, cycle68_t cycle);
+typedef struct _io68_t {
+    struct _io68_t * next; char name[32];
+    u32 addr_low, addr_high;
+    memrfunc68_t Rfunc[3]; memwfunc68_t Wfunc[3];
+    int68_t *(*interrupt)(cycle68_t);
+    cycle68_t (*next_int)(cycle68_t);
+    void (*adjust_cycle)(cycle68_t);
+    int (*reset)(void);
+    cycle68_t rcycle_penalty, wcycle_penalty;
+} io68_t;
+/* No-op I/O handlers */
+static u32 stub_readB(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
+static u32 stub_readW(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
+static u32 stub_readL(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
+static void stub_writeB(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
+static void stub_writeW(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
+static void stub_writeL(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
+static int68_t *stub_int(cycle68_t c) { (void)c; return 0; }
+static cycle68_t stub_nextint(cycle68_t c) { (void)c; return IO68_NO_INT; }
+static void stub_subcycle(cycle68_t s) { (void)s; }
+static int stub_reset(void) { return 0; }
+/* 正确的 io68_t paula_io，所有函数指针为非 NULL 空操作 */
+io68_t paula_io = { NULL, "Paula(stub)", 0xFFDFF000, 0xFFDFF0DF,
+    {stub_readB,stub_readW,stub_readL},
+    {stub_writeB,stub_writeW,stub_writeL},
+    stub_int, stub_nextint, stub_subcycle, stub_reset, 0, 0 };
+/* paula[] 和 paulav[] 不由存根提供 — 由 ahx2play 定义 */
+/* PL (Paula Mixer) 存根 — sc68 格式（YM2149）不需要实际 Paula 输出 */
 unsigned int PL_sampling_rate(unsigned int r) { return r; }
 int PL_reset(void) { return 0; }
 int PL_init(void) { return 0; }
-void PL_mix(uint32_t *b, uint8_t *m, int n) { (void)b; (void)m; (void)n; }
+void PL_mix(uint32_t *b, uint8_t *m, int n) { (void)b;(void)m;(void)n; }
 PAULA_STUBS
     source_files+=("$paula_stubs")
 

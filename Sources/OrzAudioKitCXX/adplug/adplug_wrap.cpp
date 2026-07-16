@@ -24,15 +24,20 @@ extern "C" {
 #include "audio_engine.h"
 }
 
+// 由 orz_dispatch.c 设置的当前格式名（如 "hsc", "amd", "rad"）
+extern const char *orz_current_format;
+
 // ── State ──
 static CEmuopl *opl = NULL;
 static CPlayer *player = NULL;
 static int sample_rate = 44100;
 static double song_duration = 0;
 
-// Temporary filename for MEMFS（使用 .adplug 扩展名，让 AdPlug 通过内容检测格式）
+// Temporary filename for MEMFS
+// 扩展名根据 orz_current_format 设置（"hsc"→".hsc" 等），使 AdPlug factory
+// 的扩展名匹配机制正确识别格式。程序化编译为 ".adplug" 走全 player 遍历。
 static int tmp_counter = 0;
-static char tmp_file_path[64] = "/tmp/adplug_song.adplug";
+static char tmp_file_path[80] = "/tmp/adplug_song.adplug";
 
 // ── Decoder interface ──
 
@@ -41,8 +46,18 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     // Cleanup
     adplug_destroy();
 
-    // Write data to MEMFS
-    snprintf(tmp_file_path, sizeof(tmp_file_path), "/tmp/adplug_%d.adplug", ++tmp_counter);
+    // 根据当前格式名确定 MEMFS 文件的扩展名
+    const char *ext = ".adplug";
+    if (orz_current_format) {
+        if (strcmp(orz_current_format, "hsc") == 0) ext = ".hsc";
+        else if (strcmp(orz_current_format, "amd") == 0) ext = ".amd";
+        else if (strcmp(orz_current_format, "rad") == 0) ext = ".rad";
+        else if (strcmp(orz_current_format, "d00") == 0) ext = ".d00";
+        else if (strcmp(orz_current_format, "hsp") == 0) ext = ".hsp";
+    }
+
+    // Write data to MEMFS with format-appropriate extension
+    snprintf(tmp_file_path, sizeof(tmp_file_path), "/tmp/adplug_%d%s", ++tmp_counter, ext);
     FILE *f = fopen(tmp_file_path, "wb");
     if (!f) return 0;
     fwrite(data, 1, len, f);

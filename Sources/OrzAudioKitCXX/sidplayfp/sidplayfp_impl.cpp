@@ -80,7 +80,8 @@ static int impl_load(const unsigned char *data, int len) {
         return 0;
     }
 
-    // 初始化混音器（立体声），加载后调用
+    // 重置引擎，再初始化混音器（立体声）
+    // initMixer 需要在 reset() 之后调用，否则混音器状态被清除
     player->initMixer(true);
     player->reset();
 
@@ -105,6 +106,7 @@ static int impl_get_channels() {
 static int impl_render(float *out, int frames) {
     if (!player) return 0;
 
+    try {
     // 确保混音缓冲区足够大 (frames 个立体声帧 → frames * 2 个 short)
     unsigned int needed = (unsigned int)frames;
     if (needed > mix_buf_size) {
@@ -114,12 +116,20 @@ static int impl_render(float *out, int frames) {
         mix_buf_size = needed;
     }
 
-    unsigned int total_rendered = 0; // 累计渲染的帧数（per-channel）
+    // 分批渲染，每批最多 ~4096 帧，避免 cycles 计算溢出且控制单次 play() 耗时
+    // 每帧 ~22.34 cycles，4096 帧 ≈ 91501 cycles
+    const unsigned int BATCH_FRAMES = 4096;
+    unsigned int total_rendered = 0;
+
     while (total_rendered < (unsigned int)frames) {
-        // SID 时钟 ~985248 Hz，每帧需 cycles = 985248 / SAMPLE_RATE
         unsigned int remaining = (unsigned int)frames - total_rendered;
-        unsigned int cycles = (remaining * 985248) / SAMPLE_RATE;
-        if (cycles < 1) cycles = 1;
+        unsigned int batch = (remaining > BATCH_FRAMES) ? BATCH_FRAMES : remaining;
+
+        // SID 时钟 ~985248 Hz，每帧需 cycles = 985248 / SAMPLE_RATE
+        // 使用 64 位避免 32 位溢出
+        unsigned long long cycles_64 = (unsigned long long)batch * 985248ULL / SAMPLE_RATE;
+        if (cycles_64 < 1) cycles_64 = 1;
+        unsigned int cycles = (unsigned int)cycles_64;
 
         int per_channel = player->play(cycles);
         if (per_channel <= 0) break;
@@ -141,6 +151,7 @@ static int impl_render(float *out, int frames) {
     }
 
     return (int)total_rendered;
+    } catch (...) { return 0; }
 }
 
 static void impl_destroy() {

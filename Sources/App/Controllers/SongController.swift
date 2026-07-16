@@ -87,16 +87,17 @@ struct SongController: RouteCollection {
         }
 
         let cas = req.application.casStorage
-
-        // YM 文件：原始 LHa 压缩，按需解压为 raw YM6
-        if format == .ym {
-            return try await streamYM(cas: cas, req: req, song: song)
-        }
-
         let fullPath = cas.resolve(sha256: song.sha256, format: song.fileFormat)
 
         guard FileManager.default.fileExists(atPath: fullPath) else {
             throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
+        }
+
+        // YM 格式：WASM 解码器内置了 LHa 解压，直接服务原始文件
+        if format == .ym {
+            var res = try await req.fileio.asyncStreamFile(at: fullPath)
+            res.headers.replaceOrAdd(name: .contentType, value: "audio/ym")
+            return res
         }
 
         let engine = AudioEngine()
@@ -118,26 +119,6 @@ struct SongController: RouteCollection {
             res.headers.replaceOrAdd(name: .contentType, value: "audio/wav")
             return res
         }
-    }
-
-    /// YM 文件：用 lhasa 解压 LHa 归档，返回 raw YM6 数据
-    private func streamYM(cas: CasStorageService, req: Request, song: Song) async throws -> Response {
-        let ymPath = cas.resolve(sha256: song.sha256, format: song.fileFormat)
-
-        guard FileManager.default.fileExists(atPath: ymPath) else {
-            throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
-        }
-
-        // lha x {path} -p 将解压内容以原始二进制输出到 stdout
-        let wavData = try await ProcessRunner.executeRaw(
-            "/opt/homebrew/opt/lhasa/bin/lha",
-            arguments: ["x", ymPath, "-p"]
-        )
-
-        var headers = HTTPHeaders()
-        headers.add(name: "Content-Type", value: "audio/ym")
-        headers.add(name: "Content-Length", value: "\(wavData.count)")
-        return Response(status: .ok, headers: headers, body: .init(data: wavData))
     }
 
     /// GET /api/songs/:id/raw — 原始文件下载

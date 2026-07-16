@@ -64,11 +64,14 @@ static int impl_load(const unsigned char *data, int len)
         return 0;
     }
 
+    // 限制最大播放时长（必须在 play 之前设置）
+    api68_override_max_playtime(30000);
+
     // 默认第一轨（关联播放器，必须在 music_info 前启动）
     api68_play(sc68, 0);
 
     // 获取时长 — 大多数 sc68 keygen 文件没有内嵌时长信息
-    api68_override_max_playtime(0);
+    // 注意：WASM 中 68K 模拟速度较慢（每帧 160K cycles），限制为 30 秒避免卡死
     api68_music_info_t info;
     for (int try_track = 0; try_track >= -1 && duration_ms <= 0; try_track--) {
         memset(&info, 0, sizeof(info));
@@ -77,7 +80,7 @@ static int impl_load(const unsigned char *data, int len)
             duration_ms = info.time_ms;
         }
     }
-    if (duration_ms <= 0) duration_ms = 180000; // 默认 3 分钟
+    if (duration_ms <= 0) duration_ms = 30000; // WASM 默认 30 秒
 
     return 1;
 }
@@ -101,42 +104,29 @@ static int impl_render(float *out, int frames)
 {
     if (!sc68) return 0;
 
-    int needed = frames; // sc68 每个 sample 是 32-bit packed stereo
-    if (needed > buffer_samples) {
-        int *nb = (int *)realloc(pcm_buffer, (size_t)needed * sizeof(int));
-        if (!nb) return 0;
-        pcm_buffer = nb;
-        buffer_samples = needed;
+    // 使用 static 内部缓冲区 + 固定 512 帧（与 emscripten adapter 一致）
+    // api68_process 内部循环直到填满请求帧数或遇到结束才返回
+    static int pcm[512];
+    int to_process = 512;
+    if (frames < to_process) to_process = frames;
+
+    int status = api68_process(sc68, pcm, to_process);
+
+    if (status & API68_END) {
+        int real_ms = 0;
+        int seek_pos = api68_seek(sc68, -1);
+        if (seek_pos > 0) real_ms = seek_pos;
+        if (real_ms <= 0) real_ms = (int)((unsigned long long)to_process * 1000 / sample_rate);
+        if (real_ms > 0 && real_ms < duration_ms) duration_ms = real_ms;
     }
+    if (status == API68_MIX_ERROR) return 0;
 
-    int total = 0;
-    while (total < frames) {
-        int remaining = frames - total;
-        int to_process = (remaining > buffer_samples) ? buffer_samples : remaining;
-
-        int status = api68_process(sc68, pcm_buffer, to_process);
-        if (status & API68_END) {
-            // 更新真实时长（检测到曲目终止）
-            int real_ms = 0;
-            int seek_pos = api68_seek(sc68, -1);
-            if (seek_pos > 0) real_ms = seek_pos;
-            if (real_ms <= 0) real_ms = (int)((unsigned long long)(total + to_process) * 1000 / sample_rate);
-            if (real_ms > 0 && real_ms < duration_ms) duration_ms = real_ms;
-            break;
-        }
-        if (status == API68_MIX_ERROR) break;
-
-        // sc68 packed stereo: 每个 int32 包含 left(16bit) + right(16bit)
-        int n = (to_process > remaining) ? remaining : to_process;
-        for (int i = 0; i < n; i++) {
-            int v = pcm_buffer[i];
-            out[(total + i) * 2 + 0] = (float)(int16_t)(v & 0xFFFF) / 32768.0f;
-            out[(total + i) * 2 + 1] = (float)(int16_t)(v >> 16) / 32768.0f;
-        }
-        total += n;
+    for (int i = 0; i < to_process; i++) {
+        int v = pcm[i];
+        out[i * 2 + 0] = (float)(int16_t)(v & 0xFFFF) / 32768.0f;
+        out[i * 2 + 1] = (float)(int16_t)(v >> 16) / 32768.0f;
     }
-
-    return total;
+    return to_process;
 }
 
 static void impl_destroy(void)

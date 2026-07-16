@@ -49,6 +49,9 @@ static const Decoder *find_decoder(const char *format) {
 
 static const Decoder *active = NULL;
 
+// 为 adplug 等需要格式扩展名的解码器传递当前格式名
+const char *orz_current_format = NULL;
+
 // 外部注册函数（在 audio_engine.c 中定义）
 extern void register_all(void);
 
@@ -65,6 +68,8 @@ int orz_load(const char *format, const unsigned char *data, int len) {
     }
     const Decoder *dec = find_decoder(format);
     if (!dec) return 0;
+    // 设当前格式名，供 adplug 等解码器获取文件扩展名
+    orz_current_format = format;
     if (!dec->load(data, len)) return 0;
     active = dec;
     return 1;

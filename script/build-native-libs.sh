@@ -537,12 +537,23 @@ build_libv2m() {
     mkdir -p "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
-    # Compile the synth core + wrapper
-    $HOST_CXX -c "$src_dir/src/synth_core.cpp" -o synth_core.o \
-        -I"$src_dir/src" -O2 2>/dev/null || {
-        warn "v2m synth_core.cpp compile failed"; popd >/dev/null; return 1
-    }
-    ar cr "$output" synth_core.o 2>/dev/null && ranlib "$output" 2>/dev/null
+    # Compile all v2m source files (与 WASM 构建保持一致)
+    local objs=""
+    for f in v2mplayer.cpp v2mconv.cpp sounddef.cpp ronan.cpp synth_core.cpp; do
+        local src="$src_dir/src/$f"
+        if [ -f "$src" ]; then
+            local obj_name="${f%.cpp}.o"
+            $HOST_CXX -c "$src" -o "$build_dir/$obj_name" \
+                -I"$src_dir/src" -O2 2>/dev/null || {
+                warn "v2m $f compile failed"; continue
+            }
+            objs="$objs $build_dir/$obj_name"
+        fi
+    done
+    if [ -z "$objs" ]; then
+        warn "v2m no source files compiled"; popd >/dev/null; return 1
+    fi
+    ar cr "$output" $objs 2>/dev/null && ranlib "$output" 2>/dev/null
 
     if [ -f "$output" ]; then
         log "libv2m.a → $output ($(du -h "$output" | cut -f1))"

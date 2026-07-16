@@ -27,6 +27,8 @@ class OrzAudioPlayer {
         this._wasmLoadAttempted = false;
         this._wasmLoadPromise = null;
         this._washProgressRAF = null;
+        this._streamActive = false;
+        this._streamGen = 0;
 
         // 配置
         this.sampleRate = 48000;
@@ -160,10 +162,22 @@ class OrzAudioPlayer {
      * 停止播放
      */
     stop() {
+        // 标记流式中止——让后台的 _renderAndPlayStreaming 循环尽快退出
+        this._streamActive = false;
+        this._streamGen++;
+
         // 停止 WASM 渲染
         if (this._washProgressRAF) {
             cancelAnimationFrame(this._washProgressRAF);
             this._washProgressRAF = null;
+        }
+        // 停止流式播放的所有 AudioBufferSourceNode
+        if (this._streamSources) {
+            for (const src of this._streamSources) {
+                try { src.stop(); } catch(e) {}
+                try { src.disconnect(); } catch(e) {}
+            }
+            this._streamSources = null;
         }
         if (this.currentSource) {
             try { this.currentSource.stop(); } catch(e) {}
@@ -303,69 +317,12 @@ class OrzAudioPlayer {
                 throw new Error(`WASM: invalid duration ${duration}s (frames ${totalFrames})`);
             }
 
-            step = 'malloc_render';
-            const renderBufSize = totalFrames * channels * 4;
-            console.log(`WASM: allocating ${renderBufSize} bytes for PCM output`);
-            const renderPtr = this.wasmKit._malloc(renderBufSize);
-            if (!renderPtr) throw new Error(`malloc render failed (${renderBufSize} bytes)`);
-
-            step = 'orz_render';
-            const rendered = this.wasmKit._orz_render(renderPtr, totalFrames);
-            console.log('WASM: orz_render =', rendered, '/', totalFrames, 'frames');
-
-            if (rendered <= 0) {
-                this.wasmKit._free(renderPtr);
-                this.wasmKit._orz_destroy();
-                throw new Error('WASM: no audio rendered');
-            }
-
-            step = 'getValue';
-            const actualFrames = rendered;
-            // Direct view on WASM heap — zero-copy!
-            const audioSamples = new Float32Array(
-                this.wasmKit.HEAPU8.buffer,
-                renderPtr,
-                actualFrames * channels
-            );
-            // Make a copy (WASM heap gets reused on next load)
-            const audioCopy = new Float32Array(audioSamples);
-
-            this.wasmKit._free(renderPtr);
-
-            // 重新读取时长（某些解码器在渲染过程中检测到终止后会更新）
-            const actualDuration = this.wasmKit._orz_get_duration();
-            if (actualDuration > 0 && actualDuration < this.duration) {
-                this.duration = actualDuration;
-                console.log('WASM: corrected duration =', actualDuration);
-            }
-
-            this.wasmKit._orz_destroy();
-            console.log('WASM: decode complete, playing via AudioContext');
-
-            step = 'createBuffer';
-            const audioBuffer = this.audioCtx.createBuffer(
-                channels, actualFrames, sampleRate
-            );
-
-            if (channels === 2) {
-                const left = audioBuffer.getChannelData(0);
-                const right = audioBuffer.getChannelData(1);
-                for (let i = 0; i < actualFrames; i++) {
-                    left[i] = audioCopy[i * 2];
-                    right[i] = audioCopy[i * 2 + 1];
-                }
-            } else {
-                audioBuffer.getChannelData(0).set(audioCopy);
-            }
-
-            this._playAudioBuffer(audioBuffer);
+            // 流式渲染 + 播放：小块渲染 → 立即通过 AudioContext 调度播放
+            step = 'streaming';
+            await this._renderAndPlayStreaming(sampleRate, channels);
         } catch (e) {
             console.error(`WASM decode failed at step "${step}":`, e.message, e);
-            // 清理 WASM 解码器状态，避免影响后续播放
             try { this.wasmKit._orz_destroy(); } catch(_) {}
-            if (typeof renderPtr !== 'undefined' && renderPtr) {
-                try { this.wasmKit._free(renderPtr); } catch(_) {}
-            }
             throw e;
         }
     }
@@ -406,6 +363,107 @@ class OrzAudioPlayer {
             } else {
                 this._onEnded();
             }
+        };
+        this._washProgressRAF = requestAnimationFrame(tick);
+    }
+
+    /**
+     * 流式渲染 + 播放：逐小块渲染并通过 AudioContext 调度播放
+     *
+     * 每次 orz_render 处理小块帧（~2048 帧），创建 AudioBuffer，
+     * 使用 BufferSourceNode.start(playTime) 调度到准确时间播放。
+     * 块之间 await 让出主线程，浏览器保持响应。
+     */
+    async _renderAndPlayStreaming(sampleRate, channels) {
+        const CHUNK_FRAMES = Math.min(2048, Math.max(512, Math.round(sampleRate / 20)));
+        this._streamSources = [];  // 清空并保持引用，stop() 能直接操作
+        const myGen = ++this._streamGen;
+        this._streamActive = true;
+
+        let firstPlayTime = this.audioCtx.currentTime;
+        let playTime = firstPlayTime;
+        let totalRendered = 0;
+
+        while (this._streamActive && this._streamGen === myGen) {
+            const chunkPtr = this.wasmKit._malloc(CHUNK_FRAMES * channels * 4);
+            if (!chunkPtr) break;
+
+            const frames = this.wasmKit._orz_render(chunkPtr, CHUNK_FRAMES);
+            if (frames <= 0) {
+                this.wasmKit._free(chunkPtr);
+                break;
+            }
+
+            // 从 WASM heap 拷贝（free 前必须拷贝）
+            const view = new Float32Array(
+                this.wasmKit.HEAPU8.buffer, chunkPtr, frames * channels
+            );
+            const copy = new Float32Array(view);
+            this.wasmKit._free(chunkPtr);
+
+            // 创建 AudioBuffer
+            const audioBuffer = this.audioCtx.createBuffer(channels, frames, sampleRate);
+            if (channels === 2) {
+                const left = audioBuffer.getChannelData(0);
+                const right = audioBuffer.getChannelData(1);
+                for (let i = 0; i < frames; i++) {
+                    left[i] = copy[i * 2];
+                    right[i] = copy[i * 2 + 1];
+                }
+            } else {
+                audioBuffer.getChannelData(0).set(copy);
+            }
+
+            // 调度播放 — 直接注册到 this._streamSources 以便 stop() 能立即停止
+            const source = this.audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioCtx.destination);
+            source.start(playTime);
+            this._streamSources.push(source);
+
+            playTime += frames / sampleRate;
+            totalRendered += frames;
+
+            // 让出主线程，保持 UI 响应
+            await new Promise(r => setTimeout(r, 0));
+        }
+
+        // 如果被 stop() 中断（新歌已开始），直接退出
+        if (!this._streamActive || this._streamGen !== myGen) {
+            this.wasmKit._orz_destroy();
+            return;
+        }
+
+        if (totalRendered <= 0) {
+            this.wasmKit._orz_destroy();
+            throw new Error('WASM: no audio rendered');
+        }
+
+        // 用实际渲染帧数更新时长
+        this.duration = totalRendered / sampleRate;
+
+        // 清理 WASM 解码器
+        this.wasmKit._orz_destroy();
+
+        this.currentSource = (this._streamSources && this._streamSources[this._streamSources.length - 1]) || null;
+        this.isPlaying = true;
+
+        // 时间进度跟踪
+        const tick = () => {
+            if (!this.isPlaying) return;
+            this.currentTime = Math.min(
+                this.audioCtx.currentTime - firstPlayTime,
+                this.duration
+            );
+            if (this.onTimeUpdate) {
+                this.onTimeUpdate(this.currentTime, this.duration);
+            }
+            if (this.currentTime >= this.duration) {
+                this.isPlaying = false;
+                this._onEnded();
+                return;
+            }
+            this._washProgressRAF = requestAnimationFrame(tick);
         };
         this._washProgressRAF = requestAnimationFrame(tick);
     }
