@@ -386,6 +386,15 @@ build_libsc68() {
             [ -f "$f" ] && C_FILES+=("$f")
         done
     done
+    # 排除 io68/paula*.c，避免与 ahx2play 的 paula.o 冲突
+    local filtered=()
+    for f in "${C_FILES[@]}"; do
+        case "$f" in
+            */paula*.c) ;;
+            *) filtered+=("$f") ;;
+        esac
+    done
+    C_FILES=("${filtered[@]}")
 
     if [ ${#C_FILES[@]} -eq 0 ]; then
         warn "No sc68 source files found"
@@ -794,7 +803,7 @@ generate_wrapper() {
     if [ -d "$BUILD_DIR/src/v2m" ]; then
         source_files+=("$ORZ_SRC/v2m/v2m_native_impl.cpp")
         local v2m_src_src="$BUILD_DIR/src/v2m/src"
-        for f in v2mplayer.cpp v2mconv.cpp tinyplayer.cpp sounddef.cpp ronan.cpp synth_core.cpp; do
+        for f in v2mplayer.cpp v2mconv.cpp sounddef.cpp ronan.cpp synth_core.cpp; do
             [ -f "$v2m_src_src/$f" ] && source_files+=("$v2m_src_src/$f")
         done
     fi
@@ -989,10 +998,32 @@ STUBC
         inc_flags="$inc_flags -I$dir"
     done
 
+    # 生成 sc68 paula 存根（避免与 ahx2play 的 paula 符号冲突）
+    # sc68 的 api68 在 .sc68 格式（YM2149）下不使用 paula 音频输出，
+    # 因此只需提供符号占位，不定义实际的 paula[] 数组（由 ahx2play 提供）。
+    local paula_stubs="$BUILD_DIR/src/paula_stubs.c"
+    cat > "$paula_stubs" << 'PAULA_STUBS'
+#include <stdint.h>
+#include <string.h>
+/* paula_io — 寄存器 I/O 结构（由 api68 引用） */
+typedef struct { int unused; } paula_io_t;
+paula_io_t paula_io;
+/* paula[] 和 paulav[] 不由存根提供 — 它们由 ahx2play 的 paula.o 定义 */
+/* PL (Paula Mixer) 存根 — sc68 格式（YM2149）不需要实际 Paula 音频输出 */
+unsigned int PL_sampling_rate(unsigned int r) { return r; }
+int PL_reset(void) { return 0; }
+int PL_init(void) { return 0; }
+void PL_mix(uint32_t *b, uint8_t *m, int n) { (void)b; (void)m; (void)n; }
+PAULA_STUBS
+    source_files+=("$paula_stubs")
+
     log "Linking WASM with libraries: ${libs[*]}"
 
     emcc "${source_files[@]}" "${libs[@]}" \
         $inc_flags \
+        -include "$PROJECT_DIR/Libraries/OrzAudioKit/thirdparty/ahx2play/mixer_stubs.h" \
+        -D ORZ_HAVE_OPENMPT \
+        -D ORZ_HAVE_GME \
         -s WASM=1 \
         -s MODULARIZE=1 \
         -s EXPORT_NAME="OrzAudioKit" \

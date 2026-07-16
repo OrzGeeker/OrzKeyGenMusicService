@@ -3784,6 +3784,7 @@ var _orz_load,
   _openmpt_module_destroy,
   _free,
   _malloc,
+  _register_players,
   __ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE,
   __ZN7openmpt9exceptionC2ERKS0_,
   __ZN7openmpt9exceptionC2EOS0_,
@@ -4041,6 +4042,14 @@ var _orz_load,
   _openmpt_module_ext_destroy,
   _openmpt_module_ext_get_module,
   _openmpt_module_ext_get_interface,
+  _getPlayerBuf,
+  _getPlayerBufLen,
+  _hash_new,
+  _hashKey,
+  _hash_index,
+  _hash_insert,
+  _hash_lookup,
+  _hash_lookup_len,
   _setThrew,
   __emscripten_tempret_set,
   __emscripten_stack_restore,
@@ -4072,6 +4081,7 @@ function assignWasmExports(wasmExports) {
   _openmpt_module_destroy = Module['_openmpt_module_destroy'] = wasmExports['openmpt_module_destroy'];
   _free = Module['_free'] = wasmExports['free'];
   _malloc = Module['_malloc'] = wasmExports['malloc'];
+  _register_players = Module['_register_players'] = wasmExports['register_players'];
   __ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE = Module['__ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'] = wasmExports['_ZN7openmpt9exceptionC2ERKNSt3__212basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE'];
   __ZN7openmpt9exceptionC2ERKS0_ = Module['__ZN7openmpt9exceptionC2ERKS0_'] = wasmExports['_ZN7openmpt9exceptionC2ERKS0_'];
   __ZN7openmpt9exceptionC2EOS0_ = Module['__ZN7openmpt9exceptionC2EOS0_'] = wasmExports['_ZN7openmpt9exceptionC2EOS0_'];
@@ -4329,6 +4339,14 @@ function assignWasmExports(wasmExports) {
   _openmpt_module_ext_destroy = Module['_openmpt_module_ext_destroy'] = wasmExports['openmpt_module_ext_destroy'];
   _openmpt_module_ext_get_module = Module['_openmpt_module_ext_get_module'] = wasmExports['openmpt_module_ext_get_module'];
   _openmpt_module_ext_get_interface = Module['_openmpt_module_ext_get_interface'] = wasmExports['openmpt_module_ext_get_interface'];
+  _getPlayerBuf = Module['_getPlayerBuf'] = wasmExports['getPlayerBuf'];
+  _getPlayerBufLen = Module['_getPlayerBufLen'] = wasmExports['getPlayerBufLen'];
+  _hash_new = Module['_hash_new'] = wasmExports['hash_new'];
+  _hashKey = Module['_hashKey'] = wasmExports['hashKey'];
+  _hash_index = Module['_hash_index'] = wasmExports['hash_index'];
+  _hash_insert = Module['_hash_insert'] = wasmExports['hash_insert'];
+  _hash_lookup = Module['_hash_lookup'] = wasmExports['hash_lookup'];
+  _hash_lookup_len = Module['_hash_lookup_len'] = wasmExports['hash_lookup_len'];
   _setThrew = wasmExports['setThrew'];
   __emscripten_tempret_set = wasmExports['_emscripten_tempret_set'];
   __emscripten_stack_restore = wasmExports['_emscripten_stack_restore'];
