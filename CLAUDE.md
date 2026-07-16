@@ -74,13 +74,13 @@ Dispatching: `orz_load(format, data, len)` → `audio_engine.c`'s `register_all(
 | `openmpt/` | xm, mod, it, s3m, mo3, mtm, fc13, fc14 | libopenmpt 0.8.0 | ✗ |
 | `gme/` | nsf, spc | game-music-emu 0.6.3 | ✗ |
 | `sidplayfp/` | sid | libsidplayfp 3.0.2 | ✗ |
-| `adplug/` | rad, d00, hsc | adplug 2.4 + libbinio 1.5 | ✗ |
+| `adplug/` | rad, d00, hsc, **amd** | adplug 2.4 + libbinio 1.5 | ✗ |
 | `ym6/` | ym | Built-in YM2149 emulator | ✅ |
 | `midi/` | mid | Built-in wavetable synth (sine/square/saw/triangle) | ✅ |
-| `sc68/` | sc68 | libsc68 | ✗ (disabled) |
-| `asap/` | sap | ASAP | ✗ (disabled) |
-| `uade/` | ahx, thx | UAE Amiga emu | ✗ (disabled) |
-| `v2m/` | v2m | v2m-player | ✗ (disabled) |
+| `sc68/` | sc68 | libsc68 | ✅ |
+| `asap/` | sap | ASAP | ✅ |
+| `uade/` | ahx | ahx2play (8bitbubsy C port) | ✅ |
+| `v2m/` | v2m | v2m-player | ✅ |
 
 ### Static Libraries
 
