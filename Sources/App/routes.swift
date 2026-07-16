@@ -2,9 +2,6 @@ import Fluent
 import Vapor
 
 func routes(_ app: Application) throws {
-    // 保留原兼容路由
-    try app.register(collection: KeyGenMusicController())
-
     // 前端页面
     try app.register(collection: FrontendController())
 

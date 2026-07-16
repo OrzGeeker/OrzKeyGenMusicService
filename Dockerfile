@@ -3,19 +3,6 @@
 # ================================
 FROM swift:6.1-jammy as build
 
-# Install OS updates and audio library dependencies
-RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
-    && apt-get -q update \
-    && apt-get -q dist-upgrade -y \
-    && apt-get -q install -y \
-       # Audio decoding libraries (for ffmpeg plugin support)
-       libopenmpt-dev \
-       libgme-dev \
-       libsidplay2-dev \
-       libchromaprint-dev \
-       libsndfile1-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 # Set up a build area
 WORKDIR /build
 
@@ -25,6 +12,9 @@ RUN swift package resolve
 
 # Copy entire repo into container
 COPY . .
+
+# Build native static libraries (zero system dependency)
+RUN ./script/build-native-libs.sh
 
 # Build everything, with optimizations
 RUN swift build -c release
@@ -40,7 +30,6 @@ RUN find -L "$(swift build --package-path /build -c release --show-bin-path)/" -
 
 # Copy any resources from the public directory and views directory if the directories exist
 RUN [ -d /build/Resources ] && { cp -Ra /build/Resources ./Resources && chmod -R a-w ./Resources; } || true
-RUN [ -d /build/Public ] && { cp -Ra /build/Public ./Public && chmod -R a-w ./Public; } || true
 
 # ================================
 # Run image
@@ -55,10 +44,6 @@ RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
       ca-certificates \
       tzdata \
       ffmpeg \
-      libopenmpt0 \
-      libgme0 \
-      libsidplay2 \
-      libchromaprint1 \
       curl \
     && rm -r /var/lib/apt/lists/*
 
