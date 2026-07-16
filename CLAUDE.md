@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 解码能力
+
+同一份 C 源码 → WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
+
 ## Build & Test
 
 ```bash
