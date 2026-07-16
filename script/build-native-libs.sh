@@ -382,7 +382,8 @@ build_libsc68() {
     pushd "$build_dir" >/dev/null || return 1
 
     local C_FILES=()
-    for d in api68 emu68 file68 io68 unice68 sc68; do
+    # 只编译库核心模块，排除 sc68/（CLI 工具，含 main()）
+    for d in api68 emu68 file68 io68 unice68; do
         for f in "$src_dir/$d"/*.c; do
             [ -f "$f" ] && C_FILES+=("$f")
         done
@@ -429,22 +430,14 @@ build_libasap() {
         return 1
     fi
 
-    # ASAP requires xasm (6502 cross-assembler) for the built-in player code
-    if ! command -v xasm &>/dev/null; then
-        warn "xasm (6502 assembler) not found — ASAP build skipped (sap format will use stub)"
-        return 1
-    fi
-
+    # ASAP 的 asap.c 是预生成的（从 .fu 文件），可以直接编译
     mkdir -p "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
-    CC="$HOST_CC" CFLAGS="-O2" make -f "$src_dir/Makefile" libasap.a 2>&1 | tail -3 || {
-        warn "ASAP build failed"; popd >/dev/null; return 1
+    $HOST_CC -c "$src_dir/asap.c" -o asap.o -I"$src_dir" -O2 2>/dev/null || {
+        warn "ASAP compile failed"; popd >/dev/null; return 1
     }
-
-    local libfile=$(find . -name "libasap.a" -type f 2>/dev/null | head -1)
-    [ -z "$libfile" ] && { warn "libasap.a not found"; popd >/dev/null; return 1; }
-    cp "$libfile" "$output"
+    ar cr "$output" asap.o 2>/dev/null && ranlib "$output" 2>/dev/null
     log "libasap.a → $output ($(du -h "$output" | cut -f1))"
     echo "$NATIVE_DIR"
 }
