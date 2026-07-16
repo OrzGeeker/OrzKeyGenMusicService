@@ -20,214 +20,16 @@
 #include <stdint.h>
 #include "audio_engine.h"
 
-// ── Embedded LHa/LZH decompressor (LH5/LH6) ───────────────────────────
-// 零系统依赖，无需外部 lha/lhasa 命令
+// ── LHa 解压 ───────────────────────────────────────────────
+// YM 文件可能被 LHa 压缩。WASM 构建需要内置解压器。
+// 由于标准 LH5 霍夫曼解码实现复杂，此版本始终返回 0（未压缩），
+// 由服务端层（SongController）在传输前用系统 lha 命令解压。
+// 原生构建亦通过服务端层处理，不解压。
 
-// Bit reader state for LZH decompression
-struct lz_reader {
-    const unsigned char *in;
-    int in_len;
-    int in_pos;
-    unsigned int buf;     // bit buffer
-    int bits;             // bits remaining in buffer
-};
-
-static int lz_read_byte(struct lz_reader *r, unsigned char *out) {
-    if (r->in_pos >= r->in_len) return -1;
-    *out = r->in[r->in_pos++];
-    return 0;
-}
-
-static int lz_read_bit(struct lz_reader *r) {
-    if (r->bits <= 0) {
-        unsigned char b;
-        if (lz_read_byte(r, &b) < 0) return -1;
-        r->buf = b;
-        r->bits = 8;
-    }
-    r->bits--;
-    int bit = (r->buf >> r->bits) & 1;
-    return bit;
-}
-
-static int lz_read_bits(struct lz_reader *r, int n) {
-    int val = 0;
-    for (int i = 0; i < n; i++) {
-        int bit = lz_read_bit(r);
-        if (bit < 0) return 0;
-        val = (val << 1) | bit;
-    }
-    return val;
-}
-
-// Decode LZH match length (unary coding: count leading 1-bits)
-// LH5: 0→len2, 10→3, 110→4, 1110→5, 11110→6, 111110→7, 1111110→8+5bits(range 8-39)
-// LH6: same + 11111110→40+9bits(range 40-551)
-static int lz_decode_length(struct lz_reader *r, int is_lh6) {
-    int ones = 0;
-    while (1) {
-        int bit = lz_read_bit(r);
-        if (bit < 0) return 2;           // fallback
-        if (bit == 0) break;             // found the 0 terminator
-        ones++;
-        if (is_lh6 && ones >= 7) break;   // LH6: 7+ ones means extended
-    }
-    if (ones <= 5) {
-        return ones + 2;                  // 2-7
-    } else if (!is_lh6) {
-        // LH5: read 5 extra bits
-        return lz_read_bits(r, 5) + 8;    // 8-39
-    } else {
-        // LH6: check for extended
-        if (ones == 6) {
-            return lz_read_bits(r, 5) + 8; // 8-39
-        } else {
-            // ones == 7: read 9 extra bits
-            return lz_read_bits(r, 9) + 40; // 40-551
-        }
-    }
-}
-
-// Decompress LH5/LH6 data block
-// Returns: decompressed data length, or -1 on error
-// *out_data receives malloc'd buffer (caller must free)
-static int lz_decompress_lh(const unsigned char *in, int in_len,
-                             unsigned char **out_data, int is_lh6) {
-    if (in_len < 24) return -1;
-
-    // LHa Level 0 header layout (common for YM files):
-    // [2]  header_skip       (checksum + flags, skip past)
-    // [5]  method            (e.g., "-lh5-")
-    // [4]  packed_size       (LE 32-bit)
-    // [4]  original_size     (LE 32-bit)
-    // [2]  time (DOS)
-    // [2]  date (DOS)
-    // [1]  attribute
-    // [1]  level (= 0 or 1 or 2)
-    // [1]  name_length (n)
-    // [n]  name
-    // [2]  CRC16 (if level 0, optional for level 1/2)
-    // ─── compressed data follows ───
-
-    // Original size at offset 2+5 = 7 → actually at offset 11
-    // Magic " -lh5-" starts at offset 2
-    // Packed size starts at offset 7 (LE)
-    // Original size starts at offset 11 (LE)
-    int method_off = 2;
-    int packed_off  = method_off + 5;                     // 7
-    int orig_off    = packed_off + 4;                     // 11
-    int time_off    = orig_off + 4;                       // 15
-    int date_off    = time_off + 2;                       // 17
-    int attr_off    = date_off + 2;                       // 19
-    int level_off   = attr_off + 1;                       // 20
-    int name_len_off = level_off + 1;                     // 21
-
-    if (in_len <= name_len_off) return -1;
-    int level = in[level_off];                             // 0, 1, or 2
-    int name_len = in[name_len_off];
-
-    // Read original size
-    int orig_size = in[orig_off] | (in[orig_off+1] << 8) |
-                    (in[orig_off+2] << 16) | (in[orig_off+3] << 24);
-    if (orig_size <= 0 || orig_size > 4 * in_len || orig_size > 32 * 1024 * 1024) {
-        return -1;
-    }
-
-    // Calculate header size
-    int hdr_size = name_len_off + 1 + name_len; // up to end of name
-    if (level == 0) {
-        hdr_size += 2; // CRC-16 (present in level 0)
-    }
-    // Level 1/2 may have extended headers; for simplicity, skip forward
-    // until we find the compressed data marker
-    if (level >= 1 && hdr_size < in_len) {
-        // Level 1: extended header blocks follow the name
-        while (hdr_size < in_len - 2) {
-            int ext_size = in[hdr_size] | (in[hdr_size+1] << 8);
-            if (ext_size == 0) {
-                hdr_size += 2;
-                break;  // end of extended headers marker
-            }
-            hdr_size += ext_size;
-        }
-    }
-
-    if (hdr_size >= in_len) {
-        // Fallback: just skip past the known header fields
-        hdr_size = name_len_off + 1 + name_len;
-        if (level == 0) hdr_size += 2;
-    }
-
-    unsigned char *out = (unsigned char *)malloc(orig_size);
-    if (!out) return -1;
-
-    struct lz_reader r;
-    r.in = in;
-    r.in_len = in_len;
-    r.in_pos = 0;
-    r.buf = 0;
-    r.bits = 0;
-
-    r.in_pos = hdr_size;
-    if (r.in_pos >= in_len) { free(out); return -1; }
-
-    int offset_bits = is_lh6 ? 16 : 13;
-    int out_pos = 0;
-
-    while (out_pos < orig_size) {
-        int flag = lz_read_bit(&r);
-        if (flag < 0) break;
-
-        if (flag == 0) {
-            // Literal byte
-            unsigned char c;
-            if (lz_read_byte(&r, &c) < 0) break;
-            out[out_pos++] = c;
-        } else {
-            // Match: copy from sliding window
-            // LZH 流顺序：length 先于 offset
-            int length = lz_decode_length(&r, is_lh6);
-            int offset = lz_read_bits(&r, offset_bits) + 1;
-
-            if (offset > out_pos) offset = out_pos; // safety
-            if (length > orig_size - out_pos) length = orig_size - out_pos;
-
-            for (int i = 0; i < length && out_pos < orig_size; i++) {
-                out[out_pos] = out[out_pos - offset];
-                out_pos++;
-            }
-        }
-    }
-
-    *out_data = out;
-    return out_pos;
-}
-
-// Check if data is LHa-compressed and decompress if so.
-// Returns 0 if already raw YM6, 1 if decompressed successfully, -1 on error.
-// If decompressed, frees *data and replaces with new buffer.
 static int ym6_decompress_lha(const unsigned char **data_ptr, int *len_ptr) {
-    const unsigned char *data = *data_ptr;
-    int len = *len_ptr;
-    if (len < 6) return 0;
-
-    // LHa LH5 magic: "-lh5-" at offset 2 (after header_skip[2])
-    // LHa LH6 magic: "-lh6-" at offset 2
-    if (data[2] == '-' && data[3] == 'l' && data[4] == 'h' &&
-        (data[5] == '5' || data[5] == '6') && data[6] == '-') {
-        int is_lh6 = (data[3] == '6');
-        unsigned char *decomp = NULL;
-        int out_len = lz_decompress_lh(data, len, &decomp, is_lh6);
-        if (out_len > 0 && decomp) {
-            // Replace input with decompressed data
-            *data_ptr = decomp;
-            *len_ptr = out_len;
-            return 1;
-        }
-        free(decomp);
-        return -1;
-    }
-    return 0;
+    (void)data_ptr;
+    (void)len_ptr;
+    return 0;  // LHa 解压由 Swift 服务端层负责
 }
 
 // ── YM2149 emulator ──
@@ -372,7 +174,7 @@ static double ym6_parse_header(const uint8_t *data, int len,
 
     // Calculate frame data offset from end of file
     int frame_offset = len - total_frames * 16;
-    int min_header = (m2 == '6') ? 38 : 34;
+    int min_header = (m2 == '6') ? 34 : 30;  // YM5:30 YM6:34
     if (frame_offset < min_header) return 0;
 
     *out_total_frames = total_frames;

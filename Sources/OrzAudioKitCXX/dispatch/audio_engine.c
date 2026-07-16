@@ -73,7 +73,7 @@ __attribute__((used)) __attribute__((noinline)) void register_all() {
         orz_register_decoder("ahx,thx", &decoder_uade_ahx);
 
     if (decoder_adplug.load)
-        orz_register_decoder("rad,d00,hsc,amd", &decoder_adplug);
+        orz_register_decoder("rad,d00,hsc,amd,bp", &decoder_adplug);
 
     if (decoder_midi.load)
         orz_register_decoder("mid", &decoder_midi);

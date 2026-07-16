@@ -54,6 +54,7 @@ extern "C" int adplug_load(const unsigned char *data, int len)
         else if (strcmp(orz_current_format, "rad") == 0) ext = ".rad";
         else if (strcmp(orz_current_format, "d00") == 0) ext = ".d00";
         else if (strcmp(orz_current_format, "hsp") == 0) ext = ".hsp";
+        else if (strcmp(orz_current_format, "bp") == 0) ext = ".bp";
     }
 
     // Write data to MEMFS with format-appropriate extension

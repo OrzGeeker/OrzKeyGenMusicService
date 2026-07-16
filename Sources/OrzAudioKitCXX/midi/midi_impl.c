@@ -86,6 +86,8 @@ static int   program_map[16];
 static double current_tempo = 500000.0;
 static int   ticks_per_quarter = 480;
 static int   midi_duration_ticks = 0;
+static int   silence_frames = 0;    // 沉默帧计数器，用于提前退出
+static int   remaining_note_on = 0; // 尚未处理的 NOTE_ON 事件数
 
 // ── 包络参数 ──
 
@@ -212,6 +214,12 @@ static int impl_load(const unsigned char *data, int len) {
 
     event_index = 0;
     total_samples = 0;
+    silence_frames = 0;
+    remaining_note_on = 0;
+    // 统计 NOTE_ON 事件数量
+    for (int i = 0; i < event_count; i++) {
+        if (events[i].type == MIDI_EV_NOTE_ON) remaining_note_on++;
+    }
     current_tempo = 500000.0;
 
     for (int i = 0; i < 16; i++) program_map[i] = 0;
@@ -239,6 +247,8 @@ static double impl_get_duration(void) {
 static int impl_get_sample_rate(void) { return SAMPLE_RATE; }
 static int impl_get_channels(void) { return 2; }
 
+#define SILENCE_LIMIT_SAMPLES 22050  // 0.5s 沉默后提前退出
+
 static int impl_render(float *out, int frames) {
     if (!events || event_count == 0) return 0;
 
@@ -253,6 +263,7 @@ static int impl_render(float *out, int frames) {
             switch (ev->type) {
                 case MIDI_EV_NOTE_ON:
                     note_on(ev->note, ev->velocity / 127.0f, ev->channel);
+                    if (remaining_note_on > 0) remaining_note_on--;
                     break;
                 case MIDI_EV_NOTE_OFF:
                     note_off(ev->note, ev->channel);
@@ -303,7 +314,7 @@ static int impl_render(float *out, int frames) {
         }
 
         if (active_count > 0) {
-            float scale = 0.6f;
+            float scale = 1.0f;
             out[s * 2 + 0] = left * scale;
             out[s * 2 + 1] = right * scale;
         } else {
@@ -312,6 +323,25 @@ static int impl_render(float *out, int frames) {
         }
 
         total_samples++;
+    }
+
+    // 如果所有 NOTE_ON 事件已处理完且所有音色已释放，继续沉默超过阈值则提前结束
+    // 注意：检测 remaining_note_on 而非 event_index >= event_count，
+    // 因为可能有非 NOTE_ON 元事件（tempo/end_track）在 Note 之后很远的位置
+    if (remaining_note_on <= 0) {
+        int all_done = 1;
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].active) { all_done = 0; break; }
+        }
+        if (all_done) {
+            silence_frames += frames;
+            if (silence_frames >= SILENCE_LIMIT_SAMPLES) {
+                silence_frames = 0;
+                return 0;  // 信号结束，JS 流式循环收到 0 后会 break
+            }
+        } else {
+            silence_frames = 0;
+        }
     }
 
     return frames;
@@ -324,6 +354,8 @@ static void impl_destroy(void) {
     event_index = 0;
     memset(voices, 0, sizeof(voices));
     total_samples = 0;
+    silence_frames = 0;
+    remaining_note_on = 0;
 }
 
 // ── 导出 Decoder 实例 ──

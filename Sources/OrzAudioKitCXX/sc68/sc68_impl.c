@@ -25,6 +25,7 @@ static int sample_rate = 44100;
 static int duration_ms = 0;
 static int buffer_samples = 0;
 static int *pcm_buffer = NULL;
+static int sc68_ended = 0;          // 歌曲结束后标记，后续 render 返回 0
 
 // ── inline replay data 注册 ──
 extern void register_players(void);
@@ -43,6 +44,7 @@ static int impl_load(const unsigned char *data, int len)
     pcm_buffer = NULL;
     buffer_samples = 0;
     duration_ms = 0;
+    sc68_ended = 0;
 
     // 注册 inline replay modules
     register_players();
@@ -104,6 +106,9 @@ static int impl_render(float *out, int frames)
 {
     if (!sc68) return 0;
 
+    // 歌曲已结束（上次调用已返回 API68_END），返回 0 让 JS 流式循环退出
+    if (sc68_ended) return 0;
+
     // 使用 static 内部缓冲区 + 固定 512 帧（与 emscripten adapter 一致）
     // api68_process 内部循环直到填满请求帧数或遇到结束才返回
     static int pcm[512];
@@ -118,6 +123,8 @@ static int impl_render(float *out, int frames)
         if (seek_pos > 0) real_ms = seek_pos;
         if (real_ms <= 0) real_ms = (int)((unsigned long long)to_process * 1000 / sample_rate);
         if (real_ms > 0 && real_ms < duration_ms) duration_ms = real_ms;
+        // 标记已结束，下次 render 返回 0 让 JS 流式循环退出
+        sc68_ended = 1;
     }
     if (status == API68_MIX_ERROR) return 0;
 
@@ -140,6 +147,7 @@ static void impl_destroy(void)
     pcm_buffer = NULL;
     buffer_samples = 0;
     duration_ms = 0;
+    sc68_ended = 0;
 }
 
 // ── 导出 Decoder 实例 ──

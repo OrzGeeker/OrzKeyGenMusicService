@@ -50,7 +50,7 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
         case .ahx, .amd, .fc13, .fc14, .sap, .ym, .rad, .d00:
             return .wasmDecode
         case .bp:
-            return .serverDecode
+            return .wasmDecode
         }
     }
 

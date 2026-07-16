@@ -886,6 +886,7 @@ generate_wrapper() {
         "$ORZ_SRC/midi/midi_impl.c"
     )
 
+
     # ── 条件编译其他解码器（仅在其依赖库可用时加入）──
 
     # ASAP (sap) — 直接编译 asap.c（预生成 C 源码，无需 .a）

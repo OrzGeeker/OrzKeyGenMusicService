@@ -17,6 +17,8 @@ static unsigned char *owned_data = NULL;  // V2MPlayer 只存指针，必须持�
 static int owned_data_len = 0;
 static int sample_rate = 44100;
 static int channels = 2;
+static int v2m_file_size = 0;            // 文件大小，用于 duration 降级判断
+static int v2m_ended = 0;                // 歌曲结束后标记，后续 render 返回 0
 
 // ── Decoder 接口 ──
 
@@ -30,6 +32,8 @@ static int impl_load(const unsigned char *data, int len) {
     if (!owned_data) return 0;
     memcpy(owned_data, data, len);
     owned_data_len = len;
+    v2m_file_size = len;
+    v2m_ended = 0;
 
     player = new V2MPlayer();
     if (!player) { free(owned_data); owned_data = NULL; return 0; }
@@ -42,12 +46,21 @@ static int impl_load(const unsigned char *data, int len) {
         return 0;
     }
 
+    // Play 调用启动回放（必须在 load 时调用一次，不要在 render 重复调用，
+    // 因为 V2MPlayer::Play() 内部会 Stop() + Reset()，重复调用会丢失进度）
+    player->Play(0);
+
     return 1;
 }
 
 static double impl_get_duration(void) {
     if (!player) return 0;
     uint32_t len = player->Length();
+    // Length() 返回毫秒。对于大文件（>10KB）但时长 <5s 的情况，
+    // 可能是 Length() 不准确，使用 120 秒默认值确保能完整播放
+    if (len < 5000 && v2m_file_size > 10240) {
+        return 120.0;
+    }
     return (len > 0) ? (double)len / 1000.0 : 0.0;
 }
 
@@ -57,11 +70,16 @@ static int impl_get_channels(void) { return channels; }
 static int impl_render(float *out, int frames) {
     if (!player) return 0;
 
-    // 每次 render 首次调用时 start playback
-    player->Play(0);
+    // 歌曲已结束（上次检测到 IsPlaying=false），返回 0 让 JS 流式循环退出
+    if (v2m_ended) return 0;
 
     // V2MPlayer::Render 输出 float32 stereo interleaved
     player->Render(out, frames, false);
+
+    // 检测歌曲是否结束：Render 后检查 IsPlaying，若结束则标记并在下次返回 0
+    if (!player->IsPlaying()) {
+        v2m_ended = 1;
+    }
 
     // 音量衰减
     for (int i = 0; i < frames * 2; i++) {
@@ -80,6 +98,8 @@ static void impl_destroy(void) {
     free(owned_data);
     owned_data = NULL;
     owned_data_len = 0;
+    v2m_file_size = 0;
+    v2m_ended = 0;
 }
 
 // ── 导出 Decoder 实例（必须 extern "C" 以覆盖 stub_decoders.c 的弱符号）──

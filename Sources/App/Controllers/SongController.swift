@@ -93,8 +93,15 @@ struct SongController: RouteCollection {
             throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
         }
 
-        // YM 格式：WASM 解码器内置了 LHa 解压，直接服务原始文件
+        // YM 格式：WASM 解码器需要原始 YM6 数据（不含 LHa 压缩头）
+        // 如果 CAS 存储的是 LHa 压缩版，用系统 lha 解压后再提供
         if format == .ym {
+            if isLHaCompressed(at: fullPath) {
+                let decompPath = try await decompressYM(fullPath, sha256: song.sha256, cas: cas)
+                var res = try await req.fileio.asyncStreamFile(at: decompPath)
+                res.headers.replaceOrAdd(name: .contentType, value: "audio/ym")
+                return res
+            }
             var res = try await req.fileio.asyncStreamFile(at: fullPath)
             res.headers.replaceOrAdd(name: .contentType, value: "audio/ym")
             return res
@@ -163,6 +170,61 @@ struct SongController: RouteCollection {
     }
 
     private let queue = DispatchQueue(label: "com.orzplayer.cache")
+
+    /// 检查文件是否 LHa 压缩（以 "-lh5-" 或 "-lh6-" 头标记）
+    private func isLHaCompressed(at path: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
+        defer { try? handle.close() }
+        let magic = handle.readData(ofLength: 8)
+        guard magic.count >= 7 else { return false }
+        // LHa 头：2 字节校验 + "-lh5-" 或 "-lh6-"
+        let bytes = [UInt8](magic)
+        return bytes[2] == 0x2D && bytes[3] == 0x6C && bytes[4] == 0x68 &&
+               (bytes[5] == 0x35 || bytes[5] == 0x36) && bytes[6] == 0x2D
+    }
+
+    /// 使用系统 lha 解压 YM 文件，结果缓存到 CAS 缓存目录
+    private func decompressYM(_ path: String, sha256: String, cas: CasStorageService) async throws -> String {
+        let cacheDir = "\(cas.root)/.cache/ym/"
+        let cachePath = "\(cacheDir)\(sha256).ym"
+        let fm = FileManager.default
+        if fm.fileExists(atPath: cachePath) { return cachePath }
+
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("orz_ym_\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/lha")
+        process.arguments = ["x", path]
+        process.currentDirectoryURL = tmpDir
+
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            process.terminationHandler = { p in
+                if p.terminationStatus == 0 { c.resume() }
+                else { c.resume(throwing: AudioError.decodeFailed("lha exit \(p.terminationStatus)")) }
+            }
+            do { try process.run() } catch { c.resume(throwing: error) }
+        }
+
+        // 找到解压出的文件
+        let contents = try fm.contentsOfDirectory(atPath: tmpDir.path)
+        guard let decompFile = contents.first(where: { $0 != "." && $0 != ".." }) else {
+            throw AudioError.decodeFailed("lha produced no output for YM: \(sha256)")
+        }
+
+        let decompPath = tmpDir.appendingPathComponent(decompFile).path
+        try queue.sync {
+            try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
+            if !fm.fileExists(atPath: cachePath) {
+                try fm.copyItem(atPath: decompPath, toPath: cachePath)
+            }
+        }
+        return cachePath
+    }
 
     private func baseURL(from req: Request) -> String {
         "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"

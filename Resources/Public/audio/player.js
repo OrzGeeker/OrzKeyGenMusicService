@@ -375,7 +375,7 @@ class OrzAudioPlayer {
      * 块之间 await 让出主线程，浏览器保持响应。
      */
     async _renderAndPlayStreaming(sampleRate, channels) {
-        const CHUNK_FRAMES = Math.min(2048, Math.max(512, Math.round(sampleRate / 20)));
+        const CHUNK_FRAMES = Math.min(22050, Math.max(1024, Math.round(sampleRate / 2)));
         this._streamSources = [];  // 清空并保持引用，stop() 能直接操作
         const myGen = ++this._streamGen;
         this._streamActive = true;
@@ -383,8 +383,21 @@ class OrzAudioPlayer {
         let firstPlayTime = this.audioCtx.currentTime;
         let playTime = firstPlayTime;
         let totalRendered = 0;
+        // 安全上限：最多渲染 duration 的 1.5 倍帧数，防止解码器不返回 0 时无限循环
+        const maxFrames = Math.ceil(this.duration * sampleRate * 1.5);
+        // 渲染起始时间，用于检测渲染耗时是否远超实时导致卡死
+        const renderStart = Date.now();
 
         while (this._streamActive && this._streamGen === myGen) {
+            if (totalRendered >= maxFrames) {
+                console.log('WASM: render complete (cap)');
+                break;
+            }
+            // 如果渲染耗时超过 60 秒（实时），主动中止以防页面卡死
+            if (Date.now() - renderStart > 60000) {
+                console.log('WASM: render timeout (60s)');
+                break;
+            }
             const chunkPtr = this.wasmKit._malloc(CHUNK_FRAMES * channels * 4);
             if (!chunkPtr) break;
 
