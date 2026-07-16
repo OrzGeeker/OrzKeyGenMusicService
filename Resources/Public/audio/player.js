@@ -361,6 +361,11 @@ class OrzAudioPlayer {
             this._playAudioBuffer(audioBuffer);
         } catch (e) {
             console.error(`WASM decode failed at step "${step}":`, e.message, e);
+            // 清理 WASM 解码器状态，避免影响后续播放
+            try { this.wasmKit._orz_destroy(); } catch(_) {}
+            if (typeof renderPtr !== 'undefined' && renderPtr) {
+                try { this.wasmKit._free(renderPtr); } catch(_) {}
+            }
             throw e;
         }
     }

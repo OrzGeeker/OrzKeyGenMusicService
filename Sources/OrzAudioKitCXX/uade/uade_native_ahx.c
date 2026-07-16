@@ -8,6 +8,10 @@
 #include "audio_engine.h"
 #include "replayer.h"
 
+// ahx2play forward declarations (not in replayer.h)
+bool ahxInitWaves(void);
+void ahxFreeWaves(void);
+
 static int ahx_play_started = 0;
 static int16_t *render_buf = NULL;
 static int render_buf_size = 0;
@@ -16,6 +20,7 @@ static void impl_destroy(void);
 
 static int impl_load(const unsigned char *data, int len) {
     impl_destroy();
+    ahxInitWaves();
     if (!ahxLoadFromRAM(data)) return 0;
     if (!ahxInit(44100, 4096, 256, 20)) { ahxFree(); return 0; }
     return 1;
