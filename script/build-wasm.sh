@@ -1145,19 +1145,13 @@ PAULA_STUBS
         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32", "HEAPF32"]' \
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
-        -s ALLOW_MEMORY_GROWTH=1 \
+        -s ALLOW_MEMORY_GROWTH=0 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
         -D __stdcall= \
         -D '__int64=long long' \
         --no-entry \
         -O1 \
         -o "$OUTPUT_DIR/orz_audio.js"
-
-    # Post-process: wrap TextDecoder.decode in try-catch for ALLOW_MEMORY_GROWTH=1 compatibility.
-    # In newer JS engines, WebAssembly.Memory.buffer is resizable when maximum is set,
-    # which causes TextDecoder.decode() to throw "The provided ArrayBuffer value must not be resizable".
-    sed -i '' 's/return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));/try { return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr)); } catch(e) {}\
-        /' "$OUTPUT_DIR/orz_audio.js"
 
     log "WASM module created:"
     ls -lh "$OUTPUT_DIR/orz_audio.wasm" "$OUTPUT_DIR/orz_audio.js" 2>/dev/null || true
