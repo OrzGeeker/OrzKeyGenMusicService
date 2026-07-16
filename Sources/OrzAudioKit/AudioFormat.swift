@@ -36,9 +36,8 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
     /// 该格式对应的播放策略
     public var playStrategy: PlayStrategy {
         switch self {
-        case .wav, .sc68:
-            // WAV: ADPCM/GSM 编码服务端转 PCM
-            // SC68: 68K CPU 模拟在 WASM 中极慢，服务端原生解码更快
+        case .wav:
+            // WAV 可能有 ADPCM/GSM 编码，浏览器不原生支持，服务端转 PCM
             return .serverDecode
         case .mp3, .ogg, .flac, .m4a, .aac:
             return .directFile
@@ -46,7 +45,7 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
             return .wasmDecode
         case .xm, .mod, .it, .s3m, .mo3, .mtm:
             return .wasmDecode
-        case .v2m, .hsc, .sid, .nsf, .spc:
+        case .v2m, .sc68, .hsc, .sid, .nsf, .spc:
             return .wasmDecode
         case .ahx, .amd, .fc13, .fc14, .sap, .ym, .rad, .d00:
             return .wasmDecode

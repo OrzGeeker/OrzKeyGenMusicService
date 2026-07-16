@@ -66,8 +66,8 @@ static int impl_load(const unsigned char *data, int len)
         return 0;
     }
 
-    // 限制最大播放时长（必须在 play 之前设置）
-    api68_override_max_playtime(30000);
+    // 限制最大播放时长 — WASM 中 68K 模拟极慢，限 8 秒避免页面卡死
+    api68_override_max_playtime(8000);
 
     // 默认第一轨（关联播放器，必须在 music_info 前启动）
     api68_play(sc68, 0);
@@ -109,10 +109,10 @@ static int impl_render(float *out, int frames)
     // 歌曲已结束，返回 0 让 JS 流式循环退出
     if (sc68_ended) return 0;
 
-    // api68_process 在 WASM 中 68K 模拟极慢（每帧 160K cycles），
-    // 每次只处理 16 帧以确保快速返回 (<5ms)，避免卡死浏览器主线程
-    static int pcm[16];
-    int to_process = 16;
+    // SC68 已改为 serverDecode（服务端原生解码更快），
+    // WASM 不再调用此解码器。为保持原生解码速度，用 512 帧/批
+    static int pcm[512];
+    int to_process = 512;
     if (frames < to_process) to_process = frames;
 
     int status = api68_process(sc68, pcm, to_process);
