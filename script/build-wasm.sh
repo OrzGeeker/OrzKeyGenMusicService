@@ -46,9 +46,7 @@ OGG_URL="https://downloads.xiph.org/releases/ogg/libogg-${OGG_VERSION}.tar.gz"
 VORBIS_VERSION="1.3.7"
 VORBIS_URL="https://downloads.xiph.org/releases/vorbis/libvorbis-${VORBIS_VERSION}.tar.gz"
 
-# uade — UAE Amiga 模拟器核心（AHX/FC14 等 Amiga 格式解码）
-UADE_VERSION="3.05"
-UADE_URL="https://gitlab.com/uade-music-player/uade/-/archive/uade-${UADE_VERSION}/uade-${UADE_VERSION}.tar.gz"
+# uade (deprecated) — 旧版 UAE Amiga 模拟器，已替换为 ahx2play
 
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 
@@ -642,7 +640,7 @@ build_vorbis() {
 }
 
 # ------------------------------------------------------------------
-# Setup uade source (UAE Amiga emulator core for AHX/FC14)
+# Setup uade source (不活跃 — 已替换为 ahx2play，保留供参考）
 # ------------------------------------------------------------------
 setup_uade_source() {
     local src_dir
@@ -792,47 +790,29 @@ generate_wrapper() {
         source_files+=("$ORZ_SRC/sc68/sc68_impl.c")
     fi
 
-    # v2m-player (V2M format) — 需要 v2m 源码
+    # v2m-player (V2M format) — 使用统一实现（与 SPM 共享）
     if [ -d "$BUILD_DIR/src/v2m" ]; then
-        source_files+=("$ORZ_SRC/v2m/v2m_wasm.cpp" "$ORZ_SRC/v2m/v2mplayer_wasm.cpp")
-        local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
-        [ -f "$v2m_synth_core" ] && source_files+=("$v2m_synth_core")
-    fi
-
-    # uade (AHX, FC14) — 需要 UAE Amiga 模拟器核心
-
-    # ── UAE Amiga emulator core（文件不存在时跳过）──
-    local uade_core_files=(
-        newcpu.c memory.c custom.c cia.c audio.c missing.c
-        cpustbl.c readcpu.c cpudefs.c cpuemu.c sinctable.c
-        sd-sound-generic.c machdep/support.c
-    )
-    local uade_dir="$BUILD_DIR/src/uade"
-    if [ -d "$uade_dir" ] && [ -f "$uade_dir/newcpu.c" ] && [ -f "$uade_dir/cpustbl.c" ]; then
-        source_files+=("$ORZ_SRC/uade/uade_wasm.c")
-        for f in "${uade_core_files[@]}"; do
-            [ -f "$uade_dir/$f" ] && source_files+=("$uade_dir/$f")
+        source_files+=("$ORZ_SRC/v2m/v2m_native_impl.cpp")
+        local v2m_src_src="$BUILD_DIR/src/v2m/src"
+        for f in v2mplayer.cpp v2mconv.cpp tinyplayer.cpp sounddef.cpp ronan.cpp synth_core.cpp; do
+            [ -f "$v2m_src_src/$f" ] && source_files+=("$v2m_src_src/$f")
         done
-        inc_dirs+=("$uade_dir")
-        [ -d "$uade_dir/include" ] && inc_dirs+=("$uade_dir/include")
-        [ -d "$uade_dir/frontends/include" ] && inc_dirs+=("$uade_dir/frontends/include")
-        [ -d "$uade_dir/frontends/common" ] && inc_dirs+=("$uade_dir/frontends/common")
-    else
-        log "UAE core not available, uade formats (AHX/FC14) disabled"
     fi
-    local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
-    if [ -f "$v2m_synth_core" ]; then
-        source_files+=("$v2m_synth_core")
+
+    # ahx2play (AHX format) — 轻量解码器，替换完整 UAE 仿真器
+    if [ -d "$BUILD_DIR/src/ahx2play" ]; then
+        source_files+=("$ORZ_SRC/uade/uade_native_ahx.c")
+        source_files+=(
+            "$BUILD_DIR/src/ahx2play/loader.c"
+            "$BUILD_DIR/src/ahx2play/replayer.c"
+            "$BUILD_DIR/src/ahx2play/paula.c"
+        )
+        inc_dirs+=("$BUILD_DIR/src/ahx2play")
+    else
+        log "ahx2play not available, AHX format disabled"
     fi
     inc_dirs+=("$ORZ_SRC/include")
     inc_dirs+=("$BUILD_DIR")       # ASAP 头文件 (asap.h)
-    # ── UAE (Amiga emulator) 头文件 — 优先于 adplug（防 debug.h 冲突）──
-    if [ -d "$BUILD_DIR/src/uade" ]; then
-        inc_dirs+=("$BUILD_DIR/src/uade")           # sysconfig.h, uae.h, etc.
-        inc_dirs+=("$BUILD_DIR/src/uade/include")   # uae/*.h
-        inc_dirs+=("$BUILD_DIR/src/uade/frontends/include")  # uade/*.h
-        inc_dirs+=("$BUILD_DIR/src/uade/frontends/common")   # support.h, etc.
-    fi
     # libopenmpt 头文件（0.8.0 头文件在 libopenmpt/libopenmpt.h）
     if [ -d "$BUILD_DIR/src/libopenmpt/libopenmpt" ]; then
         inc_dirs+=("$BUILD_DIR/src/libopenmpt")
@@ -846,9 +826,8 @@ generate_wrapper() {
     if [ -d "$BUILD_DIR/src/adplug/src" ]; then
         inc_dirs+=("$BUILD_DIR/src/adplug/src")
     fi
-    if [ -d "$BUILD_DIR/src/v2m" ]; then
-        inc_dirs+=("$BUILD_DIR/src")           # v2m/types.h, v2m/synth.h 等
-        inc_dirs+=("$BUILD_DIR/src/v2m")       # types.h, synth.h, v2mplayer.h (短名引用)
+    if [ -d "$BUILD_DIR/src/v2m/src" ]; then
+        inc_dirs+=("$BUILD_DIR/src/v2m/src")   # v2mplayer.h, types.h, synth.h
     fi
     # sc68 头文件
     if [ -d "$BUILD_DIR/src/sc68" ]; then
@@ -1164,15 +1143,13 @@ main() {
         warn "libsidplayfp build failed, SID format will not be available"
     fi
 
-    # ── uade (UAE Amiga emulator for AHX/FC14) ──
-    if [ ! -f "$BUILD_DIR/src/uade/newcpu.c" ]; then
-        log "Attempting to set up uade source..."
-        setup_uade_source || true
+    # ── ahx2play (AHX format, replaces full UAE emulator) ──
+    if [ -d "$BUILD_DIR/src/ahx2play" ]; then
+        # Fix paula.c for WASM: crtdbg.h is MSVC-only
+        sed -i '' 's/#include <crtdbg.h>/#include <stdlib.h>/' "$BUILD_DIR/src/ahx2play/paula.c" 2>/dev/null || true
+        log "ahx2play source present"
     else
-        log "uade source already present"
-    fi
-    if [ ! -f "$BUILD_DIR/src/uade/cpustbl.c" ]; then
-        log "UAE CPU tables not found, uade formats will be disabled"
+        log "ahx2play not available, AHX format will be disabled"
     fi
 
     generate_wrapper "$libopenmpt_dir" "$gme_result" "$sidplayfp_result"
