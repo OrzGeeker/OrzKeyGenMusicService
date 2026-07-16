@@ -19,7 +19,7 @@ extern int adplug_get_channels();
 extern int adplug_render(float *out, int frames);
 extern void adplug_destroy();
 
-const Decoder decoder_adplug = {
+__attribute__((used)) const Decoder decoder_adplug = {
     "adplug",
     adplug_load,
     adplug_get_duration,

@@ -40,7 +40,7 @@ extern const Decoder decoder_midi;
 // ── 解码器自动注册 ──
 static int registered = 0;
 
-__attribute__((used)) void register_all() {
+__attribute__((used)) __attribute__((noinline)) void register_all() {
     if (registered) return;
     registered = 1;
 

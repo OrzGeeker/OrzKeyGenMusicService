@@ -445,6 +445,110 @@ build_libsc68() {
 }
 
 # ------------------------------------------------------------------
+# Build libbinio (binary I/O library, needed by AdPlug)
+# ------------------------------------------------------------------
+build_libbinio() {
+    log "Building libbinio..."
+    local src_dir="$BUILD_DIR/src/libbinio/src"
+    if [ ! -d "$src_dir" ]; then
+        warn "libbinio source not available"
+        echo ""
+        return
+    fi
+
+    local build_dir="$BUILD_DIR/binio"
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return
+
+    local C_FILES=()
+    for f in "$src_dir"/*.cpp; do
+        [ -f "$f" ] && C_FILES+=("$f")
+    done
+
+    if [ ${#C_FILES[@]} -eq 0 ]; then
+        warn "No libbinio source files found"
+        popd >/dev/null
+        echo ""
+        return
+    fi
+
+    local inc_flags="-I$BUILD_DIR/src/libbinio/include -I$BUILD_DIR/src/libbinio/src -Dstricmp=strcasecmp -Wno-register"
+    for cfile in "${C_FILES[@]}"; do
+        local basename="${cfile##*/}"
+        emcc -c "$cfile" -o "${basename%.cpp}.o" $inc_flags -O2 2>/dev/null || continue
+    done
+
+    local objs=( *.o )
+    if [ ${#objs[@]} -gt 0 ]; then
+        emar cr libbinio.a "${objs[@]}"
+        emranlib libbinio.a
+        log "libbinio library created: libbinio.a (${#objs[@]} objects)"
+    fi
+
+    popd >/dev/null
+    echo "$build_dir/libbinio.a"
+}
+
+# ------------------------------------------------------------------
+# Build AdPlug (AdLib OPL2/3 emulator: rad, d00, hsc, amd)
+# ------------------------------------------------------------------
+build_adplug() {
+    log "Building AdPlug..."
+    local src_dir="$BUILD_DIR/src/adplug/src"
+    if [ ! -d "$src_dir" ]; then
+        warn "AdPlug source not available"
+        echo ""
+        return
+    fi
+
+    # 先确保 libbinio 已构建
+    local binio_a="$BUILD_DIR/binio/libbinio.a"
+    if [ ! -f "$binio_a" ]; then
+        build_libbinio >/dev/null 2>&1 || { warn "libbinio build failed"; echo ""; return; }
+        binio_a="$BUILD_DIR/binio/libbinio.a"
+    fi
+
+    local build_dir="$BUILD_DIR/adplug"
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return
+
+    local C_FILES=()
+    for f in "$src_dir"/*.cpp "$src_dir"/*.c; do
+        [ -f "$f" ] && C_FILES+=("$f")
+    done
+
+    if [ ${#C_FILES[@]} -eq 0 ]; then
+        warn "No AdPlug source files found"
+        popd >/dev/null
+        echo ""
+        return
+    fi
+
+    local inc_flags="-I$BUILD_DIR/src/adplug/src -I$BUILD_DIR/src/libbinio/src -I$BUILD_DIR/src/libbinio/include -Dstricmp=strcasecmp -Wno-register"
+    for cfile in "${C_FILES[@]}"; do
+        local basename="${cfile##*/}"
+        local ext="${cfile##*.}"
+        if [ "$ext" = "c" ]; then
+            emcc -c "$cfile" -o "${basename%.c}.o" $inc_flags -O2 2>/dev/null || continue
+        else
+            emcc -c "$cfile" -o "${basename%.cpp}.o" $inc_flags -O2 2>/dev/null || continue
+        fi
+    done
+
+    local objs=( *.o )
+    if [ ${#objs[@]} -gt 0 ]; then
+        emar cr libadplug.a "${objs[@]}"
+        emranlib libadplug.a
+        # 把 libbinio.a 也放到同目录，方便链接时找到
+        cp "$binio_a" "$build_dir/"
+        log "AdPlug library created: libadplug.a (${#objs[@]} objects)"
+    fi
+
+    popd >/dev/null
+    echo "$build_dir/libadplug.a|$build_dir"
+}
+
+# ------------------------------------------------------------------
 # Build libsidplayfp (SID format)
 # ------------------------------------------------------------------
 build_libsidplayfp() {
@@ -789,8 +893,8 @@ generate_wrapper() {
         source_files+=("$ORZ_SRC/asap/asap_impl.c")
     fi
 
-    # adplug (rad, d00, hsc) — 需要 libadplug + libbinio
-    if [ -d "$BUILD_DIR/src/adplug/src" ] && [ -f "$BUILD_DIR/adplug/src/libadplug.a" ]; then
+    # adplug (rad, d00, hsc, amd) — 需要 libadplug + libbinio
+    if [ -d "$BUILD_DIR/src/adplug/src" ] && [ -f "$BUILD_DIR/adplug/libadplug.a" ]; then
         source_files+=("$ORZ_SRC/adplug/adplug_impl.c" "$ORZ_SRC/adplug/adplug_wrap.cpp")
     fi
 
@@ -829,8 +933,11 @@ generate_wrapper() {
     # v2m-player 头文件
     # adplug 头文件
     # libbinio 头文件
-    if [ -d "$BUILD_DIR/libbinio-install/include" ]; then
-        inc_dirs+=("$BUILD_DIR/libbinio-install/include")
+    if [ -d "$BUILD_DIR/src/libbinio/include" ]; then
+        inc_dirs+=("$BUILD_DIR/src/libbinio/include")
+    fi
+    if [ -d "$BUILD_DIR/src/libbinio/src" ]; then
+        inc_dirs+=("$BUILD_DIR/src/libbinio/src")
     fi
     if [ -d "$BUILD_DIR/src/adplug/src" ]; then
         inc_dirs+=("$BUILD_DIR/src/adplug/src")
@@ -959,15 +1066,23 @@ generate_wrapper() {
         fi
     fi
 
-    # adplug (AdLib OPL2/3)
-    local adplug_lib="$BUILD_DIR/adplug/src/libadplug.a"
-    local binio_lib="$BUILD_DIR/libbinio/src/liblibbinio.a"
+    # adplug (AdLib OPL2/3: rad, d00, hsc, amd)
+    local adplug_lib="$BUILD_DIR/adplug/libadplug.a"
+    local binio_lib="$BUILD_DIR/binio/libbinio.a"
+    if [ ! -f "$adplug_lib" ]; then
+        log "Building AdPlug for WASM..."
+        local adplug_result=$(build_adplug)
+        if [ -n "$adplug_result" ]; then
+            adplug_lib="${adplug_result%%|*}"
+            log "AdPlug built: $adplug_lib"
+        fi
+    fi
     if [ -f "$adplug_lib" ]; then
         libs+=("$adplug_lib")
-        log "AdPlug library found: $adplug_lib"
         if [ -f "$binio_lib" ]; then
             libs+=("$binio_lib")
         fi
+        log "AdPlug + libbinio linked"
     fi
     if [ ${#libs[@]} -eq 0 ]; then
         warn "No decoder libraries found, creating stub WASM binary."
@@ -1031,13 +1146,18 @@ PAULA_STUBS
         -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=1 \
-        -s MAXIMUM_MEMORY=1073741824 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
         -D __stdcall= \
         -D '__int64=long long' \
         --no-entry \
         -O1 \
         -o "$OUTPUT_DIR/orz_audio.js"
+
+    # Post-process: wrap TextDecoder.decode in try-catch for ALLOW_MEMORY_GROWTH=1 compatibility.
+    # In newer JS engines, WebAssembly.Memory.buffer is resizable when maximum is set,
+    # which causes TextDecoder.decode() to throw "The provided ArrayBuffer value must not be resizable".
+    sed -i '' 's/return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));/try { return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr)); } catch(e) {}\
+        /' "$OUTPUT_DIR/orz_audio.js"
 
     log "WASM module created:"
     ls -lh "$OUTPUT_DIR/orz_audio.wasm" "$OUTPUT_DIR/orz_audio.js" 2>/dev/null || true

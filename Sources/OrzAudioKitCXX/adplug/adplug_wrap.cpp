@@ -30,9 +30,9 @@ static CPlayer *player = NULL;
 static int sample_rate = 44100;
 static double song_duration = 0;
 
-// Temporary filename for MEMFS
+// Temporary filename for MEMFS（使用 .adplug 扩展名，让 AdPlug 通过内容检测格式）
 static int tmp_counter = 0;
-static char tmp_file_path[64] = "/tmp/adplug_song.tmp";
+static char tmp_file_path[64] = "/tmp/adplug_song.adplug";
 
 // ── Decoder interface ──
 
@@ -42,7 +42,7 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     adplug_destroy();
 
     // Write data to MEMFS
-    snprintf(tmp_file_path, sizeof(tmp_file_path), "/tmp/adplug_%d.hsc", ++tmp_counter);
+    snprintf(tmp_file_path, sizeof(tmp_file_path), "/tmp/adplug_%d.adplug", ++tmp_counter);
     FILE *f = fopen(tmp_file_path, "wb");
     if (!f) return 0;
     fwrite(data, 1, len, f);
@@ -53,11 +53,10 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     if (!opl) return 0;
     opl->init();
 
-    // Load file with AdPlug factory
+    // Load file with AdPlug factory（通过内容检测格式，不依赖扩展名）
     player = CAdPlug::factory(tmp_file_path, opl);
     if (!player) {
         delete opl; opl = NULL;
-        remove(tmp_file_path);
         return 0;
     }
 
@@ -65,7 +64,8 @@ extern "C" int adplug_load(const unsigned char *data, int len)
     song_duration = player->songlength() / 1000.0;
     if (song_duration <= 0) song_duration = 120.0;
 
-    remove(tmp_file_path);
+    // MEMFS 是临时的，不需要显式删除
+    // 注意：在 ALLOW_MEMORY_GROWTH=1 时调用 remove() 可能导致 TextDecoder 异常
     return 1;
 }
 
@@ -112,5 +112,4 @@ extern "C" void adplug_destroy()
 {
     delete player; player = NULL;
     delete opl; opl = NULL;
-    remove(tmp_file_path);
 }
