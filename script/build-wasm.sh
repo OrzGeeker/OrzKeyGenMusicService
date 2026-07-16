@@ -770,15 +770,15 @@ generate_wrapper() {
     local libs=()
     local inc_dirs=()
 
-    # C 源文件路径（复用 Sources/OrzAudioKit/ 中的统一解码层）
-    local ORZ_SRC="$PROJECT_DIR/Sources/OrzAudioKit"
+    # C 源文件路径（OrzAudioKitCXX — 统一 C 解码层，与 SPM 共享）
+    local ORZ_SRC="$PROJECT_DIR/Sources/OrzAudioKitCXX"
     source_files=(
-        "$ORZ_SRC/orz_dispatch.c"
-        "$ORZ_SRC/audio_engine.c"
-        "$ORZ_SRC/cxx_helpers.cpp"
-        "$ORZ_SRC/openmpt_impl.c"
-        "$ORZ_SRC/gme_impl.c"
-        "$ORZ_SRC/ym6_impl.c"
+        "$ORZ_SRC/dispatch/orz_dispatch.c"
+        "$ORZ_SRC/dispatch/audio_engine.c"
+        "$ORZ_SRC/helpers/cxx_helpers.cpp"
+        "$ORZ_SRC/openmpt/openmpt_impl.c"
+        "$ORZ_SRC/gme/gme_impl.c"
+        "$ORZ_SRC/ym6/ym6_impl.c"
         "$ORZ_SRC/stub_decoders.c"
     )
 
@@ -786,22 +786,22 @@ generate_wrapper() {
 
     # ASAP (sap) — 需要 libasap_wasm.a
     if [ -f "$BUILD_DIR/libasap_wasm.a" ]; then
-        source_files+=("$ORZ_SRC/asap_impl.c")
+        source_files+=("$ORZ_SRC/asap/asap_impl.c")
     fi
 
     # adplug (rad, d00, hsc) — 需要 libadplug + libbinio
     if [ -d "$BUILD_DIR/src/adplug/src" ] && [ -f "$BUILD_DIR/adplug/src/libadplug.a" ]; then
-        source_files+=("$ORZ_SRC/adplug_impl.c" "$ORZ_SRC/adplug_wrap.cpp")
+        source_files+=("$ORZ_SRC/adplug/adplug_impl.c" "$ORZ_SRC/adplug/adplug_wrap.cpp")
     fi
 
     # sc68 (sc68, ym) — 需要 sc68 源码
     if [ -d "$BUILD_DIR/src/sc68" ] && [ -f "$BUILD_DIR/src/sc68/api68/api68.h" ]; then
-        source_files+=("$ORZ_SRC/sc68_impl.c")
+        source_files+=("$ORZ_SRC/sc68/sc68_impl.c")
     fi
 
     # v2m-player (V2M format) — 需要 v2m 源码
     if [ -d "$BUILD_DIR/src/v2m" ]; then
-        source_files+=("$ORZ_SRC/v2m_wasm.cpp" "$ORZ_SRC/v2mplayer_wasm.cpp")
+        source_files+=("$ORZ_SRC/v2m/v2m_wasm.cpp" "$ORZ_SRC/v2m/v2mplayer_wasm.cpp")
         local v2m_synth_core="$BUILD_DIR/src/v2m/synth_core.cpp"
         [ -f "$v2m_synth_core" ] && source_files+=("$v2m_synth_core")
     fi
@@ -816,7 +816,7 @@ generate_wrapper() {
     )
     local uade_dir="$BUILD_DIR/src/uade"
     if [ -d "$uade_dir" ] && [ -f "$uade_dir/newcpu.c" ] && [ -f "$uade_dir/cpustbl.c" ]; then
-        source_files+=("$ORZ_SRC/uade_wasm.c")
+        source_files+=("$ORZ_SRC/uade/uade_wasm.c")
         for f in "${uade_core_files[@]}"; do
             [ -f "$uade_dir/$f" ] && source_files+=("$uade_dir/$f")
         done
@@ -965,7 +965,7 @@ generate_wrapper() {
     if [ -n "$sidplayfp_result" ]; then
         sidplayfp_lib="${sidplayfp_result%%|*}"
         sidplayfp_inc_raw="${sidplayfp_result#*|}"
-        source_files+=("$ORZ_SRC/sidplayfp_impl.cpp")
+        source_files+=("$ORZ_SRC/sidplayfp/sidplayfp_impl.cpp")
         libs+=("$sidplayfp_lib")
         if [ -n "$sidplayfp_inc_raw" ]; then
             # 支持多个 include 路径 (用 | 分隔)
