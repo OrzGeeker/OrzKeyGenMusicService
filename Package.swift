@@ -24,11 +24,11 @@ let package = Package(
             name: "OrzAudioKitCXX",
             dependencies: [],
             exclude: [
-                // 尚未编译的解码器（逐步启用中）
-                "sc68/",
-                "asap/",
-                "uade/",
-                "v2m/",
+                // 需额外工具或特殊源码配置的解码器（暂不启用）
+                "sc68/",   // photonstorm fork 缺少 rsc68.h，需原始 sc68 源码
+                "asap/",   // 需 xasm (6502 汇编器) 编译 big-endian 播放器
+                "uade/",   // UAE Amiga 仿真核心，头文件树复杂
+                "v2m/",    // 需原始 Farbrausch Windows 类型头文件
             ],
             cSettings: [
                 .headerSearchPath("include"),

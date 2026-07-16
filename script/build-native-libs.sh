@@ -365,6 +365,165 @@ build_adplug() {
 
 
 # ============================================================================
+# sc68 (Atari ST YM / Amiga format) — manual .c compilation
+# ============================================================================
+build_libsc68() {
+    log "Building sc68..."
+    local src_dir="$SRC_DIR/sc68"
+    local build_dir="$BUILD_DIR/build-sc68-native"
+    local output="$NATIVE_DIR/libsc68.a"
+
+    if [ ! -d "$src_dir" ] || [ ! -f "$src_dir/api68/api68.h" ]; then
+        warn "sc68 source not found at $src_dir"
+        return 1
+    fi
+
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return 1
+
+    local C_FILES=()
+    for d in api68 emu68 file68 io68 unice68 sc68; do
+        for f in "$src_dir/$d"/*.c; do
+            [ -f "$f" ] && C_FILES+=("$f")
+        done
+    done
+
+    if [ ${#C_FILES[@]} -eq 0 ]; then
+        warn "No sc68 source files found"
+        popd >/dev/null; return 1
+    fi
+
+    local inc_flags="-I$src_dir -I$src_dir/file68 -I$src_dir/api68"
+    local compile_ok=0
+    for cfile in "${C_FILES[@]}"; do
+        local basename="${cfile##*/}"
+        local dirpart="${cfile%/*}"
+        local subdir="${dirpart##*/}"
+        local objname="${subdir}_${basename%.c}.o"
+        $HOST_CC -c "$cfile" -o "$objname" $inc_flags \
+            -Wno-pointer-sign -Wno-incompatible-function-pointer-types -O3 2>/dev/null && compile_ok=$((compile_ok + 1))
+    done
+
+    local objs=( *.o )
+    if [ ${#objs[@]} -eq 0 ]; then
+        warn "No sc68 object files produced"
+        popd >/dev/null; return 1
+    fi
+
+    ar cr "$output" "${objs[@]}" 2>/dev/null && ranlib "$output" 2>/dev/null
+    log "libsc68.a → $output (${#objs[@]} objects, ${compile_ok}/${#C_FILES[@]} compiled)"
+    echo "$NATIVE_DIR"
+}
+
+# ============================================================================
+# ASAP (Atari POKEY format: sap) — requires xasm 6502 assembler
+# ============================================================================
+build_libasap() {
+    log "Building ASAP..."
+    local src_dir="$SRC_DIR/asap"
+    local build_dir="$BUILD_DIR/build-asap-native"
+    local output="$NATIVE_DIR/libasap.a"
+
+    if [ ! -f "$src_dir/asap.h" ]; then
+        warn "ASAP source not found at $src_dir"
+        return 1
+    fi
+
+    # ASAP requires xasm (6502 cross-assembler) for the built-in player code
+    if ! command -v xasm &>/dev/null; then
+        warn "xasm (6502 assembler) not found — ASAP build skipped (sap format will use stub)"
+        return 1
+    fi
+
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return 1
+
+    CC="$HOST_CC" CFLAGS="-O2" make -f "$src_dir/Makefile" libasap.a 2>&1 | tail -3 || {
+        warn "ASAP build failed"; popd >/dev/null; return 1
+    }
+
+    local libfile=$(find . -name "libasap.a" -type f 2>/dev/null | head -1)
+    [ -z "$libfile" ] && { warn "libasap.a not found"; popd >/dev/null; return 1; }
+    cp "$libfile" "$output"
+    log "libasap.a → $output ($(du -h "$output" | cut -f1))"
+    echo "$NATIVE_DIR"
+}
+
+# ============================================================================
+# uade / UAE Amiga emulator (AHX, FC14 formats)
+# ============================================================================
+build_libuade() {
+    log "Building uade (UAE Amiga emulator core)..."
+    local src_dir="$SRC_DIR/uade"
+    local build_dir="$BUILD_DIR/build-uade-native"
+    local output="$NATIVE_DIR/libuade.a"
+
+    if [ ! -d "$src_dir" ] || [ ! -f "$src_dir/newcpu.c" ]; then
+        warn "UAE core source not available at $src_dir, trying uade-3.05..."
+        src_dir="$SRC_DIR/uade-3.05/src"
+        [ ! -f "$src_dir/newcpu.c" ] && { warn "UAE core not found"; return 1; }
+    fi
+
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return 1
+
+    local uade_core_files=(
+        newcpu.c memory.c custom.c cia.c audio.c missing.c
+        readcpu.c sinctable.c sd-sound-generic.c
+    )
+    local inc_dirs="-I$src_dir -I$(dirname "$src_dir")/include -I$(dirname "$src_dir")/frontends/include"
+    local compile_ok=0
+
+    for f in "${uade_core_files[@]}"; do
+        local src_file="$src_dir/$f"
+        [ ! -f "$src_file" ] && continue
+        local objname="${f//\//_}.o"
+        $HOST_CC -c "$src_file" -o "$objname" $inc_dirs -O2 2>/dev/null && compile_ok=$((compile_ok + 1))
+    done
+
+    [ $compile_ok -eq 0 ] && { warn "No UAE core files compiled"; popd >/dev/null; return 1; }
+
+    local objs=( *.o )
+    ar cr "$output" "${objs[@]}" 2>/dev/null && ranlib "$output" 2>/dev/null
+    log "libuade.a → $output (${#objs[@]} objects)"
+    echo "$NATIVE_DIR"
+}
+
+# ============================================================================
+# v2m-player (Farbrausch V2 format: v2m)
+# ============================================================================
+build_libv2m() {
+    log "Building v2m-player..."
+    local src_dir="$SRC_DIR/v2m"
+    local build_dir="$BUILD_DIR/build-v2m-native"
+    local output="$NATIVE_DIR/libv2m.a"
+
+    if [ ! -d "$src_dir" ] || [ ! -f "$src_dir/src/synth_core.cpp" ]; then
+        warn "v2m-player source not found at $src_dir"
+        return 1
+    fi
+
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null || return 1
+
+    # Compile the synth core + wrapper
+    $HOST_CXX -c "$src_dir/src/synth_core.cpp" -o synth_core.o \
+        -I"$src_dir/src" -O2 2>/dev/null || {
+        warn "v2m synth_core.cpp compile failed"; popd >/dev/null; return 1
+    }
+    ar cr "$output" synth_core.o 2>/dev/null && ranlib "$output" 2>/dev/null
+
+    if [ -f "$output" ]; then
+        log "libv2m.a → $output ($(du -h "$output" | cut -f1))"
+        echo "$NATIVE_DIR"
+    else
+        warn "v2m build produced no .a file"
+        return 1
+    fi
+}
+
+
+# ============================================================================
 # Main: build requested libraries
 # ============================================================================
 
@@ -376,6 +535,10 @@ if [ -n "$ONLY_LIB" ]; then
         sidplayfp)   build_libsidplayfp ;;
         binio)       build_libbinio ;;
         adplug)      build_libbinio && build_adplug ;;
+        sc68)        build_libsc68 ;;
+        asap)        build_libasap ;;
+        uade)        build_libuade ;;
+        v2m)         build_libv2m ;;
         *)           err "Unknown library: $ONLY_LIB" ;;
     esac
 else
@@ -389,6 +552,10 @@ else
 
     build_libbinio || warn "libbinio build failed"
     build_adplug || warn "AdPlug build failed (will use stub)"
+    build_libsc68 || warn "sc68 build failed (will use stub)"
+    build_libasap || warn "ASAP build failed (will use stub)"
+    build_libuade || warn "uade build failed (will use stub)"
+    build_libv2m || warn "v2m build failed (will use stub)"
 fi
 
 log "=== Native libraries built ==="
