@@ -49,7 +49,7 @@ let package = Package(
                 .define("ORZ_HAVE_GME"),
             ],
             linkerSettings: [
-                .unsafeFlags(["-L../../Libraries/OrzAudioKit/native"]),
+                .unsafeFlags(["-L/Users/joker/Developer/OrzPlayer/Service/Libraries/OrzAudioKit/native"]),
                 .linkedLibrary("openmpt"),
                 .linkedLibrary("gme"),
                 .linkedLibrary("sidplayfp"),

@@ -39,8 +39,10 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
         case .wav:
             // WAV 可能有 ADPCM/GSM 编码，浏览器不原生支持，服务端转 PCM
             return .serverDecode
-        case .mp3, .ogg, .flac, .mid, .m4a, .aac:
+        case .mp3, .ogg, .flac, .m4a, .aac:
             return .directFile
+        case .mid:
+            return .wasmDecode
         case .xm, .mod, .it, .s3m, .mo3, .mtm:
             return .wasmDecode
         case .v2m, .sc68, .hsc, .sid, .nsf, .spc:

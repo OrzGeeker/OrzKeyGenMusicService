@@ -65,7 +65,7 @@ final class AppTests: XCTestCase {
         XCTAssertEqual(AudioFormat.from(fileExtension: "mp3")?.playStrategy.rawValue, "directFile")
         XCTAssertEqual(AudioFormat.from(fileExtension: "ogg")?.playStrategy.rawValue, "directFile")
         XCTAssertEqual(AudioFormat.from(fileExtension: "flac")?.playStrategy.rawValue, "directFile")
-        XCTAssertEqual(AudioFormat.from(fileExtension: "mid")?.playStrategy.rawValue, "directFile")
+        XCTAssertEqual(AudioFormat.from(fileExtension: "mid")?.playStrategy.rawValue, "wasmDecode")
 
         // wasmDecode formats
         XCTAssertEqual(AudioFormat.from(fileExtension: "xm")?.playStrategy.rawValue, "wasmDecode")

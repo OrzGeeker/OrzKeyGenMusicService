@@ -17,3 +17,4 @@ WEAK const Decoder decoder_v2m = {0};
 WEAK const Decoder decoder_sc68 = {0};
 WEAK const Decoder decoder_uade_ahx = {0};
 WEAK const Decoder decoder_adplug = {0};
+WEAK const Decoder decoder_midi = {0};

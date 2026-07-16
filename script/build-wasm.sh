@@ -780,6 +780,7 @@ generate_wrapper() {
         "$ORZ_SRC/gme/gme_impl.c"
         "$ORZ_SRC/ym6/ym6_impl.c"
         "$ORZ_SRC/stub_decoders.c"
+        "$ORZ_SRC/midi/midi_impl.c"
     )
 
     # ── 条件编译其他解码器（仅在其依赖库可用时加入）──

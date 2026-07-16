@@ -33,6 +33,9 @@ extern const Decoder decoder_uade_ahx;
 // adplug (AdLib OPL2/3: rad, d00, hsc)
 extern const Decoder decoder_adplug;
 
+// midi (wavetable synth)
+extern const Decoder decoder_midi;
+
 
 // ── 解码器自动注册 ──
 static int registered = 0;
@@ -71,6 +74,9 @@ __attribute__((used)) void register_all() {
 
     if (decoder_adplug.load)
         orz_register_decoder("rad,d00,hsc", &decoder_adplug);
+
+    if (decoder_midi.load)
+        orz_register_decoder("mid", &decoder_midi);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──
