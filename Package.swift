@@ -24,9 +24,8 @@ let package = Package(
             name: "OrzAudioKitCXX",
             dependencies: [],
             exclude: [
-                // 需特殊源码配置的解码器（暂不启用）
-                "uade/",   // UAE Amiga 仿真核心，头文件树复杂
-                "v2m/",    // 需原始 Farbrausch Windows 类型头文件
+                "uade/",  // 需 build68k 生成 68000 CPU 指令表
+                "v2m/",   // 需原生兼容的包装器（当前使用 Windows 类型 sU32）
             ],
             cSettings: [
                 .headerSearchPath("include"),
@@ -35,6 +34,9 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
                 .define("ORZ_HAVE_OPENMPT"),
                 .define("ORZ_HAVE_GME"),
             ],
@@ -45,6 +47,9 @@ let package = Package(
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
                 .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
+                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
                 .define("ORZ_HAVE_OPENMPT"),
                 .define("ORZ_HAVE_GME"),
             ],
@@ -57,6 +62,7 @@ let package = Package(
                 .linkedLibrary("binio"),
                 .linkedLibrary("asap"),
                 .linkedLibrary("sc68"),
+                .linkedLibrary("uade"),
             ]
         ),
 

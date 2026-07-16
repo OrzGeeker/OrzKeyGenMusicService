@@ -465,17 +465,52 @@ build_libuade() {
 
     local uade_core_files=(
         newcpu.c memory.c custom.c cia.c audio.c missing.c
-        readcpu.c sinctable.c sd-sound-generic.c
+        readcpu.c sd-sound-generic.c
     )
-    local inc_dirs="-I$src_dir -I$(dirname "$src_dir")/include -I$(dirname "$src_dir")/frontends/include"
+
+    # 首先生成 68000 CPU 指令表
+    local cpustbl_src=""
+    local gen_dir="$BUILD_DIR/src/uade"
+    if [ -d "$gen_dir" ] && [ -f "$gen_dir/cpustbl.c" ]; then
+        cpustbl_src="$gen_dir"
+    else
+        # 用 uade-3.05 完整源码生成
+        local uade_src="$SRC_DIR/uade-3.05"
+        if [ -f "$uade_src/src/build68k.c" ] && [ -f "$uade_src/src/table68k" ]; then
+            log "Generating 68000 CPU tables..."
+            $HOST_CC -o "${build_dir}/build68k" "$uade_src/src/build68k.c" \
+                -I"$uade_src/src" -I"$uade_src/src/include" \
+                -include "$uade_src/src/sysconfig.h" -lm 2>/dev/null || {
+                warn "build68k compile failed"; popd >/dev/null; return 1
+            }
+            # 生成 CPU 表文件
+            (cd "$uade_src/src" && "${build_dir}/build68k" > "${build_dir}/cpustbl.c" 2>/dev/null)
+            if [ ! -s "${build_dir}/cpustbl.c" ] || [ "$(grep -c 'n_defs68k' "${build_dir}/cpustbl.c")" -eq 0 ]; then
+                warn "build68k generated empty CPU table (uade will use stub)"
+                # 创建空存根
+                echo 'struct instr_def defs68k[] = {}; int n_defs68k = 0;' > "${build_dir}/cpustbl.c"
+            fi
+            cpustbl_src="$build_dir"
+        else
+            warn "UAE source incomplete — build68k or table68k missing"
+        fi
+    fi
+
+    local inc_dirs="-I$uade_src/src -I$uade_src/src/include"
+    [ -n "$cpustbl_src" ] && inc_dirs="$inc_dirs -I$cpustbl_src"
+    local cflags="-Dunlikely(x)=__builtin_expect((x),0) -O2"
     local compile_ok=0
 
     for f in "${uade_core_files[@]}"; do
-        local src_file="$src_dir/$f"
+        local src_file="$SRC_DIR/uade-3.05/src/$f"
         [ ! -f "$src_file" ] && continue
         local objname="${f//\//_}.o"
-        $HOST_CC -c "$src_file" -o "$objname" $inc_dirs -O2 2>/dev/null && compile_ok=$((compile_ok + 1))
+        $HOST_CC -c "$src_file" -o "$objname" $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
     done
+    # 编译 CPU 表（如果生成了）
+    if [ -n "$cpustbl_src" ] && [ -f "$cpustbl_src/cpustbl.c" ]; then
+        $HOST_CC -c "$cpustbl_src/cpustbl.c" -o cpustbl.o $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" -O2 2>/dev/null && compile_ok=$((compile_ok + 1))
+    fi
 
     [ $compile_ok -eq 0 ] && { warn "No UAE core files compiled"; popd >/dev/null; return 1; }
 
