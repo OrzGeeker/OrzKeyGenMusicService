@@ -67,8 +67,8 @@ static int impl_load(const unsigned char *data, int len)
     }
 
     // 限制最大播放时长 — WASM 中 68K 模拟极慢（每帧 160K cycles），
-    // 限 8 秒避免页面卡死
-    api68_override_max_playtime(8000);
+    // 限 3 秒避免页面卡死（68K 模拟极慢，3 秒已是极限）
+    api68_override_max_playtime(3000);
 
     // 默认第一轨（关联播放器，必须在 music_info 前启动）
     api68_play(sc68, 0);
@@ -82,8 +82,8 @@ static int impl_load(const unsigned char *data, int len)
             duration_ms = info.time_ms;
         }
     }
-    // 不超过 max_playtime
-    if (duration_ms <= 0 || duration_ms > 8000) duration_ms = 8000;
+    // 不超过 max_playtime (3 秒)
+    if (duration_ms <= 0 || duration_ms > 3000) duration_ms = 3000;
 
     return 1;
 }
