@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -231,9 +232,13 @@ waveforms_t;
 #pragma pack(pop)
 #endif
 
-extern volatile bool isRecordingToWAV;
-extern song_t song;
-extern waveforms_t *waves; // 8bb: dword-aligned from malloc()
+extern _Thread_local volatile bool isRecordingToWAV;
+extern _Thread_local song_t song;
+extern _Thread_local waveforms_t *waves; // 8bb: dword-aligned from malloc()
+
+size_t ahxReplayerStateSize(void);
+void ahxReplayerStateSave(void *opaque);
+void ahxReplayerStateLoad(const void *opaque);
 
 // loader.c
 bool ahxLoadFromRAM(const uint8_t *data);

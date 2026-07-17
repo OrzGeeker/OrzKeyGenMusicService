@@ -11,81 +11,93 @@ extern void        safe_gme_free_info(gme_info_t*);
 extern const char* safe_gme_play(Music_Emu*, int, short*);
 extern void        safe_gme_delete(Music_Emu*);
 
-// ── 单例状态 ──
-static Music_Emu *emu = NULL;
-static short *render_buf = NULL;
-static int render_buf_size = 0;
 #define GME_SAMPLE_RATE 44100
 
-// ── Decoder 接口实现 ──
+typedef struct {
+    Music_Emu *emu;
+    short *render_buf;
+    int render_buf_size;
+    int duration_msec;
+} GMEContext;
 
-static int impl_load(const unsigned char *data, int len) {
-    if (emu) { safe_gme_delete(emu); emu = NULL; }
-    free(render_buf); render_buf = NULL;
-    render_buf_size = 0;
+static void context_destroy(void *opaque);
 
-    // gme_open_data 自动检测格式（nsf, spc, gbs 等）
-    const char* err = safe_gme_open_data(data, len, &emu, GME_SAMPLE_RATE);
-    if (err) return 0;
+static void *context_create(const char *format, const unsigned char *data, int len) {
+    (void)format;
+    GMEContext *ctx = (GMEContext *)calloc(1, sizeof(*ctx));
+    if (!ctx) return NULL;
+
+    const char* err = safe_gme_open_data(data, len, &ctx->emu, GME_SAMPLE_RATE);
+    if (err) { context_destroy(ctx); return NULL; }
 
     // 从第一轨开始播放
-    err = safe_gme_start_track(emu, 0);
-    if (err) { safe_gme_delete(emu); emu = NULL; return 0; }
+    err = safe_gme_start_track(ctx->emu, 0);
+    if (err) { context_destroy(ctx); return NULL; }
 
-    return 1;
-}
-
-static double impl_get_duration() {
-    if (!emu) return 0;
     gme_info_t *info = NULL;
-    if (safe_gme_track_info(emu, &info, 0)) return 0;
-    double secs = 0;
-    if (info->length > 0) {
-        secs = info->length / 1000.0;
-    } else if (info->play_length > 0) {
-        secs = info->play_length / 1000.0;
-    } else {
-        // 格式可能没有长度信息（如 NSF），默认 2 分钟
-        secs = 120.0;
+    if (!safe_gme_track_info(ctx->emu, &info, 0) && info) {
+        ctx->duration_msec = info->length > 0 ? info->length : info->play_length;
+        safe_gme_free_info(info);
     }
-    safe_gme_free_info(info);
-    return secs;
+    if (ctx->duration_msec <= 0) ctx->duration_msec = 150000;
+    gme_set_fade(ctx->emu, ctx->duration_msec);
+
+    return ctx;
 }
 
-static int impl_get_sample_rate() {
+static double context_get_duration(void *opaque) {
+    GMEContext *ctx = (GMEContext *)opaque;
+    // gme_set_fade() uses the library's standard 8-second fade window.
+    return ctx && ctx->emu ? (ctx->duration_msec + 8000) / 1000.0 : 0;
+}
+
+static int context_get_sample_rate(void *opaque) { (void)opaque;
     return GME_SAMPLE_RATE;
 }
 
-static int impl_get_channels() {
+static int context_get_channels(void *opaque) { (void)opaque;
     return 2; // gme 始终输出立体声
 }
 
-static int impl_render(float *out, int frames) {
-    if (!emu) return 0;
+static int context_render(void *opaque, float *out, int frames) {
+    GMEContext *ctx = (GMEContext *)opaque;
+    if (!ctx || !ctx->emu) return 0;
+    if (gme_track_ended(ctx->emu)) return 0;
 
     int sample_count = frames * 2; // 立体声
-    if (!render_buf || sample_count > render_buf_size) {
-        short *nb = (short *)realloc(render_buf, (size_t)sample_count * sizeof(short));
+    if (!ctx->render_buf || sample_count > ctx->render_buf_size) {
+        short *nb = (short *)realloc(ctx->render_buf, (size_t)sample_count * sizeof(short));
         if (!nb) return 0;
-        render_buf = nb;
-        render_buf_size = sample_count;
+        ctx->render_buf = nb;
+        ctx->render_buf_size = sample_count;
     }
 
-    const char* err = safe_gme_play(emu, sample_count, render_buf);
+    const char* err = safe_gme_play(ctx->emu, sample_count, ctx->render_buf);
     if (err) return 0;
 
     // int16 → float32 转换
     for (int i = 0; i < frames * 2; i++) {
-        out[i] = render_buf[i] / 32768.0f;
+        out[i] = ctx->render_buf[i] / 32768.0f;
     }
     return frames;
 }
 
-static void impl_destroy() {
-    if (emu) { safe_gme_delete(emu); emu = NULL; }
-    free(render_buf); render_buf = NULL;
-    render_buf_size = 0;
+static void context_destroy(void *opaque) {
+    GMEContext *ctx = (GMEContext *)opaque;
+    if (!ctx) return;
+    if (ctx->emu) safe_gme_delete(ctx->emu);
+    free(ctx->render_buf);
+    free(ctx);
 }
+
+// Legacy ABI adapter. New native/WASM callers use context_create directly.
+static GMEContext *legacy;
+static int impl_load(const unsigned char *data, int len) { context_destroy(legacy); legacy = context_create(NULL, data, len); return legacy != NULL; }
+static double impl_get_duration(void) { return context_get_duration(legacy); }
+static int impl_get_sample_rate(void) { return context_get_sample_rate(legacy); }
+static int impl_get_channels(void) { return context_get_channels(legacy); }
+static int impl_render(float *out, int frames) { return context_render(legacy, out, frames); }
+static void impl_destroy(void) { context_destroy(legacy); legacy = NULL; }
 
 // ── 导出 Decoder 实例 ──
 const Decoder decoder_gme = {
@@ -95,5 +107,7 @@ const Decoder decoder_gme = {
     impl_get_sample_rate,
     impl_get_channels,
     impl_render,
-    impl_destroy
+    impl_destroy,
+    context_create, context_get_duration, context_get_sample_rate,
+    context_get_channels, context_render, context_destroy
 };

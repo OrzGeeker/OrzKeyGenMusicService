@@ -25,10 +25,11 @@ public struct PCMData: Sendable {
         let byteRate = sampleRate * channels * (bitsPerSample / 8)
         let blockAlign = channels * (bitsPerSample / 8)
         let dataSize = samples.count
+        let paddingSize = dataSize & 1
 
         // RIFF header
         data.append(contentsOf: "RIFF".utf8)
-        data.append(contentsOf: withUnsafeBytes(of: UInt32(36 + dataSize).littleEndian) { Data($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(36 + dataSize + paddingSize).littleEndian) { Data($0) })
         data.append(contentsOf: "WAVE".utf8)
 
         // fmt chunk
@@ -52,6 +53,7 @@ public struct PCMData: Sendable {
         data.append(contentsOf: "data".utf8)
         data.append(contentsOf: withUnsafeBytes(of: UInt32(dataSize).littleEndian) { Data($0) })
         data.append(samples)
+        if paddingSize != 0 { data.append(0) }
 
         return data
     }

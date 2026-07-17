@@ -15,6 +15,7 @@ class OrzAudioPlayer {
         this.audioEl = new Audio();
         this.audioCtx = null;
         this.wasmKit = null;        // OrzAudioKit WASM 模块实例
+        this.decoderHandle = 0;     // 当前播放独占的 C decoder handle
         this.wasmReady = false;     // WASM 是否已初始化
         this.currentSource = null;  // AudioBufferSourceNode (WASM 渲染路径)
         this.analyser = null;
@@ -29,6 +30,16 @@ class OrzAudioPlayer {
         this._washProgressRAF = null;
         this._streamActive = false;
         this._streamGen = 0;
+        this._playGen = 0;
+        this._decoderWorker = null;
+        this._workerReject = null;
+        this._workerRejectOwner = null;
+        this._fetchController = null;
+        this._workletNode = null;
+        this._workerControl = null;
+        this._workletModulePromise = null;
+        this.diagnostics = { firstFrameMs: 0, decodeRate: 0, underruns: 0,
+            peakBufferMs: 0, memoryPeakBytes: 0 };
 
         // 配置
         this.sampleRate = 48000;
@@ -54,6 +65,12 @@ class OrzAudioPlayer {
 
         this._wasmLoadPromise = (async () => {
             try {
+                if (crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined' &&
+                    typeof AudioWorkletNode !== 'undefined') {
+                    // Worker imports the format-specific bundle on demand.
+                    this.wasmReady = true;
+                    return true;
+                }
                 if (typeof OrzAudioKit === 'undefined') {
                     // 动态加载
                     const script = document.createElement('script');
@@ -95,6 +112,7 @@ class OrzAudioPlayer {
      */
     async play(song) {
         this.stop();
+        const playGen = this._playGen;
 
         this.currentSong = song;
         this.isPlaying = false;
@@ -107,22 +125,23 @@ class OrzAudioPlayer {
             switch (strategy) {
                 case 'directFile':
                 case 'serverDecode':
-                    await this._playDirect(song.streamUrl || song.rawUrl);
+                    await this._playDirect(song.streamUrl || song.rawUrl, playGen);
                     break;
 
                 case 'wasmDecode':
-                    await this._playWasm(song.streamUrl || song.rawUrl, song.fileFormat);
+                    await this._playWasm(song.streamUrl || song.rawUrl, song.fileFormat, song.subsong || 0, playGen);
                     break;
 
                 default:
-                    await this._playDirect(song.streamUrl || song.rawUrl);
+                    await this._playDirect(song.streamUrl || song.rawUrl, playGen);
             }
         } catch (e) {
+            if (playGen !== this._playGen || e?.name === 'AbortError') return;
             console.error('Playback error:', e);
             // 最后尝试: server decode 降级
             if (strategy !== 'serverDecode') {
                 try {
-                    await this._playDirect(song.streamUrl || song.rawUrl);
+                    await this._playDirect(song.streamUrl || song.rawUrl, playGen);
                 } catch (fallbackErr) {
                     if (this.onError) this.onError(fallbackErr);
                 }
@@ -162,9 +181,30 @@ class OrzAudioPlayer {
      * 停止播放
      */
     stop() {
+        this._playGen++;
+        this._fetchController?.abort();
+        this._fetchController = null;
         // 标记流式中止——让后台的 _renderAndPlayStreaming 循环尽快退出
         this._streamActive = false;
         this._streamGen++;
+        if (this._workerControl) {
+            Atomics.store(this._workerControl, 2, 4);
+            Atomics.store(this._workerControl, 3, this._streamGen);
+            this._workerControl = null;
+        }
+        if (this._decoderWorker) {
+            if (this._workerReject && this._workerRejectOwner === this._decoderWorker) {
+                this._workerReject(this._cancelledPlayback());
+            }
+            this._workerReject = null;
+            this._workerRejectOwner = null;
+            this._shutdownWorker(this._decoderWorker, this._streamGen);
+            this._decoderWorker = null;
+        }
+        if (this._workletNode) {
+            this._workletNode.disconnect();
+            this._workletNode = null;
+        }
 
         // 停止 WASM 渲染
         if (this._washProgressRAF) {
@@ -184,6 +224,7 @@ class OrzAudioPlayer {
             this.currentSource.disconnect();
             this.currentSource = null;
         }
+        this._destroyWasmDecoder();
 
         // 停止 audio 元素
         this.audioEl.pause();
@@ -198,8 +239,13 @@ class OrzAudioPlayer {
      */
     seek(position) {
         if (this._usingWasm) {
-            // WASM 渲染路径不支持 seek（简化实现）
             this.currentTime = position * this.duration;
+            if (this._decoderWorker) {
+                this._workerTimeOffset = this.currentTime;
+                this._workerClockStart = this.audioCtx.currentTime;
+                this._decoderWorker.postMessage({ type: 'seek', generation: this._streamGen,
+                    positionMs: Math.round(this.currentTime * 1000) });
+            }
         } else if (this.audioEl.duration) {
             this.audioEl.currentTime = position * this.audioEl.duration;
         }
@@ -218,10 +264,12 @@ class OrzAudioPlayer {
     /**
      * 直接文件播放 (directFile / serverDecode)
      */
-    async _playDirect(url) {
+    async _playDirect(url, playGen = this._playGen) {
+        this._assertCurrentPlayback(playGen);
         this._usingWasm = false;
         this.audioEl.src = url;
         await this.audioEl.play();
+        this._assertCurrentPlayback(playGen);
         this.isPlaying = true;
         this.duration = this.audioEl.duration || 0;
     }
@@ -229,7 +277,8 @@ class OrzAudioPlayer {
     /**
      * WASM 解码播放 (wasmDecode)
      */
-    async _playWasm(url, format) {
+    async _playWasm(url, format, subsong = 0, playGen = this._playGen) {
+        this._assertCurrentPlayback(playGen);
         this._usingWasm = true;
 
         // 初始化 AudioContext（需用户交互后创建）
@@ -237,7 +286,16 @@ class OrzAudioPlayer {
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
         if (this.audioCtx.state === 'suspended') {
-            await this.audioCtx.resume();
+            // Do not block decoder priming on an AudioContext resume promise:
+            // some browsers keep it pending until the output device is ready.
+            // Calling resume synchronously preserves user activation while the
+            // Worker fills its initial ring in parallel.
+            this.audioCtx.resume().catch(() => {});
+        }
+
+        if (crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined' && this.audioCtx.audioWorklet) {
+            await this._playWithWorker(url, format, subsong, playGen);
+            return;
         }
 
         // 尝试 WASM 解码
@@ -251,7 +309,7 @@ class OrzAudioPlayer {
                     throw new Error(`WASM: format "${format}" not supported by WASM module`);
                 }
 
-                await this._playWithWasm(url, format);
+                await this._playWithWasm(url, format, subsong);
                 return;
             } catch (e) {
                 console.warn('WASM decode failed, falling back:', e.message);
@@ -265,7 +323,7 @@ class OrzAudioPlayer {
     /**
      * 使用 WASM 模块解码并播放（统一 API）
      */
-    async _playWithWasm(url, format) {
+    async _playWithWasm(url, format, subsong = 0) {
         let step = 'fetch';
         try {
             step = 'fetch';
@@ -290,30 +348,33 @@ class OrzAudioPlayer {
             step = 'copy_data';
             this.wasmKit.HEAPU8.set(data, dataPtr);
 
-            step = 'orz_load';
-            const loaded = this.wasmKit._orz_load(fmtPtr, dataPtr, data.length);
+            step = 'orz_decoder_create';
+            const decoderHandle = this.wasmKit._orz_decoder_create(fmtPtr, dataPtr, data.length);
             this.wasmKit._free(fmtPtr);
             this.wasmKit._free(dataPtr);
-            console.log('WASM: orz_load =', loaded);
+            console.log('WASM: decoder handle =', decoderHandle);
 
-            if (!loaded) {
-                this.wasmKit._orz_destroy();
+            if (!decoderHandle) {
                 throw new Error('WASM: failed to load module');
+            }
+            this.decoderHandle = decoderHandle;
+            if (subsong > 0 && this.wasmKit._orz_decoder_select_subsong(decoderHandle, subsong) !== 0) {
+                throw new Error(`WASM: subsong ${subsong} is not supported`);
             }
 
             step = 'get_duration';
-            const duration = this.wasmKit._orz_get_duration();
+            const duration = this.wasmKit._orz_decoder_get_duration(decoderHandle);
             console.log('WASM: duration =', duration);
             if (duration > 0) this.duration = duration;
 
             step = 'get_format_info';
-            const sampleRate = this.wasmKit._orz_get_sample_rate() || 44100;
-            const channels = this.wasmKit._orz_get_channels() || 2;
+            const sampleRate = this.wasmKit._orz_decoder_get_sample_rate(decoderHandle) || 44100;
+            const channels = this.wasmKit._orz_decoder_get_channels(decoderHandle) || 2;
             console.log('WASM: sr=', sampleRate, 'ch=', channels);
 
             const totalFrames = Math.ceil(duration * sampleRate);
             if (totalFrames <= 0 || totalFrames > 3600 * sampleRate) {
-                this.wasmKit._orz_destroy();
+                this._destroyWasmDecoder();
                 throw new Error(`WASM: invalid duration ${duration}s (frames ${totalFrames})`);
             }
 
@@ -322,9 +383,141 @@ class OrzAudioPlayer {
             await this._renderAndPlayStreaming(sampleRate, channels);
         } catch (e) {
             console.error(`WASM decode failed at step "${step}":`, e.message, e);
-            try { this.wasmKit._orz_destroy(); } catch(_) {}
+            this._destroyWasmDecoder();
             throw e;
         }
+    }
+
+    async _playWithWorker(url, format, subsong = 0, playGen = this._playGen) {
+        const startedAt = performance.now();
+        const fetchController = new AbortController();
+        this._fetchController = fetchController;
+        let data;
+        try {
+            const response = await fetch(url, { signal: fetchController.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+            data = await response.arrayBuffer();
+        } finally {
+            if (this._fetchController === fetchController) this._fetchController = null;
+        }
+        this._assertCurrentPlayback(playGen);
+        const generation = ++this._streamGen;
+        const channels = 2;
+        const capacityFrames = Math.ceil(44100 * 0.5) + 1;
+        const startFrames = Math.ceil(44100 * 0.15);
+        const controlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 8);
+        const sampleBuffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * capacityFrames * channels);
+        this.diagnostics.peakBufferMs = capacityFrames / 44.1;
+        this.diagnostics.memoryPeakBytes = controlBuffer.byteLength + sampleBuffer.byteLength;
+        const control = new Int32Array(controlBuffer);
+        Atomics.store(control, 3, generation);
+        this._workerControl = control;
+        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-ym-lhasa-v1');
+        this._decoderWorker = worker;
+        let workletNode = null;
+
+        const ready = new Promise((resolve, reject) => {
+            this._workerReject = reject;
+            this._workerRejectOwner = worker;
+            worker.onmessage = async event => {
+                const message = event.data;
+                if (message.generation !== generation) return;
+                if (message.type === 'ready') {
+                    if (playGen !== this._playGen) return reject(this._cancelledPlayback());
+                    this.duration = message.duration;
+                    await this._ensureWorkletModule();
+                    if (playGen !== this._playGen) return reject(this._cancelledPlayback());
+                    workletNode = new AudioWorkletNode(this.audioCtx, 'orz-ring-buffer', {
+                        numberOfOutputs: 1,
+                        outputChannelCount: [channels],
+                        processorOptions: { control: controlBuffer, samples: sampleBuffer, capacityFrames,
+                            channels, generation, sourceSampleRate: message.sampleRate }
+                    });
+                    this._workletNode = workletNode;
+                    workletNode.connect(this.audioCtx.destination);
+                    resolve();
+                } else if (message.type === 'started') {
+                    this.diagnostics.firstFrameMs = performance.now() - startedAt;
+                    this.isPlaying = true;
+                } else if (message.type === 'ended') {
+                    this.diagnostics.decodeRate = message.decodeRate;
+                } else if (message.type === 'error') reject(new Error(message.message));
+            };
+            worker.onerror = event => reject(new Error(event.message));
+        });
+        const moduleJs = ['bp', 'mid', 'ym'].includes(format)
+            ? '/audio/orz_audio_builtin.js?v=20260717-ym-lhasa-v1'
+            : '/audio/orz_audio.js?v=20260717-ym-lhasa-v1';
+        worker.postMessage({ type: 'decode', generation, format, subsong, moduleJs, data, control: controlBuffer,
+            samples: sampleBuffer, capacityFrames, channels, startFrames }, [data]);
+        try {
+            await ready;
+            if (this._workerRejectOwner === worker) {
+                this._workerReject = null;
+                this._workerRejectOwner = null;
+            }
+        } catch (error) {
+            if (this._workerRejectOwner === worker) {
+                this._workerReject = null;
+                this._workerRejectOwner = null;
+            }
+            worker.terminate();
+            if (this._decoderWorker === worker) this._decoderWorker = null;
+            if (this._workerControl === control) this._workerControl = null;
+            workletNode?.disconnect();
+            if (this._workletNode === workletNode) this._workletNode = null;
+            throw error;
+        }
+
+        this._workerClockStart = this.audioCtx.currentTime;
+        this._workerTimeOffset = 0;
+        const tick = () => {
+            if (this._streamGen !== generation) return;
+            this.currentTime = Math.min(this._workerTimeOffset + this.audioCtx.currentTime - this._workerClockStart,
+                this.duration || Infinity);
+            this.diagnostics.underruns = Atomics.load(control, 4);
+            if (this.onTimeUpdate) this.onTimeUpdate(this.currentTime, this.duration);
+            if (Atomics.load(control, 2) === 2 && this.currentTime >= this.duration) return this._onEnded();
+            if (Atomics.load(control, 2) === 3) return;
+            this._washProgressRAF = requestAnimationFrame(tick);
+        };
+        this._washProgressRAF = requestAnimationFrame(tick);
+    }
+
+    _shutdownWorker(worker, stopGeneration) {
+        let terminated = false;
+        const terminate = () => {
+            if (terminated) return;
+            terminated = true;
+            clearTimeout(timeout);
+            worker.terminate();
+        };
+        const timeout = setTimeout(terminate, 250);
+        worker.onmessage = event => {
+            if (event.data?.type === 'stopped' && event.data.generation === stopGeneration) terminate();
+        };
+        try { worker.postMessage({ type: 'stop', generation: stopGeneration }); }
+        catch (_) { terminate(); }
+    }
+
+    async _ensureWorkletModule() {
+        if (!this._workletModulePromise) {
+            this._workletModulePromise = this.audioCtx.audioWorklet
+                .addModule('/audio/orz-audio-worklet.js?v=20260717-ym-zero-period')
+                .catch(error => {
+                    this._workletModulePromise = null;
+                    throw error;
+                });
+        }
+        return this._workletModulePromise;
+    }
+
+    _cancelledPlayback() {
+        return new DOMException('Playback superseded by a newer request', 'AbortError');
+    }
+
+    _assertCurrentPlayback(playGen) {
+        if (playGen !== this._playGen) throw this._cancelledPlayback();
     }
 
     /**
@@ -401,7 +594,7 @@ class OrzAudioPlayer {
             const chunkPtr = this.wasmKit._malloc(CHUNK_FRAMES * channels * 4);
             if (!chunkPtr) break;
 
-            const frames = this.wasmKit._orz_render(chunkPtr, CHUNK_FRAMES);
+            const frames = this.wasmKit._orz_decoder_render(this.decoderHandle, chunkPtr, CHUNK_FRAMES);
             if (frames <= 0) {
                 this.wasmKit._free(chunkPtr);
                 break;
@@ -443,12 +636,12 @@ class OrzAudioPlayer {
 
         // 如果被 stop() 中断（新歌已开始），直接退出
         if (!this._streamActive || this._streamGen !== myGen) {
-            this.wasmKit._orz_destroy();
+            this._destroyWasmDecoder();
             return;
         }
 
         if (totalRendered <= 0) {
-            this.wasmKit._orz_destroy();
+            this._destroyWasmDecoder();
             throw new Error('WASM: no audio rendered');
         }
 
@@ -456,7 +649,7 @@ class OrzAudioPlayer {
         this.duration = totalRendered / sampleRate;
 
         // 清理 WASM 解码器
-        this.wasmKit._orz_destroy();
+        this._destroyWasmDecoder();
 
         this.currentSource = (this._streamSources && this._streamSources[this._streamSources.length - 1]) || null;
         this.isPlaying = true;
@@ -479,6 +672,12 @@ class OrzAudioPlayer {
             this._washProgressRAF = requestAnimationFrame(tick);
         };
         this._washProgressRAF = requestAnimationFrame(tick);
+    }
+
+    _destroyWasmDecoder() {
+        if (!this.decoderHandle || !this.wasmKit) return;
+        try { this.wasmKit._orz_decoder_destroy(this.decoderHandle); } catch (_) {}
+        this.decoderHandle = 0;
     }
 
     // ── 事件处理 ──

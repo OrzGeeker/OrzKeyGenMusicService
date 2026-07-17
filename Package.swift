@@ -98,6 +98,7 @@ let package = Package(
         .testTarget(name: "AppTests", dependencies: [
             .target(name: "App"),
             .target(name: "OrzAudioKit"),
+            .target(name: "OrzAudioKitCXX"),
             .product(name: "XCTVapor", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
         ])

@@ -88,56 +88,6 @@ if $CLEAN; then
 fi
 
 # ------------------------------------------------------------------
-# Decompress LHa YM archives
-# ------------------------------------------------------------------
-decompress_ym_files() {
-    local lha_bin="/opt/homebrew/opt/lhasa/bin/lha"
-    if [ ! -x "$lha_bin" ]; then
-        warn "lha not installed - ym files will not be decompressed"
-        return
-    fi
-
-    local raw_dir="$BUILD_DIR/ym-raw"
-    local public_ym_raw="$OUTPUT_DIR/ym-raw"
-    mkdir -p "$raw_dir" "$public_ym_raw"
-
-    # 解压单个 YM 文件（如果是 LHa 归档）
-    decompress_one_ym() {
-        local ymfile="$1" outfile="$2"
-        if [ -f "$outfile" ] && head -c 4 "$outfile" | grep -q "YM[0-9]"; then
-            return 0  # 已解压
-        fi
-        log "Decompressing: $(basename "$ymfile")"
-        local tmpdir=$(mktemp -d)
-        (cd "$tmpdir" && "$lha_bin" x "$ymfile" >/dev/null 2>&1)
-        local extracted=$(find "$tmpdir" -type f 2>/dev/null | head -1)
-        if [ -n "$extracted" ]; then
-            mkdir -p "$(dirname "$outfile")"
-            cp "$extracted" "$outfile"
-            log "  -> $(wc -c < "$outfile") bytes raw YM"
-        else
-            warn "  -> extraction failed for $(basename "$ymfile")"
-        fi
-        rm -rf "$tmpdir"
-    }
-
-    # 从 keygenmusic/ 解压（保留子目录结构）
-    find "$PROJECT_DIR/Resources/Public/keygenmusic" -name "*.ym" -type f 2>/dev/null | while read -r ymfile; do
-        if ! head -c 4 "$ymfile" | grep -q "YM[0-9]"; then
-            local relpath="${ymfile#$PROJECT_DIR/Resources/Public/keygenmusic/}"
-            decompress_one_ym "$ymfile" "$raw_dir/$relpath"
-        fi
-    done
-    # 复制到公开 web 目录
-    if [ -d "$raw_dir" ]; then
-        rm -rf "$public_ym_raw"
-        cp -R "$raw_dir" "$public_ym_raw"
-        local count=$(find "$public_ym_raw" -name '*.ym' -type f 2>/dev/null | wc -l)
-        log "Decompressed YM files: $count in $public_ym_raw"
-    fi
-}
-
-# ------------------------------------------------------------------
 # Check prerequisites
 # ------------------------------------------------------------------
 check_prereqs() {
@@ -882,6 +832,10 @@ generate_wrapper() {
         "$ORZ_SRC/openmpt/openmpt_impl.c"
         "$ORZ_SRC/gme/gme_impl.c"
         "$ORZ_SRC/ym6/ym6_impl.c"
+        "$ORZ_SRC/bp/bp_impl.c"
+        "$ORZ_SRC/ym6/unlzh_ym.c"
+        "$ORZ_SRC/ym6/lhasa_adapter.c"
+        "$ORZ_SRC/ym6/lhasa/lh5_decoder.c"
         "$ORZ_SRC/stub_decoders.c"
         "$ORZ_SRC/midi/midi_impl.c"
     )
@@ -918,6 +872,8 @@ generate_wrapper() {
 
     # ahx2play (AHX format) — 轻量解码器，替换完整 UAE 仿真器
     if [ -d "$BUILD_DIR/src/ahx2play" ]; then
+        patch -N -d "$BUILD_DIR/src/ahx2play" -p1 < "$ORZ_SRC/uade/ahx2play-reset.patch" >/dev/null 2>&1 || true
+        patch -N -d "$BUILD_DIR/src/ahx2play" -p1 < "$ORZ_SRC/uade/ahx2play-context.patch" >/dev/null 2>&1 || true
         source_files+=("$ORZ_SRC/uade/uade_native_ahx.c")
         source_files+=(
             "$BUILD_DIR/src/ahx2play/loader.c"
@@ -1172,18 +1128,43 @@ PAULA_STUBS
         -s MODULARIZE=1 \
         -s EXPORT_NAME="OrzAudioKit" \
         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32", "HEAPF32"]' \
-        -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_audio_can_decode", "_malloc", "_free"]' \
+        -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=0 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
         -D __stdcall= \
         -D '__int64=long long' \
         --no-entry \
-        -O1 \
+        -O3 \
         -o "$OUTPUT_DIR/orz_audio.js"
 
     log "WASM module created:"
     ls -lh "$OUTPUT_DIR/orz_audio.wasm" "$OUTPUT_DIR/orz_audio.js" 2>/dev/null || true
+}
+
+# Small dependency-free bundle for formats implemented entirely in this tree.
+# The browser chooses this for BP/MIDI/YM and avoids downloading libopenmpt,
+# GME, SID, AdPlug and SC68.
+generate_builtin_wrapper() {
+    local ORZ_SRC="$PROJECT_DIR/Sources/OrzAudioKitCXX"
+    emcc \
+        "$ORZ_SRC/dispatch/orz_dispatch.c" \
+        "$ORZ_SRC/dispatch/audio_engine.c" \
+        "$ORZ_SRC/ym6/ym6_impl.c" \
+        "$ORZ_SRC/ym6/unlzh_ym.c" \
+        "$ORZ_SRC/ym6/lhasa_adapter.c" \
+        "$ORZ_SRC/ym6/lhasa/lh5_decoder.c" \
+        "$ORZ_SRC/bp/bp_impl.c" \
+        "$ORZ_SRC/midi/midi_impl.c" \
+        "$ORZ_SRC/stub_decoders.c" \
+        -I"$ORZ_SRC/include" \
+        -s WASM=1 -s MODULARIZE=1 -s EXPORT_NAME="OrzAudioKit" \
+        -s EXPORTED_RUNTIME_METHODS='["stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAPF32"]' \
+        -s EXPORTED_FUNCTIONS='["_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_malloc", "_free"]' \
+        -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 \
+        --no-entry -O3 -o "$OUTPUT_DIR/orz_audio_builtin.js"
+    log "Built dependency-free WASM bundle:"
+    ls -lh "$OUTPUT_DIR/orz_audio_builtin.wasm" "$OUTPUT_DIR/orz_audio_builtin.js"
 }
 
 # ------------------------------------------------------------------
@@ -1193,9 +1174,6 @@ main() {
     mkdir -p "$OUTPUT_DIR" "$BUILD_DIR" "$CACHE_DIR"
 
     check_prereqs
-
-    # Decompress LHa YM archives to raw YM6
-    decompress_ym_files
 
     # ── mpg123 (MO3 MP3 压缩采样解码) ──
     local mpg123_prefix=""
@@ -1328,6 +1306,7 @@ main() {
     fi
 
     generate_wrapper "$libopenmpt_dir" "$gme_result" "$sidplayfp_result"
+    generate_builtin_wrapper
 
     log "Build complete!"
     log "WASM output: $OUTPUT_DIR/orz_audio.wasm"

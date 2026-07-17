@@ -74,10 +74,10 @@ final class AppTests: XCTestCase {
         XCTAssertEqual(AudioFormat.from(fileExtension: "s3m")?.playStrategy.rawValue, "wasmDecode")
         XCTAssertEqual(AudioFormat.from(fileExtension: "sid")?.playStrategy.rawValue, "wasmDecode")
         XCTAssertEqual(AudioFormat.from(fileExtension: "nsf")?.playStrategy.rawValue, "wasmDecode")
+        XCTAssertEqual(AudioFormat.from(fileExtension: "bp")?.playStrategy.rawValue, "wasmDecode")
 
         // serverDecode formats (WAV may have ADPCM/GSM encoding, needs ffmpeg)
         XCTAssertEqual(AudioFormat.from(fileExtension: "wav")?.playStrategy.rawValue, "serverDecode")
-        XCTAssertEqual(AudioFormat.from(fileExtension: "bp")?.playStrategy.rawValue, "serverDecode")
     }
 
     func testPCMEncodeWAV() {
@@ -126,13 +126,13 @@ final class AppTests: XCTestCase {
             XCTFail("Expected wasmDecode strategy for xm")
         }
 
-        // serverDecode
+        // SoundMon BP is decoded by the shared native/WASM C decoder.
         let bpStrategy = engine.resolveStreamStrategy(filePath: "/test.bp", format: .bp)
-        if case .serverDecode(let path, let fmt) = bpStrategy {
+        if case .wasmDecode(let path, let fmt) = bpStrategy {
             XCTAssertEqual(path, "/test.bp")
             XCTAssertEqual(fmt, .bp)
         } else {
-            XCTFail("Expected serverDecode strategy for bp")
+            XCTFail("Expected wasmDecode strategy for bp")
         }
     }
 

@@ -3,91 +3,110 @@
 #include <string.h>
 #include "audio_engine.h"
 
-// ── 单例状态 ──
-static ASAP *asap = NULL;
-static short *render_buf = NULL;
-static int render_buf_size = 0;
-static int total_duration_ms = 0;
 #define ASAP_SAMPLE_RATE 44100
 
-// ── Decoder 接口实现 ──
+typedef struct {
+    ASAP *asap;
+    short *render_buf;
+    int render_buf_size;
+    int total_duration_ms;
+    int source_channels;
+} ASAPContext;
 
-static int impl_load(const unsigned char *data, int len) {
-    if (asap) { ASAP_Delete(asap); asap = NULL; }
-    free(render_buf); render_buf = NULL;
-    render_buf_size = 0;
-    total_duration_ms = 0;
+static void context_destroy(void *opaque);
 
-    asap = ASAP_New();
-    if (!asap) return 0;
+static void *context_create(const char *format, const unsigned char *data, int len) {
+    (void)format;
+    ASAPContext *ctx = (ASAPContext *)calloc(1, sizeof(*ctx));
+    if (!ctx) return NULL;
+    ctx->source_channels = 2;
+    ctx->asap = ASAP_New();
+    if (!ctx->asap) { context_destroy(ctx); return NULL; }
 
-    ASAP_SetSampleRate(asap, ASAP_SAMPLE_RATE);
-    ASAP_DetectSilence(asap, 5); // 5秒静音自动停止
+    ASAP_SetSampleRate(ctx->asap, ASAP_SAMPLE_RATE);
+    ASAP_DetectSilence(ctx->asap, 5); // 5秒静音自动停止
 
     // ASAP_Load 参数: (self, filename, module, moduleLen)
-    if (!ASAP_Load(asap, "song.sap", (const unsigned char*)data, len)) {
-        ASAP_Delete(asap); asap = NULL;
-        return 0;
+    if (!ASAP_Load(ctx->asap, "song.sap", (const unsigned char*)data, len)) {
+        context_destroy(ctx); return NULL;
     }
 
     // 获取时长
-    const ASAPInfo *info = ASAP_GetInfo(asap);
+    const ASAPInfo *info = ASAP_GetInfo(ctx->asap);
     if (info) {
-        total_duration_ms = ASAPInfo_GetDuration(info, 0);
+        ctx->total_duration_ms = ASAPInfo_GetDuration(info, 0);
+        ctx->source_channels = ASAPInfo_GetChannels(info);
     }
-    if (total_duration_ms <= 0) total_duration_ms = 120000; // 默认2分钟
+    if (ctx->source_channels != 1 && ctx->source_channels != 2) ctx->source_channels = 2;
+    if (ctx->total_duration_ms <= 0) ctx->total_duration_ms = 120000;
 
     // 开始播放
-    if (!ASAP_PlaySong(asap, 0, total_duration_ms)) {
-        ASAP_Delete(asap); asap = NULL;
-        return 0;
+    if (!ASAP_PlaySong(ctx->asap, 0, ctx->total_duration_ms)) {
+        context_destroy(ctx); return NULL;
     }
 
-    return 1;
+    return ctx;
 }
 
-static double impl_get_duration() {
-    if (!asap) return 0;
-    return total_duration_ms / 1000.0;
+static double context_get_duration(void *opaque) {
+    ASAPContext *ctx = (ASAPContext *)opaque;
+    return ctx && ctx->asap ? ctx->total_duration_ms / 1000.0 : 0;
 }
 
-static int impl_get_sample_rate() {
+static int context_get_sample_rate(void *opaque) { (void)opaque;
     return ASAP_SAMPLE_RATE;
 }
 
-static int impl_get_channels() {
+static int context_get_channels(void *opaque) { (void)opaque;
     return 2; // ASAP 默认输出立体声（POKEY 双声道）
 }
 
-static int impl_render(float *out, int frames) {
-    if (!asap) return 0;
+static int context_render(void *opaque, float *out, int frames) {
+    ASAPContext *ctx = (ASAPContext *)opaque;
+    if (!ctx || !ctx->asap) return 0;
 
-    int byte_count = frames * 2 * sizeof(short); // 立体声 16-bit
-    if (!render_buf || byte_count > render_buf_size) {
-        short *nb = (short *)realloc(render_buf, (size_t)byte_count);
+    int byte_count = frames * ctx->source_channels * sizeof(short);
+    if (!ctx->render_buf || byte_count > ctx->render_buf_size) {
+        short *nb = (short *)realloc(ctx->render_buf, (size_t)byte_count);
         if (!nb) return 0;
-        render_buf = nb;
-        render_buf_size = byte_count;
+        ctx->render_buf = nb;
+        ctx->render_buf_size = byte_count;
     }
 
-    int generated = ASAP_Generate(asap, (unsigned char*)render_buf, byte_count,
+    int generated = ASAP_Generate(ctx->asap, (unsigned char*)ctx->render_buf, byte_count,
                                    ASAPSampleFormat_S16_L_E);
-    int samples = generated / sizeof(short); // 实际生成的样本数
+    int samples = generated / sizeof(short);
+    int rendered_frames = samples / ctx->source_channels;
 
-    // short → float 转换（立体声交错）
-    int rendered_frames = samples / 2;
-    for (int i = 0; i < rendered_frames * 2 && i < samples; i++) {
-        out[i] = render_buf[i] / 32768.0f;
+    if (ctx->source_channels == 1) {
+        for (int i = 0; i < rendered_frames; i++) {
+            float sample = ctx->render_buf[i] / 32768.0f;
+            out[i * 2] = sample;
+            out[i * 2 + 1] = sample;
+        }
+    } else {
+        for (int i = 0; i < rendered_frames * 2; i++) {
+            out[i] = ctx->render_buf[i] / 32768.0f;
+        }
     }
     return rendered_frames;
 }
 
-static void impl_destroy() {
-    if (asap) { ASAP_Delete(asap); asap = NULL; }
-    free(render_buf); render_buf = NULL;
-    render_buf_size = 0;
-    total_duration_ms = 0;
+static void context_destroy(void *opaque) {
+    ASAPContext *ctx = (ASAPContext *)opaque;
+    if (!ctx) return;
+    if (ctx->asap) ASAP_Delete(ctx->asap);
+    free(ctx->render_buf);
+    free(ctx);
 }
+
+static ASAPContext *legacy;
+static int impl_load(const unsigned char *data, int len) { context_destroy(legacy); legacy = context_create(NULL, data, len); return legacy != NULL; }
+static double impl_get_duration(void) { return context_get_duration(legacy); }
+static int impl_get_sample_rate(void) { return context_get_sample_rate(legacy); }
+static int impl_get_channels(void) { return context_get_channels(legacy); }
+static int impl_render(float *out, int frames) { return context_render(legacy, out, frames); }
+static void impl_destroy(void) { context_destroy(legacy); legacy = NULL; }
 
 // ── 导出 Decoder 实例 ──
 const Decoder decoder_asap = {
@@ -97,5 +116,7 @@ const Decoder decoder_asap = {
     impl_get_sample_rate,
     impl_get_channels,
     impl_render,
-    impl_destroy
+    impl_destroy,
+    context_create, context_get_duration, context_get_sample_rate,
+    context_get_channels, context_render, context_destroy
 };

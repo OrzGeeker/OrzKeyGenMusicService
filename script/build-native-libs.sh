@@ -23,10 +23,19 @@ BUILD_DIR="$PROJECT_DIR/.wasm-build"
 SRC_DIR="$BUILD_DIR/src"
 NATIVE_DIR="$BUILD_DIR/native"
 CACHE_DIR="$BUILD_DIR/cache"
+INSTALL_DIR="$PROJECT_DIR/Libraries/OrzAudioKit/native"
 
 JOBS=${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 HOST_CC=${CC:-clang}
 HOST_CXX=${CXX:-clang++}
+NATIVE_CFLAGS=${CFLAGS:-}
+NATIVE_CXXFLAGS=${CXXFLAGS:-}
+if [ "$(uname -s)" = "Darwin" ]; then
+    MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}
+    export MACOSX_DEPLOYMENT_TARGET
+    NATIVE_CFLAGS="$NATIVE_CFLAGS -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+    NATIVE_CXXFLAGS="$NATIVE_CXXFLAGS -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+fi
 
 # Detect host architecture for --host flag in configure
 detect_host() {
@@ -66,6 +75,25 @@ done
 
 mkdir -p "$NATIVE_DIR"
 
+install_native_libraries() {
+    mkdir -p "$INSTALL_DIR"
+    local library basename
+    for library in "$NATIVE_DIR"/*.a; do
+        [ -f "$library" ] || continue
+        basename="${library##*/}"
+        [ "$basename" = "liblibbinio.a" ] && basename="libbinio.a"
+        cp "$library" "$INSTALL_DIR/$basename"
+    done
+}
+
+# Configure systems do not reliably rebuild existing objects when only the
+# deployment target/flags change. Native build directories are disposable, so
+# start each library from a clean directory to keep archive metadata honest.
+prepare_build_directory() {
+    rm -rf "$1"
+    mkdir -p "$1"
+}
+
 if $CLEAN; then
     log "Cleaning native build artifacts..."
     rm -rf "$NATIVE_DIR" "$BUILD_DIR/build-*-native"
@@ -87,11 +115,11 @@ build_libopenmpt() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     log "Configuring libopenmpt (native)..."
-    CC="$HOST_CC" CXX="$HOST_CXX" \
+    CC="$HOST_CC" CXX="$HOST_CXX" CFLAGS="$NATIVE_CFLAGS" CXXFLAGS="$NATIVE_CXXFLAGS" \
     "$src_dir/configure" \
         --host="$HOST" \
         --disable-shared \
@@ -152,13 +180,14 @@ build_libgme() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
-    CC="$HOST_CC" CXX="$HOST_CXX" \
+    CC="$HOST_CC" CXX="$HOST_CXX" CFLAGS="$NATIVE_CFLAGS" CXXFLAGS="$NATIVE_CXXFLAGS" \
     cmake "$src_dir" \
         -DBUILD_SHARED_LIBS=OFF \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-}" \
         -DENABLE_UBSAN=OFF \
         -DGME_ENABLE_SPC=ON \
         -DGME_ENABLE_NSF=ON \
@@ -208,11 +237,11 @@ build_libsidplayfp() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     log "Configuring libsidplayfp (native)..."
-    CC="$HOST_CC" CXX="$HOST_CXX" \
+    CC="$HOST_CC" CXX="$HOST_CXX" CFLAGS="$NATIVE_CFLAGS" CXXFLAGS="$NATIVE_CXXFLAGS" \
     "$src_dir/configure" \
         --host="$HOST" \
         --disable-shared \
@@ -254,7 +283,7 @@ build_libbinio() {
     log "Building libbinio..."
     local src_dir="$SRC_DIR/libbinio"
     local build_dir="$BUILD_DIR/build-libbinio-native"
-    local output="$NATIVE_DIR/liblibbinio.a"
+    local output="$NATIVE_DIR/libbinio.a"
 
     # Download source if not present
     local BINIO_VERSION="1.5"
@@ -269,10 +298,10 @@ build_libbinio() {
         }
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
-    CC="$HOST_CC" CXX="$HOST_CXX" \
+    CC="$HOST_CC" CXX="$HOST_CXX" CFLAGS="$NATIVE_CFLAGS" CXXFLAGS="$NATIVE_CXXFLAGS" \
     "$src_dir/configure" \
         --host="$HOST" \
         --disable-shared \
@@ -283,26 +312,46 @@ build_libbinio() {
             return 1
         }
 
-    make -j"$JOBS" >/dev/null 2>&1 || {
-        warn "libbinio make failed"
+    # libbinio's generated libtool appends archive members non-atomically.
+    if ! make -j1 >/dev/null 2>&1; then
+        # libtool 1.x is unreliable with current Apple toolchains. Its static
+        # target is only four translation units, so use a deterministic direct
+        # archive fallback with the same public headers.
+        warn "libbinio libtool failed; using direct static archive fallback"
+        local objects=()
+        local source object
+        for source in binio.cpp binfile.cpp binwrap.cpp binstr.cpp; do
+            object="$build_dir/${source%.cpp}.o"
+            "$HOST_CXX" $NATIVE_CXXFLAGS -Wno-register -I"$src_dir/src" -c "$src_dir/src/$source" -o "$object" || {
+                popd >/dev/null
+                return 1
+            }
+            objects+=("$object")
+        done
+        ar rcs "$output" "${objects[@]}"
+        ranlib "$output"
+        mkdir -p "$build_dir/src/.libs"
+        cp "$output" "$build_dir/src/.libs/libbinio.a"
         popd >/dev/null
-        return 1
-    }
+        log "libbinio.a → $output ($(du -h "$output" | cut -f1))"
+        echo "$NATIVE_DIR"
+        return 0
+    fi
 
     popd >/dev/null
 
     local libfile=""
-    for try in "$build_dir/src/.libs/liblibbinio.a" "$build_dir/liblibbinio.a"; do
+    for try in "$build_dir/src/.libs/libbinio.a" "$build_dir/libbinio.a"; do
         if [ -f "$try" ]; then libfile="$try"; break; fi
     done
 
     if [ -z "$libfile" ]; then
-        warn "liblibbinio.a not found after build"
+        warn "libbinio.a not found after build"
         return 1
     fi
 
     cp "$libfile" "$output"
-    log "liblibbinio.a → $output ($(du -h "$output" | cut -f1))"
+    log "libbinio.a → $output ($(du -h "$output" | cut -f1))"
     echo "$NATIVE_DIR"
 }
 
@@ -320,15 +369,17 @@ build_adplug() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     # AdPlug needs libbinio
     local binio_prefix="$BUILD_DIR/build-libbinio-native"
 
-    CC="$HOST_CC" CXX="$HOST_CXX" \
+    CC="$HOST_CC" CXX="$HOST_CXX" CFLAGS="$NATIVE_CFLAGS" CXXFLAGS="$NATIVE_CXXFLAGS" \
     CPPFLAGS="-I$binio_prefix" \
     LDFLAGS="-L$binio_prefix/src/.libs" \
+    libbinio_CFLAGS="-I$SRC_DIR/libbinio/src" \
+    libbinio_LIBS="$binio_prefix/src/.libs/libbinio.a" \
     "$src_dir/configure" \
         --host="$HOST" \
         --disable-shared \
@@ -340,7 +391,8 @@ build_adplug() {
             return 1
         }
 
-    make -j"$JOBS" >/dev/null 2>&1 || {
+    # AdPlug uses the same old libtool archive rules as libbinio.
+    make -j1 >/dev/null 2>&1 || make -j1 >/dev/null 2>&1 || {
         warn "AdPlug make failed"
         popd >/dev/null
         return 1
@@ -378,7 +430,7 @@ build_libsc68() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     local C_FILES=()
@@ -405,7 +457,7 @@ build_libsc68() {
         local dirpart="${cfile%/*}"
         local subdir="${dirpart##*/}"
         local objname="${subdir}_${basename%.c}.o"
-        $HOST_CC -c "$cfile" -o "$objname" $inc_flags $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
+        $HOST_CC $NATIVE_CFLAGS -c "$cfile" -o "$objname" $inc_flags $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
     done
 
     local objs=( *.o )
@@ -434,10 +486,10 @@ build_libasap() {
     fi
 
     # ASAP 的 asap.c 是预生成的（从 .fu 文件），可以直接编译
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
-    $HOST_CC -c "$src_dir/asap.c" -o asap.o -I"$src_dir" -O2 2>/dev/null || {
+    $HOST_CC $NATIVE_CFLAGS -c "$src_dir/asap.c" -o asap.o -I"$src_dir" -O2 2>/dev/null || {
         warn "ASAP compile failed"; popd >/dev/null; return 1
     }
     ar cr "$output" asap.o 2>/dev/null && ranlib "$output" 2>/dev/null
@@ -460,7 +512,7 @@ build_libuade() {
         [ ! -f "$src_dir/newcpu.c" ] && { warn "UAE core not found"; return 1; }
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     local uade_core_files=(
@@ -478,7 +530,7 @@ build_libuade() {
         local uade_src="$SRC_DIR/uade-3.05"
         if [ -f "$uade_src/src/build68k.c" ] && [ -f "$uade_src/src/table68k" ]; then
             log "Generating 68000 CPU tables..."
-            $HOST_CC -o "${build_dir}/build68k" "$uade_src/src/build68k.c" \
+            $HOST_CC $NATIVE_CFLAGS -o "${build_dir}/build68k" "$uade_src/src/build68k.c" \
                 -I"$uade_src/src" -I"$uade_src/src/include" \
                 -include "$uade_src/src/sysconfig.h" -lm 2>/dev/null || {
                 warn "build68k compile failed"; popd >/dev/null; return 1
@@ -505,11 +557,11 @@ build_libuade() {
         local src_file="$SRC_DIR/uade-3.05/src/$f"
         [ ! -f "$src_file" ] && continue
         local objname="${f//\//_}.o"
-        $HOST_CC -c "$src_file" -o "$objname" $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
+        $HOST_CC $NATIVE_CFLAGS -c "$src_file" -o "$objname" $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" $cflags 2>/dev/null && compile_ok=$((compile_ok + 1))
     done
     # 编译 CPU 表（如果生成了）
     if [ -n "$cpustbl_src" ] && [ -f "$cpustbl_src/cpustbl.c" ]; then
-        $HOST_CC -c "$cpustbl_src/cpustbl.c" -o cpustbl.o $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" -O2 2>/dev/null && compile_ok=$((compile_ok + 1))
+        $HOST_CC $NATIVE_CFLAGS -c "$cpustbl_src/cpustbl.c" -o cpustbl.o $inc_dirs -include "$SRC_DIR/uade-3.05/src/sysconfig.h" -O2 2>/dev/null && compile_ok=$((compile_ok + 1))
     fi
 
     [ $compile_ok -eq 0 ] && { warn "No UAE core files compiled"; popd >/dev/null; return 1; }
@@ -534,7 +586,7 @@ build_libv2m() {
         return 1
     fi
 
-    mkdir -p "$build_dir"
+    prepare_build_directory "$build_dir"
     pushd "$build_dir" >/dev/null || return 1
 
     # Compile all v2m source files (与 WASM 构建保持一致)
@@ -543,7 +595,7 @@ build_libv2m() {
         local src="$src_dir/src/$f"
         if [ -f "$src" ]; then
             local obj_name="${f%.cpp}.o"
-            $HOST_CXX -c "$src" -o "$build_dir/$obj_name" \
+            $HOST_CXX $NATIVE_CXXFLAGS -c "$src" -o "$build_dir/$obj_name" \
                 -I"$src_dir/src" -O2 2>/dev/null || {
                 warn "v2m $f compile failed"; continue
             }
@@ -564,6 +616,40 @@ build_libv2m() {
     fi
 }
 
+# ============================================================================
+# ahx2play — AHX (same patched Paula core as WASM)
+# ============================================================================
+build_libahx2play() {
+    log "Building ahx2play..."
+    local src_dir="$SRC_DIR/ahx2play"
+    local build_dir="$BUILD_DIR/build-ahx2play-native"
+    local output="$NATIVE_DIR/libahx2play.a"
+    local install_output="$PROJECT_DIR/Libraries/OrzAudioKit/native/libahx2play.a"
+    local reset_patch="$PROJECT_DIR/Sources/OrzAudioKitCXX/uade/ahx2play-reset.patch"
+    local context_patch="$PROJECT_DIR/Sources/OrzAudioKitCXX/uade/ahx2play-context.patch"
+
+    if [ ! -f "$src_dir/paula.c" ]; then
+        warn "ahx2play source not found at $src_dir"
+        return 1
+    fi
+
+    patch -N -d "$src_dir" -p1 < "$reset_patch" >/dev/null 2>&1 || true
+    patch -N -d "$src_dir" -p1 < "$context_patch" >/dev/null 2>&1 || true
+    prepare_build_directory "$build_dir"
+    mkdir -p "$(dirname "$install_output")"
+
+    local objs=""
+    for f in loader.c replayer.c paula.c; do
+        local obj="$build_dir/${f%.c}.o"
+        $HOST_CC $NATIVE_CFLAGS -c "$src_dir/$f" -o "$obj" -I"$src_dir" -O2 \
+            -include "$PROJECT_DIR/Libraries/OrzAudioKit/thirdparty/ahx2play/mixer_stubs.h" || return 1
+        objs="$objs $obj"
+    done
+    ar cr "$output" $objs && ranlib "$output"
+    cp "$output" "$install_output"
+    log "libahx2play.a → $output"
+}
+
 
 # ============================================================================
 # Main: build requested libraries
@@ -581,6 +667,7 @@ if [ -n "$ONLY_LIB" ]; then
         asap)        build_libasap ;;
         uade)        build_libuade ;;
         v2m)         build_libv2m ;;
+        ahx2play)    build_libahx2play ;;
         *)           err "Unknown library: $ONLY_LIB" ;;
     esac
 else
@@ -598,7 +685,10 @@ else
     build_libasap || warn "ASAP build failed (will use stub)"
     build_libuade || warn "uade build failed (will use stub)"
     build_libv2m || warn "v2m build failed (will use stub)"
+    build_libahx2play || warn "ahx2play build failed (will use stub)"
 fi
+
+install_native_libraries
 
 log "=== Native libraries built ==="
 ls -lh "$NATIVE_DIR"/*.a 2>/dev/null || echo "(no .a files)"

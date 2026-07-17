@@ -93,21 +93,12 @@ struct SongController: RouteCollection {
             throw CasError.fileNotFound(sha256: song.sha256, format: song.fileFormat)
         }
 
-        // YM 格式：WASM 解码器需要原始 YM6 数据（不含 LHa 压缩头）
-        // 如果 CAS 存储的是 LHa 压缩版，用系统 lha 解压后再提供
-        if format == .ym {
-            if isLHaCompressed(at: fullPath) {
-                let decompPath = try await decompressYM(fullPath, sha256: song.sha256, cas: cas)
-                var res = try await req.fileio.asyncStreamFile(at: decompPath)
-                res.headers.replaceOrAdd(name: .contentType, value: "audio/ym")
-                return res
-            }
-            var res = try await req.fileio.asyncStreamFile(at: fullPath)
-            res.headers.replaceOrAdd(name: .contentType, value: "audio/ym")
-            return res
-        }
-
         let engine = AudioEngine()
+        let requestedSubsong = req.query[Int.self, at: "subsong"] ?? 0
+        guard requestedSubsong >= 0, requestedSubsong <= Int(Int32.max) else {
+            throw Abort(.badRequest, reason: "Invalid subsong")
+        }
+        let subsong = requestedSubsong
         let strategy = engine.resolveStreamStrategy(filePath: fullPath, format: format)
 
         switch strategy {
@@ -121,7 +112,7 @@ struct SongController: RouteCollection {
 
         case .serverDecode(let path, let fmt):
             // 尝试从转码缓存读取（避免重复 ffmpeg）
-            let cachePath = try await cachedDecode(originalPath: path, sha256: song.sha256, format: fmt, cas: req.application.casStorage)
+            let cachePath = try await cachedDecode(originalPath: path, sha256: song.sha256, format: fmt, subsong: subsong, cas: req.application.casStorage)
             var res = try await req.fileio.asyncStreamFile(at: cachePath)
             res.headers.replaceOrAdd(name: .contentType, value: "audio/wav")
             return res
@@ -149,80 +140,27 @@ struct SongController: RouteCollection {
 
     /// 服务端解码，并将结果缓存到 CAS 缓存目录
     /// 首次请求转码（AudioEngine → C 解码器 / ffmpeg），后续直接读缓存
-    private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, cas: CasStorageService) async throws -> String {
+    private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, subsong: Int, cas: CasStorageService) async throws -> String {
         let cacheDir = "\(cas.root)/.cache/wav/"
-        let cachePath = "\(cacheDir)\(sha256).wav"
+        // Version output semantics so decoder/format changes never reuse stale PCM.
+        let cachePath = "\(cacheDir)\(sha256)-decoder-v3-rate-native-ch-native-sub-\(subsong).wav"
 
         let fm = FileManager.default
         if fm.fileExists(atPath: cachePath) {
-            return cachePath
-        }
-
-        // 首次：通过 AudioEngine 解码为 PCM WAV 并缓存
-        let engine = AudioEngine()
-        let wavData = try await engine.decodeToWAV(filePath: originalPath, format: format)
-
-        try queue.sync {
-            try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
-            try wavData.write(to: URL(fileURLWithPath: cachePath))
-        }
-        return cachePath
-    }
-
-    private let queue = DispatchQueue(label: "com.orzplayer.cache")
-
-    /// 检查文件是否 LHa 压缩（以 "-lh5-" 或 "-lh6-" 头标记）
-    private func isLHaCompressed(at path: String) -> Bool {
-        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
-        defer { try? handle.close() }
-        let magic = handle.readData(ofLength: 8)
-        guard magic.count >= 7 else { return false }
-        // LHa 头：2 字节校验 + "-lh5-" 或 "-lh6-"
-        let bytes = [UInt8](magic)
-        return bytes[2] == 0x2D && bytes[3] == 0x6C && bytes[4] == 0x68 &&
-               (bytes[5] == 0x35 || bytes[5] == 0x36) && bytes[6] == 0x2D
-    }
-
-    /// 使用系统 lha 解压 YM 文件，结果缓存到 CAS 缓存目录
-    private func decompressYM(_ path: String, sha256: String, cas: CasStorageService) async throws -> String {
-        let cacheDir = "\(cas.root)/.cache/ym/"
-        let cachePath = "\(cacheDir)\(sha256).ym"
-        let fm = FileManager.default
-        if fm.fileExists(atPath: cachePath) { return cachePath }
-
-        let tmpDir = fm.temporaryDirectory.appendingPathComponent("orz_ym_\(UUID().uuidString)")
-        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: tmpDir) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/lha")
-        process.arguments = ["x", path]
-        process.currentDirectoryURL = tmpDir
-
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { p in
-                if p.terminationStatus == 0 { c.resume() }
-                else { c.resume(throwing: AudioError.decodeFailed("lha exit \(p.terminationStatus)")) }
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath), options: .mappedIfSafe),
+               (try? WAVFile.parse(data, includeSamples: false).encoding) == .pcm {
+                return cachePath
             }
-            do { try process.run() } catch { c.resume(throwing: error) }
+            try? fm.removeItem(atPath: cachePath)
         }
 
-        // 找到解压出的文件
-        let contents = try fm.contentsOfDirectory(atPath: tmpDir.path)
-        guard let decompFile = contents.first(where: { $0 != "." && $0 != ".." }) else {
-            throw AudioError.decodeFailed("lha produced no output for YM: \(sha256)")
-        }
-
-        let decompPath = tmpDir.appendingPathComponent(decompFile).path
-        try queue.sync {
-            try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
-            if !fm.fileExists(atPath: cachePath) {
-                try fm.copyItem(atPath: decompPath, toPath: cachePath)
-            }
-        }
+        try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
+        try await AudioEngine().decodeToWAVFile(
+            filePath: originalPath,
+            format: format,
+            destinationPath: cachePath,
+            subsong: subsong
+        )
         return cachePath
     }
 

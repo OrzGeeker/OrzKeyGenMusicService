@@ -7,7 +7,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" href="/favicon.png" type="image/png" sizes="192x192">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script defer src="/audio/player.js"></script>
+    <script defer src="/audio/player.js?v=20260717-ym-lhasa-v1"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -429,6 +429,7 @@
             },
 
             async playSong(song) {
+                const playRequest = (this.playRequestGen = (this.playRequestGen || 0) + 1);
                 if (!player) return;
                 this.currentSong = song;
                 this.isPlaying = false;
@@ -436,6 +437,8 @@
                 this.currentTime = 0;
 
                 await player.play(song);
+
+                if (playRequest !== this.playRequestGen || player.currentSong?.id !== song.id) return;
 
                 this.isPlaying = player.isPlaying;
 

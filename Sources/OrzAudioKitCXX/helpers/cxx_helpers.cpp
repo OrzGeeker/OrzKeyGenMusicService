@@ -19,9 +19,13 @@ double safe_openmpt_duration(openmpt_module* mod) {
     catch (...) { return 0; }
 }
 
-size_t safe_openmpt_render(openmpt_module* mod, int rate, size_t frames,
-                           float* left, float* right) {
-    try { return openmpt_module_read_float_stereo(mod, rate, frames, left, right); }
+size_t safe_openmpt_render_interleaved(openmpt_module* mod, int rate,
+                                       size_t frames, float* out) {
+    try {
+        return openmpt_module_read_interleaved_float_stereo(
+            mod, rate, frames, out
+        );
+    }
     catch (...) { return 0; }
 }
 

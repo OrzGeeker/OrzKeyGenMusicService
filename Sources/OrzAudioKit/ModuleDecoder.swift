@@ -21,6 +21,16 @@ public class ModuleDecoder: @unchecked Sendable {
         return try await decodeWithFFmpeg(filePath: filePath, format: format)
     }
 
+    public func decodeToWAVFile(
+        filePath: String,
+        format: AudioFormat,
+        destinationPath: String
+    ) async throws {
+        try await StandardDecoder().decodeWithFFmpegToFile(
+            filePath: filePath, destinationPath: destinationPath
+        )
+    }
+
     // MARK: - FFmpeg Universal Decoder
 
     /// 通过 ffmpeg CLI 异步解码任意音频格式为 WAV/PCM
@@ -58,20 +68,6 @@ public class ModuleDecoder: @unchecked Sendable {
         }
 
         let wavData = try Data(contentsOf: URL(fileURLWithPath: outputPath))
-        // Standard WAV header is 44 bytes for PCM
-        let pcmStart = 44
-
-        guard wavData.count > pcmStart else {
-            throw AudioError.invalidPCMData(
-                "Decoded WAV too small for \(format.rawValue): \(wavData.count) bytes"
-            )
-        }
-
-        return PCMData(
-            samples: Data(wavData[pcmStart...]),
-            sampleRate: 44100,
-            channels: 2,
-            bitsPerSample: 16
-        )
+        return try WAVFile.parse(wavData).linearPCM()
     }
 }

@@ -13,6 +13,7 @@ public func configure(_ app: Application) throws {
         allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith]
     )
     app.middleware.use(CORSMiddleware(configuration: corsConfig))
+    app.middleware.use(CrossOriginIsolationMiddleware())
 
     // 统一错误响应格式
     app.middleware.use(ErrorResponseMiddleware())

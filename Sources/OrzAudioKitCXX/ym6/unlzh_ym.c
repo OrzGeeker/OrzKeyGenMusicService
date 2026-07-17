@@ -15,14 +15,14 @@
 #define DICSIZ      (1U << DICBIT)
 #define CBIT        9
 #define CODE_BIT    12
-#define NC          (510)    /* 255+256+2-THRESHOLD */
+#define NC          (510)    /* UCHAR_MAX+MAXMATCH+2-THRESHOLD */
 #define NP          (DICBIT + 1)
 #define NT          (CODE_BIT + 3)
 #define PBIT        4
 #define TBIT        5
 #define NPT         (1 << TBIT)
 #define MAXMATCH    256
-#define THRESHOLD   2
+#define THRESHOLD   3
 
 /* Bit I/O */
 static const unsigned char *inp;
@@ -30,6 +30,7 @@ static int inpos, insize;
 static unsigned char *outp;
 static int outpos;
 static unsigned short bitbuf;
+static unsigned int subbitbuf;
 static int bitcount;
 
 static int read_byte(void) {
@@ -39,12 +40,13 @@ static int read_byte(void) {
 static void fillbuf(int n) {
     bitbuf <<= n;
     while (n > bitcount) {
-        int b = read_byte();
-        if (b < 0) b = 0;
-        bitbuf |= (unsigned short)(b << (n -= bitcount));
+        n -= bitcount;
+        bitbuf |= (unsigned short)(subbitbuf << n);
+        subbitbuf = (unsigned int)read_byte();
         bitcount = 8;
     }
-    bitbuf |= (unsigned short)(read_byte() >> (bitcount -= n));
+    bitcount -= n;
+    bitbuf |= (unsigned short)(subbitbuf >> bitcount);
 }
 
 static unsigned short getbits(int n) {
@@ -61,6 +63,8 @@ static unsigned short right[2 * NC - 1];
 static unsigned short c_table[4096];
 static unsigned short pt_table[256];
 static int blocksize;
+static unsigned decode_i;
+static int decode_j;
 
 static void make_table(int nchar, unsigned char bitlen[], int tablebits, unsigned short table[]) {
     unsigned short count[17], weight[17], start[18], *p;
@@ -71,7 +75,7 @@ static void make_table(int nchar, unsigned char bitlen[], int tablebits, unsigne
     start[1] = 0;
     for (i = 1; i <= 16; i++)
         start[i + 1] = start[i] + (count[i] << (16 - i));
-    if ((start[17] & 0xffff) != 0) return; /* Bad table, skip silently */
+    if ((start[17] & 0xffff) != 0) return;
 
     jutbits = 16 - tablebits;
     for (i = 1; i <= (unsigned)tablebits; i++) {
@@ -83,7 +87,8 @@ static void make_table(int nchar, unsigned char bitlen[], int tablebits, unsigne
     i = start[tablebits + 1] >> jutbits;
     if (i != 0) {
         k = 1 << tablebits;
-        while (i != k) table[i++] = 0;
+        if (i > k) return;
+        while (i < k) table[i++] = 0;
     }
 
     avail = nchar;
@@ -125,13 +130,17 @@ static void read_pt_len(int nn, int nbit, int i_special) {
             c = bitbuf >> (16 - 3);
             if (c == 7) {
                 unsigned mask = 1 << (16 - 1 - 3);
-                while (mask & bitbuf) { mask >>= 1; c++; }
+                while (mask & bitbuf) {
+                    mask >>= 1; c++;
+                }
             }
             fillbuf((c < 7) ? 3 : c - 3);
             pt_len[i++] = c;
             if (i == i_special) {
                 c = getbits(2);
-                while (--c >= 0) pt_len[i++] = 0;
+                while (--c >= 0) {
+                    pt_len[i++] = 0;
+                }
             }
         }
         while (i < nn) pt_len[i++] = 0;
@@ -211,18 +220,17 @@ static unsigned decode_p(void) {
 }
 
 static void decode_start(void) {
-    bitbuf = 0; bitcount = 0; blocksize = 0;
+    bitbuf = 0; subbitbuf = 0; bitcount = 0; blocksize = 0;
+    decode_i = 0; decode_j = 0;
     fillbuf(16);
 }
 
 static int decode(unsigned count, unsigned char buffer[]) {
-    static unsigned i;
-    static int j;
     unsigned r = 0, c;
 
-    while (--j >= 0) {
-        buffer[r] = buffer[i];
-        i = (i + 1) & (DICSIZ - 1);
+    while (--decode_j >= 0) {
+        buffer[r] = buffer[decode_i];
+        decode_i = (decode_i + 1) & (DICSIZ - 1);
         if (++r == count) return r;
     }
     for (;;) {
@@ -232,11 +240,11 @@ static int decode(unsigned count, unsigned char buffer[]) {
             buffer[r] = (unsigned char)c;
             if (++r == count) return r;
         } else {
-            j = c - ((unsigned char)(-1) + 1 - THRESHOLD);
-            i = (r - decode_p() - 1) & (DICSIZ - 1);
-            while (--j >= 0) {
-                buffer[r] = buffer[i];
-                i = (i + 1) & (DICSIZ - 1);
+            decode_j = c - ((unsigned char)(-1) + 1 - THRESHOLD);
+            decode_i = (r - decode_p() - 1) & (DICSIZ - 1);
+            while (--decode_j >= 0) {
+                buffer[r] = buffer[decode_i];
+                decode_i = (decode_i + 1) & (DICSIZ - 1);
                 if (++r == count) return r;
             }
         }
@@ -252,8 +260,8 @@ static int decode(unsigned count, unsigned char buffer[]) {
  * @param decompressed_len  预期解压大小
  * @return 实际解压字节数，或 -1 表示错误
  */
-int ym_lzh_decompress(const unsigned char *compressed, int compressed_len,
-                       unsigned char *decompressed, int decompressed_len)
+static int legacy_ym_lzh_decompress(const unsigned char *compressed, int compressed_len,
+                                    unsigned char *decompressed, int decompressed_len)
 {
     if (!compressed || compressed_len <= 0 || !decompressed || decompressed_len <= 0)
         return -1;
@@ -266,6 +274,7 @@ int ym_lzh_decompress(const unsigned char *compressed, int compressed_len,
 
     unsigned char *window = (unsigned char *)calloc(DICSIZ, 1);
     if (!window) return -1;
+    memset(window, ' ', DICSIZ);
 
     decode_start();
 
@@ -284,4 +293,15 @@ int ym_lzh_decompress(const unsigned char *compressed, int compressed_len,
 
     free(window);
     return outpos;
+}
+
+int ym_lhasa_lh5_decompress(const unsigned char *compressed, int compressed_len,
+                            unsigned char *decompressed, int decompressed_len);
+
+int ym_lzh_decompress(const unsigned char *compressed, int compressed_len,
+                      unsigned char *decompressed, int decompressed_len)
+{
+    (void)legacy_ym_lzh_decompress; /* Retained for source-history comparison. */
+    return ym_lhasa_lh5_decompress(compressed, compressed_len,
+                                   decompressed, decompressed_len);
 }

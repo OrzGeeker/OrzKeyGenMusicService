@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 // AUDIO DRIVERS
 #if defined AUDIODRIVER_SDL
@@ -74,5 +75,9 @@ void paulaSetLength(int32_t ch, uint16_t len);
 void paulaSetData(int32_t ch, const int8_t *src);
 void paulaMixSamples(int16_t *target, uint32_t numSamples);
 
-extern audio_t audio; // paula.c
-extern paulaVoice_t paula[PAULA_VOICES]; // paula.c
+extern _Thread_local audio_t audio; // paula.c
+extern _Thread_local paulaVoice_t paula[PAULA_VOICES]; // paula.c
+
+size_t ahxPaulaStateSize(void);
+void ahxPaulaStateSave(void *opaque);
+void ahxPaulaStateLoad(const void *opaque);

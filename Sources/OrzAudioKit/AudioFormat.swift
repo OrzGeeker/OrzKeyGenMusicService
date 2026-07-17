@@ -10,8 +10,11 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
     case nsf, spc
     // Commodore 64 — libsidplay2
     case sid
-    // Atari ST — libsc68 / ST-Sound
-    case sc68, hsc, ym
+    // SC68 — libsc68（完整 68K CPU 模拟，WASM 中极慢，走 serverDecode）
+    case sc68
+    // HSC — AdPlug OPL2/3（轻量 FM 合成，走 wasmDecode）
+    // YM — YM6 内置 YM2149 模拟器（轻量芯片模拟，走 wasmDecode）
+    case hsc, ym
     // Amiga — uADE
     case ahx, amd, fc13, fc14
     // Atari POKEY — ASAP
@@ -36,8 +39,9 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
     /// 该格式对应的播放策略
     public var playStrategy: PlayStrategy {
         switch self {
-        case .wav:
-            // WAV 可能有 ADPCM/GSM 编码，浏览器不原生支持，服务端转 PCM
+        case .wav, .sc68:
+            // WAV: ADPCM/GSM 编码服务端转 PCM
+            // SC68: 68K CPU 模拟在 WASM 中极慢，服务端原生解码更快
             return .serverDecode
         case .mp3, .ogg, .flac, .m4a, .aac:
             return .directFile
@@ -45,7 +49,7 @@ public enum AudioFormat: String, CaseIterable, Codable, Sendable {
             return .wasmDecode
         case .xm, .mod, .it, .s3m, .mo3, .mtm:
             return .wasmDecode
-        case .v2m, .sc68, .hsc, .sid, .nsf, .spc:
+        case .v2m, .hsc, .sid, .nsf, .spc:
             return .wasmDecode
         case .ahx, .amd, .fc13, .fc14, .sap, .ym, .rad, .d00:
             return .wasmDecode

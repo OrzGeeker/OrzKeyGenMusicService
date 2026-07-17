@@ -32,6 +32,16 @@ public class AudioEngine: @unchecked Sendable {
         format: AudioFormat,
         cachePath: String? = nil
     ) -> StreamStrategy {
+        if format == .wav,
+           let data = try? Data(contentsOf: URL(fileURLWithPath: filePath), options: .mappedIfSafe),
+           let wav = try? WAVFile.parse(data, includeSamples: false) {
+            switch wav.encoding {
+            case .pcm, .ieeeFloat:
+                return .directFile(path: filePath, mimeType: format.mimeType)
+            case .compressed:
+                return .serverDecode(path: filePath, format: format)
+            }
+        }
         switch format.playStrategy {
         case .directFile:
             return .directFile(path: filePath, mimeType: format.mimeType)
@@ -92,5 +102,35 @@ public class AudioEngine: @unchecked Sendable {
     public func decodeToWAV(filePath: String, format: AudioFormat) async throws -> Data {
         let pcm = try await decodeToPCM(filePath: filePath, format: format)
         return pcm.encodeWAV()
+    }
+
+    /// Decode directly to a cache file. C decoders and standard decoders both
+    /// use bounded-memory writers; module fallback lets ffmpeg write the
+    /// temporary WAV directly.
+    public func decodeToWAVFile(
+        filePath: String,
+        format: AudioFormat,
+        destinationPath: String,
+        subsong: Int = 0
+    ) async throws {
+        if CDecoderBridge.canDecode(format: format.rawValue) {
+            try CDecoderBridge.decodeToWAVFile(
+                filePath: filePath,
+                format: format.rawValue,
+                destinationPath: destinationPath,
+                subsong: subsong
+            )
+            return
+        }
+        switch format {
+        case .mp3, .ogg, .wav, .flac, .mid, .m4a, .aac:
+            try await standardDecoder.decodeToWAVFile(
+                filePath: filePath, destinationPath: destinationPath
+            )
+        default:
+            try await moduleDecoder.decodeToWAVFile(
+                filePath: filePath, format: format, destinationPath: destinationPath
+            )
+        }
     }
 }

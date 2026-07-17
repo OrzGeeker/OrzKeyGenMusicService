@@ -7,79 +7,80 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <new>
 #include "audio_engine.h"
 #include "v2mplayer.h"
 
 // ── 合成器状态 ──
 
-static V2MPlayer *player = NULL;
-static unsigned char *owned_data = NULL;  // V2MPlayer 只存指针，必须持有一份数据拷贝
-static int owned_data_len = 0;
-static int sample_rate = 44100;
-static int channels = 2;
-static int v2m_file_size = 0;            // 文件大小，用于 duration 降级判断
-static int v2m_ended = 0;                // 歌曲结束后标记，后续 render 返回 0
+struct V2MContext {
+    V2MPlayer *player = NULL;
+    unsigned char *owned_data = NULL;
+    int sample_rate = 44100;
+    int v2m_ended = 0;
+    uint64_t rendered_frames = 0;
+    uint64_t duration_frames = 0;
+};
 
 // ── Decoder 接口 ──
 
-static void impl_destroy(void);
+static void context_destroy(void *opaque);
 
-static int impl_load(const unsigned char *data, int len) {
-    impl_destroy();
+static void *context_create(const char *format, const unsigned char *data, int len) {
+    (void)format;
+    if (!data || len <= 0) return NULL;
+    V2MContext *ctx = new(std::nothrow) V2MContext();
+    if (!ctx) return NULL;
 
     // 复制数据（V2MPlayer::Open 要求数据指针在 player 生命周期内有效）
-    owned_data = (unsigned char *)malloc(len);
-    if (!owned_data) return 0;
-    memcpy(owned_data, data, len);
-    owned_data_len = len;
-    v2m_file_size = len;
-    v2m_ended = 0;
+    ctx->owned_data = (unsigned char *)malloc((size_t)len);
+    if (!ctx->owned_data) { delete ctx; return NULL; }
+    memcpy(ctx->owned_data, data, (size_t)len);
 
-    player = new V2MPlayer();
-    if (!player) { free(owned_data); owned_data = NULL; return 0; }
-    player->Init(1000);
+    ctx->player = new(std::nothrow) V2MPlayer();
+    if (!ctx->player) { context_destroy(ctx); return NULL; }
+    ctx->player->Init(1000);
 
     // Open 加载 .v2m 数据（使用拷贝后的数据）
-    if (!player->Open(owned_data, sample_rate, false)) {
-        delete player; player = NULL;
-        free(owned_data); owned_data = NULL;
-        return 0;
+    if (!ctx->player->Open(ctx->owned_data, ctx->sample_rate, false)) {
+        context_destroy(ctx); return NULL;
     }
 
     // Play 调用启动回放（必须在 load 时调用一次，不要在 render 重复调用，
     // 因为 V2MPlayer::Play() 内部会 Stop() + Reset()，重复调用会丢失进度）
-    player->Play(0);
+    ctx->player->Play(0);
+    ctx->duration_frames = (uint64_t)ctx->player->Length() * ctx->sample_rate / 1000U;
 
-    return 1;
+    return ctx;
 }
 
-static double impl_get_duration(void) {
-    if (!player) return 0;
-    uint32_t len = player->Length();
-    // Length() 返回毫秒。对于大文件（>10KB）但时长 <5s 的情况，
-    // 可能是 Length() 不准确，使用 120 秒默认值确保能完整播放
-    if (len < 5000 && v2m_file_size > 10240) {
-        return 120.0;
-    }
-    return (len > 0) ? (double)len / 1000.0 : 0.0;
+static double context_get_duration(void *opaque) {
+    V2MContext *ctx = (V2MContext *)opaque;
+    return ctx && ctx->player ? (double)ctx->player->Length() / 1000.0 : 0;
 }
 
-static int impl_get_sample_rate(void) { return sample_rate; }
-static int impl_get_channels(void) { return channels; }
+static int context_get_sample_rate(void *opaque) { return opaque ? ((V2MContext *)opaque)->sample_rate : 0; }
+static int context_get_channels(void *opaque) { return opaque ? 2 : 0; }
 
-static int impl_render(float *out, int frames) {
-    if (!player) return 0;
+static int context_render(void *opaque, float *out, int frames) {
+    V2MContext *ctx = (V2MContext *)opaque;
+    if (!ctx || !ctx->player || !out || frames <= 0) return 0;
 
     // 歌曲已结束（上次检测到 IsPlaying=false），返回 0 让 JS 流式循环退出
-    if (v2m_ended) return 0;
+    if (ctx->v2m_ended) return 0;
+    if (ctx->rendered_frames >= ctx->duration_frames) { ctx->v2m_ended = 1; return 0; }
+    if ((uint64_t)frames > ctx->duration_frames - ctx->rendered_frames) {
+        frames = (int)(ctx->duration_frames - ctx->rendered_frames);
+    }
 
     // V2MPlayer::Render 输出 float32 stereo interleaved
-    player->Render(out, frames, false);
+    ctx->player->Render(out, frames, false);
 
     // 检测歌曲是否结束：Render 后检查 IsPlaying，若结束则标记并在下次返回 0
-    if (!player->IsPlaying()) {
-        v2m_ended = 1;
+    if (!ctx->player->IsPlaying()) {
+        ctx->v2m_ended = 1;
     }
+    ctx->rendered_frames += (uint64_t)frames;
 
     // 音量衰减
     for (int i = 0; i < frames * 2; i++) {
@@ -89,18 +90,24 @@ static int impl_render(float *out, int frames) {
     return frames;
 }
 
-static void impl_destroy(void) {
-    if (player) {
-        player->Close();
-        delete player;
-        player = NULL;
+static void context_destroy(void *opaque) {
+    V2MContext *ctx = (V2MContext *)opaque;
+    if (!ctx) return;
+    if (ctx->player) {
+        ctx->player->Close();
+        delete ctx->player;
     }
-    free(owned_data);
-    owned_data = NULL;
-    owned_data_len = 0;
-    v2m_file_size = 0;
-    v2m_ended = 0;
+    free(ctx->owned_data);
+    delete ctx;
 }
+
+static V2MContext *legacy;
+static int impl_load(const unsigned char *data, int len) { context_destroy(legacy); legacy = (V2MContext *)context_create(NULL, data, len); return legacy != NULL; }
+static double impl_get_duration(void) { return context_get_duration(legacy); }
+static int impl_get_sample_rate(void) { return context_get_sample_rate(legacy); }
+static int impl_get_channels(void) { return context_get_channels(legacy); }
+static int impl_render(float *out, int frames) { return context_render(legacy, out, frames); }
+static void impl_destroy(void) { context_destroy(legacy); legacy = NULL; }
 
 // ── 导出 Decoder 实例（必须 extern "C" 以覆盖 stub_decoders.c 的弱符号）──
 
@@ -112,5 +119,7 @@ const Decoder decoder_v2m = {
     impl_get_sample_rate,
     impl_get_channels,
     impl_render,
-    impl_destroy
+    impl_destroy,
+    context_create, context_get_duration, context_get_sample_rate,
+    context_get_channels, context_render, context_destroy
 };

@@ -39,6 +39,7 @@ static int program_to_wave(int program) {
 typedef struct {
     int   active;        // 0=空闲
     int   note;          // MIDI 音符编号
+    int   channel;       // MIDI 通道
     int   wave;          // 波形类型
     float phase;         // 相位 (0.0 - 1.0)
     float freq;          // 频率 (Hz)
@@ -51,20 +52,31 @@ typedef struct {
 
 // ── 预计算波形表 ──
 
-static float wave_table[5][WAVE_TABLE_SIZE];
-static int   wave_table_initialized = 0;
+typedef struct {
+    float wave_table[5][WAVE_TABLE_SIZE];
+    MidiEvent *events;
+    int event_count, event_index;
+    Voice voices[MAX_VOICES];
+    int total_samples;
+    double current_tick, ticks_per_sample;
+    int program_map[16];
+    double current_tempo;
+    int ticks_per_quarter;
+    double duration_seconds;
+    int silence_frames, remaining_note_on;
+} MIDIContext;
 
-static void init_wave_table(void) {
-    if (wave_table_initialized) return;
-    wave_table_initialized = 1;
+static void init_wave_table(MIDIContext *ctx) {
+    unsigned int noise = 0x6d2b79f5U;
     for (int i = 0; i < WAVE_TABLE_SIZE; i++) {
         float p = (float)i / WAVE_TABLE_SIZE;
         float angle = 2.0f * 3.14159265f * p;
-        wave_table[WAVE_SINE][i]   = sinf(angle);
-        wave_table[WAVE_SQUARE][i] = (p < 0.5f) ? 1.0f : -1.0f;
-        wave_table[WAVE_SAW][i]    = 2.0f * p - 1.0f;
-        wave_table[WAVE_TRI][i]    = (p < 0.5f) ? 4.0f * p - 1.0f : 3.0f - 4.0f * p;
-        wave_table[WAVE_NOISE][i]  = ((float)(rand() % 32767) / 16383.5f - 1.0f);
+        ctx->wave_table[WAVE_SINE][i]   = sinf(angle);
+        ctx->wave_table[WAVE_SQUARE][i] = (p < 0.5f) ? 1.0f : -1.0f;
+        ctx->wave_table[WAVE_SAW][i]    = 2.0f * p - 1.0f;
+        ctx->wave_table[WAVE_TRI][i]    = (p < 0.5f) ? 4.0f * p - 1.0f : 3.0f - 4.0f * p;
+        noise = noise * 1664525U + 1013904223U;
+        ctx->wave_table[WAVE_NOISE][i] = (float)((noise >> 8) & 0xffff) / 32767.5f - 1.0f;
     }
 }
 
@@ -73,21 +85,6 @@ static void init_wave_table(void) {
 static float note_to_freq(int note) {
     return 440.0f * powf(2.0f, (note - 69.0f) / 12.0f);
 }
-
-// ── 合成器全局状态 ──
-
-static MidiEvent *events = NULL;
-static int   event_count = 0;
-static int   event_index = 0;
-static Voice voices[MAX_VOICES];
-static int   total_samples = 0;
-static float ticks_per_sample = 0.0f;
-static int   program_map[16];
-static double current_tempo = 500000.0;
-static int   ticks_per_quarter = 480;
-static int   midi_duration_ticks = 0;
-static int   silence_frames = 0;    // 沉默帧计数器，用于提前退出
-static int   remaining_note_on = 0; // 尚未处理的 NOTE_ON 事件数
 
 // ── 包络参数 ──
 
@@ -143,35 +140,36 @@ static float calc_envelope(Voice *v) {
 
 // ── 读波形表（线性插值）──
 
-static float read_wave(int wave, float phase) {
+static float read_wave(MIDIContext *ctx, int wave, float phase) {
     float fpos = phase * WAVE_TABLE_SIZE;
     int idx = (int)fpos % WAVE_TABLE_SIZE;
     float frac = fpos - (int)fpos;
     int next = (idx + 1) % WAVE_TABLE_SIZE;
-    return wave_table[wave][idx] * (1.0f - frac) + wave_table[wave][next] * frac;
+    return ctx->wave_table[wave][idx] * (1.0f - frac) + ctx->wave_table[wave][next] * frac;
 }
 
 // ── 触发音符 ──
 
-static void note_on(int note, float vel, int channel) {
-    int wave = program_to_wave(program_map[channel]);
+static void note_on(MIDIContext *ctx, int note, float vel, int channel) {
+    int wave = program_to_wave(ctx->program_map[channel]);
 
     // 查找空闲音色
     int slot = -1;
     for (int i = 0; i < MAX_VOICES; i++) {
-        if (!voices[i].active) { slot = i; break; }
+        if (!ctx->voices[i].active) { slot = i; break; }
     }
     if (slot < 0) {
         // 没有空闲音色，替换最早 release 或 sustain 的
         for (int i = 0; i < MAX_VOICES; i++) {
-            if (voices[i].env_stage >= 3) { slot = i; break; }
+            if (ctx->voices[i].env_stage >= 3) { slot = i; break; }
         }
     }
     if (slot < 0) return;
 
-    Voice *v = &voices[slot];
+    Voice *v = &ctx->voices[slot];
     v->active       = 1;
     v->note         = note;
+    v->channel      = channel;
     v->wave         = wave;
     v->phase        = 0.0f;
     v->freq         = note_to_freq(note);
@@ -182,13 +180,12 @@ static void note_on(int note, float vel, int channel) {
     v->samples_left = RELEASE_SAMPLES;
 }
 
-static void note_off(int note, int channel) {
-    (void)channel;
+static void note_off(MIDIContext *ctx, int note, int channel) {
     for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].active && voices[i].note == note &&
-            voices[i].env_stage < 3) {
-            voices[i].env_stage = 3;  // Release
-            voices[i].stage_samples = 0;
+        if (ctx->voices[i].active && ctx->voices[i].note == note && ctx->voices[i].channel == channel &&
+            ctx->voices[i].env_stage < 3) {
+            ctx->voices[i].env_stage = 3;
+            ctx->voices[i].stage_samples = 0;
             break;
         }
     }
@@ -196,90 +193,84 @@ static void note_off(int note, int channel) {
 
 // ── Decoder 接口 ──
 
-static void impl_destroy(void);
+static void context_destroy(void *opaque);
 
-static int impl_load(const unsigned char *data, int len) {
-    impl_destroy();
-    init_wave_table();
+static void *context_create(const char *format, const unsigned char *data, int len) {
+    (void)format;
+    MIDIContext *ctx = (MIDIContext *)calloc(1, sizeof(*ctx));
+    if (!ctx) return NULL;
+    ctx->current_tempo = 500000.0;
+    ctx->ticks_per_quarter = 480;
+    init_wave_table(ctx);
 
     MidiFile mf;
-    if (!midi_load(&mf, data, len)) return 0;
+    if (!midi_load(&mf, data, len)) { free(ctx); return NULL; }
 
-    ticks_per_quarter = mf.ticks_per_quarter;
-    event_count = mf.count;
-    events = (MidiEvent *)malloc(sizeof(MidiEvent) * event_count);
-    if (!events) { midi_free(&mf); return 0; }
-    memcpy(events, mf.events, sizeof(MidiEvent) * event_count);
+    ctx->ticks_per_quarter = mf.ticks_per_quarter;
+    ctx->event_count = mf.count;
+    ctx->events = (MidiEvent *)malloc(sizeof(MidiEvent) * (size_t)ctx->event_count);
+    if (!ctx->events) { midi_free(&mf); free(ctx); return NULL; }
+    memcpy(ctx->events, mf.events, sizeof(MidiEvent) * (size_t)ctx->event_count);
     midi_free(&mf);
 
-    event_index = 0;
-    total_samples = 0;
-    silence_frames = 0;
-    remaining_note_on = 0;
     // 统计 NOTE_ON 事件数量
-    for (int i = 0; i < event_count; i++) {
-        if (events[i].type == MIDI_EV_NOTE_ON) remaining_note_on++;
+    for (int i = 0; i < ctx->event_count; i++) {
+        if (ctx->events[i].type == MIDI_EV_NOTE_ON) ctx->remaining_note_on++;
     }
-    current_tempo = 500000.0;
 
-    for (int i = 0; i < 16; i++) program_map[i] = 0;
-    memset(voices, 0, sizeof(voices));
-
-    if (event_count > 0) {
-        midi_duration_ticks = (int)events[event_count - 1].tick + ticks_per_quarter * 4;
-    } else {
-        midi_duration_ticks = ticks_per_quarter * 128;
+    double duration = 0.0, previous_tick = 0.0, tempo = 500000.0;
+    for (int i = 0; i < ctx->event_count; i++) {
+        if (ctx->events[i].tick > previous_tick) {
+            duration += (ctx->events[i].tick - previous_tick) * tempo / 1000000.0 / ctx->ticks_per_quarter;
+            previous_tick = ctx->events[i].tick;
+        }
+        if (ctx->events[i].type == MIDI_EV_TEMPO && ctx->events[i].tempo > 0) tempo = ctx->events[i].tempo;
     }
+    ctx->duration_seconds = duration + (double)RELEASE_SAMPLES / SAMPLE_RATE;
 
     // 预计算 ticks_per_sample（使用默认 tempo，后续 tempo 变化时更新）
-    double secs_per_tick = current_tempo / 1000000.0 / ticks_per_quarter;
-    ticks_per_sample = (float)(1.0 / (secs_per_tick * SAMPLE_RATE));
+    double secs_per_tick = ctx->current_tempo / 1000000.0 / ctx->ticks_per_quarter;
+    ctx->ticks_per_sample = 1.0 / (secs_per_tick * SAMPLE_RATE);
 
-    return 1;
+    return ctx;
 }
 
-static double impl_get_duration(void) {
-    if (ticks_per_quarter <= 0) return 0;
-    double secs_per_tick = current_tempo / 1000000.0 / ticks_per_quarter;
-    return midi_duration_ticks * secs_per_tick;
-}
-
-static int impl_get_sample_rate(void) { return SAMPLE_RATE; }
-static int impl_get_channels(void) { return 2; }
+static double context_get_duration(void *opaque) { return opaque ? ((MIDIContext *)opaque)->duration_seconds : 0; }
+static int context_get_sample_rate(void *opaque) { return opaque ? SAMPLE_RATE : 0; }
+static int context_get_channels(void *opaque) { return opaque ? 2 : 0; }
 
 #define SILENCE_LIMIT_SAMPLES 22050  // 0.5s 沉默后提前退出
 
-static int impl_render(float *out, int frames) {
-    if (!events || event_count == 0) return 0;
+static int context_render(void *opaque, float *out, int frames) {
+    MIDIContext *ctx = (MIDIContext *)opaque;
+    if (!ctx || !ctx->events || ctx->event_count == 0) return 0;
 
     for (int s = 0; s < frames; s++) {
         // 当前采样对应的 tick 位置
-        float current_tick = (float)total_samples * ticks_per_sample;
-
         // 处理事件
-        while (event_index < event_count &&
-               (float)events[event_index].tick <= current_tick) {
-            MidiEvent *ev = &events[event_index];
+        while (ctx->event_index < ctx->event_count &&
+               ctx->events[ctx->event_index].tick <= ctx->current_tick) {
+            MidiEvent *ev = &ctx->events[ctx->event_index];
             switch (ev->type) {
                 case MIDI_EV_NOTE_ON:
-                    note_on(ev->note, ev->velocity / 127.0f, ev->channel);
-                    if (remaining_note_on > 0) remaining_note_on--;
+                    note_on(ctx, ev->note, ev->velocity / 127.0f, ev->channel);
+                    if (ctx->remaining_note_on > 0) ctx->remaining_note_on--;
                     break;
                 case MIDI_EV_NOTE_OFF:
-                    note_off(ev->note, ev->channel);
+                    note_off(ctx, ev->note, ev->channel);
                     break;
                 case MIDI_EV_PROGRAM:
-                    if (ev->channel < 16) program_map[ev->channel] = ev->program;
+                    if (ev->channel < 16) ctx->program_map[ev->channel] = ev->program;
                     break;
                 case MIDI_EV_TEMPO: {
-                    current_tempo = ev->tempo ? (double)ev->tempo : 500000.0;
-                    double st = (float)(current_tempo / 1000000.0 / ticks_per_quarter);
-                    ticks_per_sample = (float)(1.0 / (st * SAMPLE_RATE));
+                    ctx->current_tempo = ev->tempo ? (double)ev->tempo : 500000.0;
+                    double st = ctx->current_tempo / 1000000.0 / ctx->ticks_per_quarter;
+                    ctx->ticks_per_sample = 1.0 / (st * SAMPLE_RATE);
                     break;
                 }
                 default: break;
             }
-            event_index++;
+            ctx->event_index++;
         }
 
         // 混合所有活跃音色
@@ -287,8 +278,8 @@ static int impl_render(float *out, int frames) {
         int active_count = 0;
 
         for (int v = 0; v < MAX_VOICES; v++) {
-            if (!voices[v].active) continue;
-            Voice *voice = &voices[v];
+            if (!ctx->voices[v].active) continue;
+            Voice *voice = &ctx->voices[v];
 
             float env = calc_envelope(voice);
 
@@ -298,7 +289,7 @@ static int impl_render(float *out, int frames) {
             }
 
             // 读波形
-            float sample = read_wave(voice->wave, voice->phase);
+            float sample = read_wave(ctx, voice->wave, voice->phase);
             sample *= env * voice->velocity * 0.4f;
 
             float pan = (voice->note - 36.0f) / 96.0f;
@@ -322,41 +313,46 @@ static int impl_render(float *out, int frames) {
             out[s * 2 + 1] = 0.0f;
         }
 
-        total_samples++;
+        ctx->total_samples++;
+        ctx->current_tick += ctx->ticks_per_sample;
     }
 
     // 如果所有 NOTE_ON 事件已处理完且所有音色已释放，继续沉默超过阈值则提前结束
     // 注意：检测 remaining_note_on 而非 event_index >= event_count，
     // 因为可能有非 NOTE_ON 元事件（tempo/end_track）在 Note 之后很远的位置
-    if (remaining_note_on <= 0) {
+    if (ctx->remaining_note_on <= 0) {
         int all_done = 1;
         for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].active) { all_done = 0; break; }
+            if (ctx->voices[v].active) { all_done = 0; break; }
         }
         if (all_done) {
-            silence_frames += frames;
-            if (silence_frames >= SILENCE_LIMIT_SAMPLES) {
-                silence_frames = 0;
+            ctx->silence_frames += frames;
+            if (ctx->silence_frames >= SILENCE_LIMIT_SAMPLES) {
+                ctx->silence_frames = 0;
                 return 0;  // 信号结束，JS 流式循环收到 0 后会 break
             }
         } else {
-            silence_frames = 0;
+            ctx->silence_frames = 0;
         }
     }
 
     return frames;
 }
 
-static void impl_destroy(void) {
-    free(events);
-    events = NULL;
-    event_count = 0;
-    event_index = 0;
-    memset(voices, 0, sizeof(voices));
-    total_samples = 0;
-    silence_frames = 0;
-    remaining_note_on = 0;
+static void context_destroy(void *opaque) {
+    MIDIContext *ctx = (MIDIContext *)opaque;
+    if (!ctx) return;
+    free(ctx->events);
+    free(ctx);
 }
+
+static MIDIContext *legacy;
+static int impl_load(const unsigned char *data, int len) { context_destroy(legacy); legacy = context_create(NULL, data, len); return legacy != NULL; }
+static double impl_get_duration(void) { return context_get_duration(legacy); }
+static int impl_get_sample_rate(void) { return context_get_sample_rate(legacy); }
+static int impl_get_channels(void) { return context_get_channels(legacy); }
+static int impl_render(float *out, int frames) { return context_render(legacy, out, frames); }
+static void impl_destroy(void) { context_destroy(legacy); legacy = NULL; }
 
 // ── 导出 Decoder 实例 ──
 
@@ -367,5 +363,7 @@ const Decoder decoder_midi = {
     impl_get_sample_rate,
     impl_get_channels,
     impl_render,
-    impl_destroy
+    impl_destroy,
+    context_create, context_get_duration, context_get_sample_rate,
+    context_get_channels, context_render, context_destroy
 };

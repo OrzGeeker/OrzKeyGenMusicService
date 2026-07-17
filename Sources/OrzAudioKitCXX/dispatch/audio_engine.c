@@ -35,6 +35,7 @@ extern const Decoder decoder_adplug;
 
 // midi (wavetable synth)
 extern const Decoder decoder_midi;
+extern const Decoder decoder_bp;
 
 
 // ── 解码器自动注册 ──
@@ -73,10 +74,13 @@ __attribute__((used)) __attribute__((noinline)) void register_all() {
         orz_register_decoder("ahx,thx", &decoder_uade_ahx);
 
     if (decoder_adplug.load)
-        orz_register_decoder("rad,d00,hsc,amd,bp", &decoder_adplug);
+        orz_register_decoder("rad,d00,hsc,amd", &decoder_adplug);
 
     if (decoder_midi.load)
         orz_register_decoder("mid", &decoder_midi);
+
+    if (decoder_bp.load)
+        orz_register_decoder("bp", &decoder_bp);
 }
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──

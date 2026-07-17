@@ -18,6 +18,12 @@ extern int adplug_get_sample_rate();
 extern int adplug_get_channels();
 extern int adplug_render(float *out, int frames);
 extern void adplug_destroy();
+extern void *adplug_context_create(const char *, const unsigned char *, int);
+extern double adplug_context_get_duration(void *);
+extern int adplug_context_get_sample_rate(void *);
+extern int adplug_context_get_channels(void *);
+extern int adplug_context_render(void *, float *, int);
+extern void adplug_context_destroy(void *);
 
 __attribute__((used)) const Decoder decoder_adplug = {
     "adplug",
@@ -26,5 +32,8 @@ __attribute__((used)) const Decoder decoder_adplug = {
     adplug_get_sample_rate,
     adplug_get_channels,
     adplug_render,
-    adplug_destroy
+    adplug_destroy,
+    adplug_context_create, adplug_context_get_duration,
+    adplug_context_get_sample_rate, adplug_context_get_channels,
+    adplug_context_render, adplug_context_destroy
 };
