@@ -157,3 +157,34 @@ test('worker seek updates the clock only after decoder confirmation', () => {
     assert.equal(messages[0].generation, 7);
     assert.equal(messages[0].positionMs, 75000);
 });
+
+test('volume updates both direct audio and the shared Web Audio gain', () => {
+    const player = new Player();
+    const gainParam = {
+        value: 1,
+        cancelledAt: null,
+        setAt: null,
+        cancelScheduledValues(time) { this.cancelledAt = time; },
+        setValueAtTime(value, time) { this.setAt = [value, time]; },
+    };
+    const gainNode = { gain: gainParam, connectedTo: null, connect(node) { this.connectedTo = node; } };
+    const destination = { id: 'speakers' };
+    player.audioCtx = { currentTime: 12, destination, createGain: () => gainNode };
+
+    player.setVolume(0.25);
+
+    assert.equal(player.audioEl.volume, 0.25);
+    assert.equal(player.masterGain, gainNode);
+    assert.equal(gainNode.connectedTo, destination);
+    assert.equal(gainParam.value, 0.25);
+    assert.deepEqual(gainParam.setAt, [0.25, 12]);
+    assert.equal(player._outputNode(), gainNode);
+});
+
+test('volume remains clamped and works before Web Audio is initialized', () => {
+    const player = new Player();
+    player.setVolume(-2);
+    assert.equal(player.audioEl.volume, 0);
+    player.setVolume(2);
+    assert.equal(player.audioEl.volume, 1);
+});

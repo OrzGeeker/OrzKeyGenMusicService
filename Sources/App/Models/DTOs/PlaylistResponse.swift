@@ -7,11 +7,11 @@ struct PlaylistResponse: Content {
     let songCount: Int?
     let songs: [SongResponse]?
 
-    init(playlist: Playlist, songs: [SongResponse]? = nil) {
+    init(playlist: Playlist, songCount: Int? = nil, songs: [SongResponse]? = nil) {
         self.id = playlist.id ?? UUID()
         self.name = playlist.name
         self.description = playlist.description
-        self.songCount = songs?.count
+        self.songCount = songs?.count ?? songCount
         self.songs = songs
     }
 }

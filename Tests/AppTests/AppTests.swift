@@ -201,6 +201,68 @@ final class AppTests: XCTestCase {
         }
     }
 
+    func testPlaylistIndexReportsSongCountForAtomicSave() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        struct CreateBody: Codable {
+            let name: String
+            let songIds: [UUID]
+        }
+        let songs = (1...2).map { index in
+            Song(
+                title: "Atomic \(index)",
+                sha256: "atomic-playlist-\(String(format: "%047d", index))",
+                fileFormat: "mp3",
+                fileSize: 100
+            )
+        }
+        for song in songs { try song.create(on: app.db).wait() }
+
+        try app.test(.POST, "/api/playlists", beforeRequest: { request in
+            request.body = jsonBuffer(CreateBody(name: "Atomic", songIds: songs.compactMap(\.id)))
+            request.headers.contentType = .json
+        }) { response in
+            XCTAssertEqual(response.status, .ok)
+            XCTAssertEqual(try response.content.decode(PlaylistResponse.self).songCount, 2)
+        }
+
+        try app.test(.GET, "/api/playlists") { response in
+            let playlists = try response.content.decode([PlaylistResponse].self)
+            XCTAssertEqual(playlists.count, 1)
+            XCTAssertEqual(playlists[0].songCount, 2)
+        }
+    }
+
+    func testAtomicPlaylistSaveRollsBackWhenAnySongIsMissing() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        struct CreateBody: Codable {
+            let name: String
+            let songIds: [UUID]
+        }
+        let song = Song(
+            title: "Existing", sha256: "atomic-rollback-existing-00000000000000000000000",
+            fileFormat: "mp3", fileSize: 100
+        )
+        try song.create(on: app.db).wait()
+
+        try app.test(.POST, "/api/playlists", beforeRequest: { request in
+            request.body = jsonBuffer(CreateBody(
+                name: "Must Roll Back", songIds: [song.id!, UUID()]
+            ))
+            request.headers.contentType = .json
+        }) { response in
+            XCTAssertEqual(response.status, .notFound)
+        }
+
+        try app.test(.GET, "/api/playlists") { response in
+            XCTAssertTrue(try response.content.decode([PlaylistResponse].self).isEmpty)
+        }
+        XCTAssertEqual(try PlaylistSongPivot.query(on: app.db).count().wait(), 0)
+    }
+
     func testUpdatePlaylist() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
@@ -505,6 +567,53 @@ final class AppTests: XCTestCase {
         try app.test(.GET, "/api/songs") { res in
             let page = try res.content.decode(Page<SongResponse>.self)
             XCTAssertEqual(page.items.count, 0)
+        }
+    }
+
+    func testSongFormatSummaryAndEmptyLibrary() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        try app.test(.GET, "/api/songs/formats") { response in
+            XCTAssertEqual(response.status, .ok)
+            let summary = try response.content.decode(SongController.FormatSummary.self)
+            XCTAssertEqual(summary.total, 0)
+            XCTAssertTrue(summary.formats.isEmpty)
+        }
+
+        for (index, format) in ["ym", "ym", "mp3", "custom"].enumerated() {
+            let song = Song(
+                title: "Format \(index)",
+                sha256: "format-summary-\(String(format: "%049d", index))",
+                fileFormat: format,
+                fileSize: 100
+            )
+            try song.create(on: app.db).wait()
+        }
+
+        try app.test(.GET, "/api/songs/formats") { response in
+            let summary = try response.content.decode(SongController.FormatSummary.self)
+            XCTAssertEqual(summary.total, 4)
+            XCTAssertEqual(Dictionary(uniqueKeysWithValues: summary.formats.map { ($0.format, $0.count) }), ["custom": 1, "mp3": 1, "ym": 2])
+        }
+    }
+
+    func testSongSearchCanFilterByFormat() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let artist = Artist(name: "Demo Artist")
+        try artist.create(on: app.db).wait()
+        for (index, format) in ["ym", "mp3"].enumerated() {
+            let song = Song(title: "Shared title", sha256: "search-format-\(String(format: "%050d", index))", fileFormat: format, fileSize: 100)
+            song.$artist.id = artist.id!
+            try song.create(on: app.db).wait()
+        }
+
+        try app.test(.GET, "/api/songs/search?q=shared&format=ym") { response in
+            XCTAssertEqual(response.status, .ok)
+            let songs = try response.content.decode([SongResponse].self)
+            XCTAssertEqual(songs.map(\.fileFormat), ["ym"])
         }
     }
 

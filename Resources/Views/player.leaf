@@ -3,553 +3,147 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OrzPlayer</title>
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" href="/favicon.png" type="image/png" sizes="192x192">
+    <meta name="theme-color" content="#0b0d0c">
+    <title>OrzPlayer · 芯片音乐播放器</title>
+    <link rel="icon" href="/brand/favicon.ico" sizes="any">
+    <link rel="icon" href="/brand/orz-logo.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/brand/orz-logo-192.png">
+    <link rel="stylesheet" href="/audio/app.css?v=20260718-brand-title-v1">
+    <script defer src="/audio/player.js?v=20260718-master-volume-v1"></script>
+    <script defer src="/audio/app.js?v=20260718-focus-ring-v1"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script defer src="/audio/player.js?v=20260717-controls-seek-v1"></script>
-    <style>
-        :root {
-            --bg: #0a0a0a;
-            --text: #e0e0e0;
-            --text-sub: #666;
-            --accent: #1DB954;
-            --hover: #fff;
-            --divider: #1a1a1a;
-            --bar-bg: rgba(10,10,10,0.85);
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
-        /* Header */
-        .header {
-            position: fixed; top: 0; left: 0; right: 0;
-            z-index: 10; padding: 16px 24px;
-            display: flex; align-items: center;
-            background: linear-gradient(180deg, rgba(10,10,10,0.95) 60%, transparent);
-        }
-        .header h1 { font-size: 16px; font-weight: 500; color: var(--text); letter-spacing: 1px; }
-        .header-right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
-        .search-input {
-            background: transparent; border: none; color: var(--text);
-            font-size: 13px; padding: 6px 8px; width: 120px;
-            outline: none; border-bottom: 1px solid var(--divider);
-            transition: width .2s, border-color .2s;
-        }
-        .search-input::placeholder { color: var(--text-sub); }
-        .search-input:focus { width: 200px; border-color: var(--text-sub); }
-        .filter-select {
-            background: transparent; border: 1px solid var(--divider); color: var(--text-sub);
-            font-size: 12px; padding: 4px 6px; border-radius: 0; outline: none;
-            cursor: pointer;
-        }
-        .filter-select:hover { color: var(--text); }
-
-        /* Song List */
-        .song-list {
-            margin-top: 64px; padding: 8px 24px 120px;
-        }
-        .song-item {
-            display: flex; align-items: center;
-            padding: 8px 12px; cursor: pointer;
-            border-radius: 4px; transition: background .15s;
-        }
-        .song-item:hover { background: rgba(255,255,255,0.04); }
-        .song-item.active { background: rgba(29,185,84,0.08); }
-        .song-title {
-            flex: 1; font-size: 14px; font-weight: 400;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .song-artist {
-            margin-left: 16px; font-size: 13px; color: var(--text-sub);
-            white-space: nowrap;
-        }
-        .song-format {
-            margin-left: 12px; font-size: 11px; color: var(--accent); opacity: 0.6;
-            min-width: 30px; text-align: right;
-        }
-        .song-item:hover .play-indicator {
-            opacity: 0.3;
-        }
-        .play-indicator {
-            margin-left: 8px; font-size: 12px; opacity: 0; transition: opacity .15s;
-        }
-        .song-item:hover .play-indicator,
-        .song-item.active .play-indicator { opacity: 1; }
-
-        /* Load more */
-        .load-more {
-            text-align: center; padding: 24px; color: var(--text-sub); font-size: 13px;
-            cursor: pointer;
-        }
-        .load-more:hover { color: var(--text); }
-
-        /* Player Bar */
-        .player-bar {
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: var(--bar-bg); backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-top: 1px solid var(--divider);
-            padding: 8px 24px 12px;
-            z-index: 20;
-        }
-        .progress-container { margin-bottom: 6px; cursor: pointer; }
-        .progress-bar {
-            height: 3px; background: #333; position: relative; border-radius: 2px;
-        }
-        .progress-fill {
-            height: 100%; background: var(--accent); border-radius: 2px;
-            transition: width 0.3s;
-            width: 0%;
-        }
-        .progress-bar:hover { height: 4px; }
-        .player-controls {
-            display: flex; align-items: center; gap: 16px;
-        }
-        .player-btn {
-            background: none; border: none; color: var(--text);
-            font-size: 18px; cursor: pointer; padding: 4px;
-            transition: opacity .15s; opacity: 0.7;
-            line-height: 1;
-        }
-        .player-btn:hover { opacity: 1; }
-        .player-btn.play-btn { font-size: 24px; opacity: 0.9; }
-        .player-info {
-            flex: 1; font-size: 13px; overflow: hidden;
-            white-space: nowrap; text-overflow: ellipsis;
-            margin: 0 16px;
-        }
-        .player-info .now-title { color: var(--text); }
-        .player-info .now-artist { color: var(--text-sub); font-size: 12px; }
-        .player-time {
-            font-size: 12px; color: var(--text-sub);
-            font-variant-numeric: tabular-nums;
-        }
-        .volume-btn {
-            background: none; border: none; color: var(--text-sub);
-            font-size: 14px; cursor: pointer; opacity: 0.7;
-        }
-        .volume-btn:hover { opacity: 1; }
-
-        /* Playlist panel */
-        .playlist-panel {
-            position: fixed; top: 56px; right: -320px;
-            width: 300px; bottom: 80px;
-            background: rgba(15,15,15,0.95);
-            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            transition: right .3s ease; z-index: 15;
-            padding: 16px; overflow-y: auto;
-        }
-        .playlist-panel.open { right: 0; }
-        .playlist-panel h3 {
-            font-size: 14px; font-weight: 500; margin-bottom: 12px;
-            color: var(--text);
-        }
-        .playlist-item {
-            padding: 6px 8px; font-size: 13px; color: var(--text-sub);
-            display: flex; align-items: center; cursor: pointer;
-            border-radius: 4px;
-        }
-        .playlist-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
-        .playlist-item .remove-btn {
-            margin-left: auto; background: none; border: none;
-            color: var(--text-sub); cursor: pointer; font-size: 12px;
-            opacity: 0; transition: opacity .15s;
-        }
-        .playlist-item:hover .remove-btn { opacity: 0.5; }
-        .playlist-item.dragging { opacity: 0.5; }
-
-        .queue-btn {
-            background: none; border: none; color: var(--text-sub);
-            font-size: 14px; cursor: pointer; position: relative;
-        }
-        .queue-btn:hover { color: var(--text); }
-        .queue-count {
-            position: absolute; top: -4px; right: -6px;
-            background: var(--accent); color: #000;
-            font-size: 10px; padding: 1px 4px; border-radius: 8px;
-            font-weight: 600;
-        }
-
-        /* Playlist management */
-        .pl-actions { margin-top: 16px; border-top: 1px solid var(--divider); padding-top: 12px; }
-        .pl-section { margin-bottom: 12px; }
-        .pl-section input { margin-bottom: 6px; }
-        .pl-name-input {
-            width: 100%; background: transparent; border: 1px solid var(--divider);
-            color: var(--text); font-size: 12px; padding: 4px 6px; outline: none;
-            box-sizing: border-box;
-        }
-        .pl-name-input:focus { border-color: var(--text-sub); }
-        .pl-btn {
-            background: transparent; border: 1px solid var(--divider); color: var(--text-sub);
-            font-size: 11px; padding: 3px 8px; cursor: pointer; width: 100%;
-            transition: color .15s, border-color .15s;
-        }
-        .pl-btn:hover { color: var(--text); border-color: var(--text-sub); }
-        .pl-btn:disabled { opacity: 0.4; cursor: default; }
-        .pl-btn.danger:hover { border-color: #e33; color: #e33; }
-        .pl-btn.sm { width: auto; font-size: 10px; padding: 2px 6px; }
-        .saved-pl-item {
-            display: flex; align-items: center; gap: 6px;
-            padding: 4px 0; font-size: 12px;
-        }
-        .saved-pl-name { flex: 1; cursor: pointer; color: var(--text-sub); }
-        .saved-pl-name:hover { color: var(--text); }
-        .saved-pl-count { font-size: 10px; color: var(--text-sub); opacity: 0.6; }
-    </style>
 </head>
-<body x-data="playerApp()">
-
-    <!-- Header -->
-    <div class="header">
-        <h1>OrzPlayer</h1>
-        <div class="header-right">
-            <input class="search-input" type="text" placeholder="搜索歌曲..."
-                   x-model="searchQuery" @input.debounce="search" @keydown.escape="searchQuery='';search()">
-            <select class="filter-select" x-model="formatFilter" @change="loadSongs()">
-                <option value="">所有格式</option>
-                <option value="xm">XM (模块)</option>
-                <option value="mod">MOD (模块)</option>
-                <option value="it">IT (模块)</option>
-                <option value="s3m">S3M (模块)</option>
-                <option value="mo3">MO3 (模块)</option>
-                <option value="mtm">MTM (模块)</option>
-                <option value="mp3">MP3</option>
-                <option value="ogg">OGG</option>
-                <option value="wav">WAV</option>
-                <option value="flac">FLAC</option>
-                <option value="mid">MIDI</option>
-                <option value="ahx">AHX (Amiga)</option>
-                <option value="amd">AMD (Amiga)</option>
-                <option value="fc13">FC13 (Amiga)</option>
-                <option value="fc14">FC14 (Amiga)</option>
-                <option value="sid">SID (C64)</option>
-                <option value="nsf">NSF (NES)</option>
-                <option value="spc">SPC (SNES)</option>
-                <option value="sc68">SC68 (Atari ST)</option>
-                <option value="hsc">HSC (Atari ST)</option>
-                <option value="ym">YM (Atari ST)</option>
-                <option value="sap">SAP (Atari POKEY)</option>
-                <option value="rad">RAD (AdLib)</option>
-                <option value="d00">D00 (AdLib)</option>
-                <option value="v2m">V2M</option>
-                <option value="bp">BP</option>
-            </select>
-            <button class="queue-btn" @click="playlistOpen = !playlistOpen" title="播放队列">
-                &#9776;
-                <span class="queue-count" x-show="queue.length > 0" x-text="queue.length"></span>
-            </button>
-        </div>
-    </div>
-
-    <!-- Song List -->
-    <div class="song-list" id="songList">
-        <template x-for="song in songs" :key="song.id">
-            <div class="song-item" :class="{ active: currentSong?.id === song.id }"
-                 @dblclick="playSong(song)">
-                <span class="song-title" x-text="song.title"></span>
-                <span class="song-artist" x-text="song.artist?.name || 'Unknown'"></span>
-                <span class="song-format" x-text="song.fileFormat"></span>
-                <span class="play-indicator">&#9654;</span>
+<body x-data="playerApp()" @keydown.window="handleShortcut($event)" :class="{'drawer-open': sidebarOpen}">
+    <div class="app-shell">
+        <aside class="sidebar" :class="{'open': sidebarOpen}" aria-label="音频格式分类">
+            <div class="brand-row">
+                <button class="brand-home" title="OrzMusic 首页" aria-label="OrzMusic 首页" @click="selectFormat('')">
+                    <span class="brand-mark"><img src="/brand/orz-logo.svg" alt=""></span>
+                    <span class="brand-title"><strong>Orz<span>Music</span></strong><small>CHIP AUDIO</small></span>
+                </button>
+                <button class="icon-btn mobile-only" @click="sidebarOpen=false" aria-label="关闭格式分类">✕</button>
             </div>
-        </template>
-        <div class="load-more" x-show="hasMore" @click="loadMore()">
-            ··· 滚动加载更多 ···
-        </div>
-    </div>
-
-    <!-- Player Bar -->
-    <div class="player-bar">
-        <div class="progress-container" @click="seek" id="progressContainer">
-            <div class="progress-bar">
-                <div class="progress-fill" :style="`width: ${progressPercent}%`"></div>
-            </div>
-        </div>
-        <div class="player-controls">
-            <button class="player-btn" @click="prev">&#9664;&#9664;</button>
-            <button class="player-btn play-btn" @click="togglePlay" x-text="isPlaying ? '&#9646;&#9646;' : '&#9654;'"></button>
-            <button class="player-btn" @click="next">&#9654;&#9654;</button>
-            <div class="player-info">
-                <div class="now-title" x-text="currentSong?.title || '未播放'"></div>
-                <div class="now-artist" x-text="currentSong?.artist?.name || ''"></div>
-            </div>
-            <span class="player-time" x-text="timeDisplay"></span>
-            <button class="volume-btn" @click="toggleMute" x-text="volume === 0 ? '&#128263;' : '&#128266;'"></button>
-        </div>
-    </div>
-
-    <!-- Playlist Panel -->
-    <div class="playlist-panel" :class="{ open: playlistOpen }">
-        <h3>播放队列</h3>
-        <template x-for="(song, idx) in queue" :key="song.id">
-            <div class="playlist-item" @click="playSong(song)">
-                <span x-text="`${idx+1}. ${song.title}`"></span>
-                <button class="remove-btn" @click.stop="removeFromQueue(idx)" x-text="'&#10005;'"></button>
-            </div>
-        </template>
-        <div x-show="queue.length === 0" style="color:#666;font-size:13px;padding:12px;text-align:center;">
-            队列为空
-        </div>
-        <div class="pl-actions" x-show="queue.length > 0 || playlists.length > 0">
-            <div class="pl-section" x-show="queue.length > 0">
-                <input class="pl-name-input" type="text" x-model="newPlaylistName" placeholder="新建播放列表名..."
-                       @keydown.enter="saveAsPlaylist()">
-                <button class="pl-btn" @click="saveAsPlaylist()" :disabled="!newPlaylistName.trim()">保存队列</button>
-            </div>
-            <div class="pl-section" x-show="playlists.length > 0">
-                <span style="font-size:12px;color:var(--text-sub);">已保存的播放列表</span>
-                <template x-for="pl in playlists" :key="pl.id">
-                    <div class="saved-pl-item">
-                        <span class="saved-pl-name" @click="loadPlaylist(pl.id)" x-text="pl.name"></span>
-                        <template x-if="pl.songCount">
-                            <span class="saved-pl-count" x-text="`${pl.songCount}首`"></span>
+            <button class="shortcut-hint" @click="shortcutOpen=true" title="快捷键帮助 (? 或 H)" aria-label="显示快捷键帮助" aria-keyshortcuts="? H"><kbd>?</kbd><span>快捷键</span></button>
+            <nav class="format-nav">
+                <button class="format-link all" :class="{'active': !formatFilter}" @click="selectFormat('')">
+                    <span class="format-dot"></span><span>全部曲目</span><strong x-text="libraryTotal"></strong>
+                </button>
+                <template x-for="group in formatGroups" :key="group.id">
+                    <section class="format-group" x-show="group.items.length">
+                        <h2 x-text="group.label"></h2>
+                        <template x-for="item in group.items" :key="item.id">
+                            <button class="format-link" :class="{'active': formatFilter===item.id}" @click="selectFormat(item.id)">
+                                <span class="format-dot" :style="`--dot:${item.color}`"></span>
+                                <span x-text="item.label"></span><strong x-text="item.count"></strong>
+                            </button>
                         </template>
-                        <button class="pl-btn sm danger" @click="deletePlaylist(pl.id)">删除</button>
-                    </div>
+                    </section>
                 </template>
-            </div>
-        </div>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="icon-btn mobile-only" @click="sidebarOpen=true" aria-label="打开格式分类">☰</button>
+                <div class="view-heading">
+                    <p>音乐资料库</p>
+                    <h1 x-text="activeFormatLabel"></h1>
+                </div>
+                <label class="search-box">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="songSearch" type="search" placeholder="搜索曲目或艺术家" aria-label="搜索曲目或艺术家"
+                           x-model="searchQuery" @input.debounce.250ms="search" @keydown.escape.stop="clearSearch">
+                    <kbd>⌘K</kbd>
+                </label>
+                <button class="queue-trigger" @click="playlistOpen=!playlistOpen" aria-keyshortcuts="Q" :aria-expanded="playlistOpen" title="播放队列 (Q)">
+                    <span>队列</span><strong x-text="queue.length"></strong>
+                </button>
+            </header>
+
+            <section class="library" aria-live="polite">
+                <div class="library-summary">
+                    <span x-text="summaryText"></span>
+                    <span class="loading-label" x-cloak x-show="isLoading"><i></i><i></i><i></i> 正在载入</span>
+                </div>
+                <div class="song-table" role="table" aria-label="曲目列表">
+                    <div class="song-row song-head" role="row">
+                        <span></span><span>标题</span><span>艺术家</span><span>专辑</span><span>格式</span><span>大小</span><span>时长</span>
+                    </div>
+                    <template x-for="(song,index) in songs" :key="song.id">
+                        <div class="song-row" role="row" tabindex="0"
+                             :class="{'active':currentSong?.id===song.id,'selected':selectedSong?.id===song.id}"
+                             @click="selectedSong=song" @dblclick="playSong(song)" @keydown.enter="playSong(song)">
+                            <button class="row-play" @click.stop="playSong(song)" :aria-label="`播放 ${song.title}`">
+                                <span x-show="currentSong?.id!==song.id || !isPlaying">▶</span>
+                                <span class="playing-bars" x-show="currentSong?.id===song.id && isPlaying"><i></i><i></i><i></i></span>
+                            </button>
+                            <span class="title-cell"><strong x-text="song.title"></strong><small x-text="song.album?.title || song.artist?.name || '未知来源'"></small></span>
+                            <span x-text="song.artist?.name || '未知艺术家'"></span>
+                            <span class="album-cell" x-text="song.album?.title || '—'"></span>
+                            <span><em class="format-badge" x-text="song.fileFormat" :style="`--badge:${formatColor(song.fileFormat)}`"></em></span>
+                            <span class="size-cell" x-text="formatBytes(song.fileSize)"></span>
+                            <span class="duration-cell" x-text="formatDuration(song.duration)"></span>
+                        </div>
+                    </template>
+                </div>
+                <div class="empty-state" x-cloak x-show="!isLoading && songs.length===0">
+                    <img src="/brand/orz-logo-mono.svg" alt=""><h2>没有找到曲目</h2><p>试试更换格式分类或搜索关键词。</p>
+                    <button @click="resetFilters">查看全部曲目</button>
+                </div>
+                <button class="load-more" x-cloak x-show="hasMore && !isLoading" @click="loadMore">加载更多</button>
+            </section>
+        </main>
     </div>
 
-    <script>
-    // 全局音频播放引擎实例
-    let player = null;
-    document.addEventListener('DOMContentLoaded', () => {
-        player = new OrzAudioPlayer();
-        // 尝试初始化 WASM（不影响页面加载）
-        player.initWasm();
-    });
+    <div class="scrim" x-cloak x-show="sidebarOpen || playlistOpen" x-transition.opacity @click="sidebarOpen=false;playlistOpen=false"></div>
 
-    function playerApp() {
-        return {
-            songs: [],
-            page: 1,
-            perPage: 50,
-            hasMore: true,
-            isLoading: false,
-            searchQuery: '',
-            formatFilter: '',
+    <aside class="queue-panel" :class="{'open':playlistOpen}" aria-label="播放队列">
+        <div class="panel-head"><div><small>接下来播放</small><h2>播放队列</h2></div><button class="icon-btn" @click="playlistOpen=false" aria-label="关闭播放队列">✕</button></div>
+        <div class="queue-list">
+            <template x-for="(song,idx) in queue" :key="song.id">
+                <div class="queue-item" :class="{'active':currentSong?.id===song.id}" @click="playSong(song)">
+                    <span x-text="String(idx+1).padStart(2,'0')"></span><div><strong x-text="song.title"></strong><small x-text="song.artist?.name || song.fileFormat.toUpperCase()"></small></div>
+                    <button @click.stop="removeFromQueue(idx)" :aria-label="`从队列移除 ${song.title}`">×</button>
+                </div>
+            </template>
+            <div class="queue-empty" x-show="queue.length===0"><img src="/brand/orz-logo-mono.svg" alt=""><p>队列还是空的</p></div>
+        </div>
+        <div class="playlist-tools">
+            <input type="text" x-model="newPlaylistName" placeholder="播放列表名称" @keydown.enter="saveAsPlaylist">
+            <button @click="saveAsPlaylist" :disabled="!newPlaylistName.trim() || !queue.length">保存当前队列</button>
+            <template x-for="pl in playlists" :key="pl.id"><div class="saved-list"><button @click="loadPlaylist(pl.id)"><span x-text="pl.name"></span><small x-text="`${pl.songCount || 0} 首`"></small></button><button @click="deletePlaylist(pl.id)" aria-label="删除播放列表">×</button></div></template>
+        </div>
+    </aside>
 
-            currentSong: null,
-            queue: [],
-            queueIndex: -1,
-            isPlaying: false,
-            volume: 0.7,
-            progressPercent: 0,
-            currentTime: 0,
-            duration: 0,
-            playlistOpen: false,
-            playlists: [],
-            newPlaylistName: '',
+    <footer class="player-dock" :class="{'idle':!currentSong}">
+        <div class="seek-wrap" @pointermove="previewSeek" @pointerleave="seekPreview=null" @click="seek" id="progressContainer">
+            <div class="seek-track"><div class="seek-buffer"></div><div class="seek-fill" :style="`width:${progressPercent}%`"></div><span class="seek-thumb" :style="`left:${progressPercent}%`"></span></div>
+            <span class="seek-preview" x-cloak x-show="seekPreview!==null" :style="`left:${seekPreview?.left || 0}px`" x-text="formatTime(seekPreview?.time)"></span>
+        </div>
+        <div class="dock-grid">
+            <div class="now-playing">
+                <div class="track-art"><img src="/brand/orz-logo.svg" alt="" :class="{'pulse':isLoadingTrack}"></div>
+                <div><strong x-text="currentSong?.title || '选择一首曲目开始播放'"></strong><span x-text="nowPlayingMeta"></span></div>
+            </div>
+            <div class="transport">
+                <button @click="prev" :disabled="!canPrev" title="上一首 (P)" aria-label="上一首" aria-keyshortcuts="P">◀</button>
+                <button class="main-play" @click="togglePlay" :disabled="!currentSong" :title="isPlaying?'暂停 (空格)':'播放 (空格)'" :aria-label="isPlaying?'暂停':'播放'" aria-keyshortcuts="Space"><span x-text="isPlaying?'Ⅱ':'▶'"></span></button>
+                <button @click="next" :disabled="!canNext" title="下一首 (N)" aria-label="下一首" aria-keyshortcuts="N">▶</button>
+                <span class="dock-time" x-text="timeDisplay"></span>
+            </div>
+            <div class="volume-control">
+                <button @click="toggleMute" title="静音 (M)" aria-label="静音或恢复音量" aria-keyshortcuts="M" x-text="volume===0?'⌁':'◖'"></button>
+                <input type="range" min="0" max="1" step="0.01" x-model.number="volume" @input="setVolume" aria-label="音量">
+                <span x-text="`${Math.round(volume*100)}%`"></span>
+            </div>
+        </div>
+    </footer>
 
-            attachPlayerCallbacks() {
-                if (!player) return false;
-                player.volume = this.volume;
-                player.onTimeUpdate = (ct, dur) => {
-                    this.currentTime = ct;
-                    this.duration = dur;
-                    // Worker playback becomes active after play() has returned
-                    // once its ring buffer reaches the start threshold.
-                    this.isPlaying = player.isPlaying;
-                    this.progressPercent = dur > 0 ? (ct / dur) * 100 : 0;
-                };
-                player.onEnded = () => this.next();
-                player.onPlaybackStateChange = (isPlaying) => {
-                    this.isPlaying = isPlaying;
-                };
-                player.onError = (e) => {
-                    console.error('Playback error:', e);
-                };
-                return true;
-            },
-
-            async init() {
-                this.attachPlayerCallbacks();
-                await this.loadSongs();
-                await this.loadPlaylists();
-                // 原生 JS 监听窗口滚动，触发加载更多
-                window.addEventListener('scroll', () => this.onScroll(), { passive: true });
-            },
-
-            get timeDisplay() {
-                if (!this.duration) return '0:00 / 0:00';
-                const fmt = (s) => {
-                    const m = Math.floor(s / 60);
-                    return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-                };
-                return `${fmt(this.currentTime)} / ${fmt(this.duration)}`;
-            },
-
-            async loadSongs() {
-                this.isLoading = true;
-                this.page = 1;
-                let url = `/api/songs?page=${this.page}&per=${this.perPage}`;
-                if (this.formatFilter) url += `&format=${this.formatFilter}`;
-                try {
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    this.songs = data.items || [];
-                    const { page, per, total } = data.metadata || {};
-                    this.hasMore = (page * per) < total;
-                } catch (e) { console.error(e); }
-                this.isLoading = false;
-            },
-
-            async loadMore() {
-                if (this.isLoading || !this.hasMore) return;
-                this.isLoading = true;
-                this.page++;
-                let url = `/api/songs?page=${this.page}&per=${this.perPage}`;
-                if (this.formatFilter) url += `&format=${this.formatFilter}`;
-                try {
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    this.songs = [...this.songs, ...(data.items || [])];
-                    const { page, per, total } = data.metadata || {};
-                    this.hasMore = (page * per) < total;
-                } catch (e) { console.error(e); }
-                this.isLoading = false;
-            },
-
-            onScroll() {
-                const scrollTop = window.scrollY || document.documentElement.scrollTop;
-                const scrollHeight = document.documentElement.scrollHeight;
-                const clientHeight = window.innerHeight;
-                if (scrollHeight - scrollTop - clientHeight < 200) {
-                    this.loadMore();
-                }
-            },
-
-            async search() {
-                if (!this.searchQuery.trim()) { await this.loadSongs(); return; }
-                this.isLoading = true;
-                try {
-                    const res = await fetch(`/api/songs/search?q=${encodeURIComponent(this.searchQuery)}`);
-                    const data = await res.json();
-                    this.songs = Array.isArray(data) ? data : [];
-                    this.hasMore = false;
-                } catch (e) { console.error(e); }
-                this.isLoading = false;
-            },
-
-            async playSong(song) {
-                const playRequest = (this.playRequestGen = (this.playRequestGen || 0) + 1);
-                if (!player) return;
-                // DOMContentLoaded and Alpine initialization ordering differs
-                // between browsers. Bind again at the guaranteed-use point.
-                this.attachPlayerCallbacks();
-                this.currentSong = song;
-                this.isPlaying = false;
-                this.progressPercent = 0;
-                this.currentTime = 0;
-
-                await player.play(song);
-
-                if (playRequest !== this.playRequestGen || player.currentSong?.id !== song.id) return;
-
-                this.isPlaying = player.isPlaying;
-
-                // 添加到队列
-                if (!this.queue.find(s => s.id === song.id)) {
-                    this.queue.push(song);
-                }
-                this.queueIndex = this.queue.findIndex(s => s.id === song.id);
-            },
-
-            async togglePlay() {
-                if (!this.currentSong) return;
-                if (player) this.isPlaying = await player.togglePlay();
-            },
-
-            prev() {
-                const list = this.songs.some(song => song.id === this.currentSong?.id) ? this.songs : this.queue;
-                const index = list.findIndex(song => song.id === this.currentSong?.id);
-                if (index > 0) this.playSong(list[index - 1]);
-            },
-
-            next() {
-                const list = this.songs.some(song => song.id === this.currentSong?.id) ? this.songs : this.queue;
-                const index = list.findIndex(song => song.id === this.currentSong?.id);
-                if (index >= 0 && index < list.length - 1) this.playSong(list[index + 1]);
-            },
-
-            seek(e) {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const pct = (e.clientX - rect.left) / rect.width;
-                if (player && player.seek(pct)) {
-                    this.currentTime = pct * this.duration;
-                    this.progressPercent = pct * 100;
-                }
-            },
-
-            toggleMute() {
-                this.volume = this.volume === 0 ? 0.7 : 0;
-                if (player) player.setVolume(this.volume);
-            },
-
-            removeFromQueue(idx) {
-                this.queue.splice(idx, 1);
-                if (idx <= this.queueIndex) this.queueIndex--;
-            },
-
-            // ── 播放列表管理 ──
-
-            async loadPlaylists() {
-                try {
-                    const res = await fetch('/api/playlists');
-                    const data = await res.json();
-                    this.playlists = Array.isArray(data) ? data : [];
-                } catch (e) { console.error('Failed to load playlists:', e); }
-            },
-
-            async saveAsPlaylist() {
-                const name = this.newPlaylistName.trim();
-                if (!name || this.queue.length === 0) return;
-                try {
-                    const res = await fetch('/api/playlists', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ name, description: '' })
-                    });
-                    const pl = await res.json();
-                    // Add all queue songs
-                    for (const song of this.queue) {
-                        await fetch(`/api/playlists/${pl.id}/songs`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ songId: song.id })
-                        });
-                    }
-                    this.newPlaylistName = '';
-                    await this.loadPlaylists();
-                } catch (e) { console.error('Failed to save playlist:', e); }
-            },
-
-            async loadPlaylist(plId) {
-                try {
-                    const res = await fetch(`/api/playlists/${plId}`);
-                    const pl = await res.json();
-                    if (pl.songs && pl.songs.length > 0) {
-                        this.queue = pl.songs;
-                        this.playSong(pl.songs[0]);
-                    }
-                } catch (e) { console.error('Failed to load playlist:', e); }
-            },
-
-            async deletePlaylist(plId) {
-                try {
-                    await fetch(`/api/playlists/${plId}`, { method: 'DELETE' });
-                    this.playlists = this.playlists.filter(p => p.id !== plId);
-                } catch (e) { console.error('Failed to delete playlist:', e); }
-            }
-        };
-    }
-    </script>
+    <div class="toast-stack" aria-live="assertive"><template x-for="toast in toasts" :key="toast.id"><div class="toast" :class="toast.type" x-transition><span x-text="toast.message"></span><button @click="dismissToast(toast.id)">×</button></div></template></div>
+    <div class="modal" x-cloak x-show="shortcutOpen" x-transition.opacity @click.self="shortcutOpen=false" @keydown.escape.window="shortcutOpen=false">
+        <section><div class="panel-head"><div><small>轻松操控</small><h2>键盘快捷键</h2></div><button class="icon-btn" @click="shortcutOpen=false">✕</button></div>
+            <div class="shortcut-grid"><template x-for="item in shortcuts" :key="item.key"><div><kbd x-text="item.key"></kbd><span x-text="item.label"></span></div></template></div>
+        </section>
+    </div>
 </body>
 </html>

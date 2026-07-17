@@ -19,6 +19,7 @@ class OrzAudioPlayer {
         this.wasmReady = false;     // WASM 是否已初始化
         this.currentSource = null;  // AudioBufferSourceNode (WASM 渲染路径)
         this.analyser = null;
+        this.masterGain = null;     // shared volume control for every Web Audio path
 
         // 状态
         this.isPlaying = false;
@@ -279,8 +280,30 @@ class OrzAudioPlayer {
      * 设置音量
      */
     setVolume(vol) {
-        this.volume = Math.max(0, Math.min(1, vol));
+        const value = Number(vol);
+        this.volume = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : this.volume;
         this.audioEl.volume = this.volume;
+        const gain = this._ensureMasterGain();
+        if (gain) {
+            gain.gain.cancelScheduledValues?.(this.audioCtx.currentTime);
+            gain.gain.setValueAtTime?.(this.volume, this.audioCtx.currentTime);
+            // Minimal test/browser implementations may only expose `.value`.
+            gain.gain.value = this.volume;
+        }
+    }
+
+    _ensureMasterGain() {
+        if (!this.audioCtx || typeof this.audioCtx.createGain !== 'function') return null;
+        if (!this.masterGain) {
+            this.masterGain = this.audioCtx.createGain();
+            this.masterGain.gain.value = this.volume;
+            this.masterGain.connect(this.audioCtx.destination);
+        }
+        return this.masterGain;
+    }
+
+    _outputNode() {
+        return this._ensureMasterGain() || this.audioCtx.destination;
     }
 
     // ── 内部方法 ──
@@ -309,6 +332,7 @@ class OrzAudioPlayer {
         if (!this.audioCtx) {
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
+        this._ensureMasterGain();
         if (this.audioCtx.state === 'suspended') {
             // Do not block decoder priming on an AudioContext resume promise:
             // some browsers keep it pending until the output device is ready.
@@ -458,7 +482,7 @@ class OrzAudioPlayer {
                             channels, generation, sourceSampleRate: message.sampleRate }
                     });
                     this._workletNode = workletNode;
-                    workletNode.connect(this.audioCtx.destination);
+                    workletNode.connect(this._outputNode());
                     resolve();
                 } else if (message.type === 'started') {
                     this.diagnostics.firstFrameMs = performance.now() - startedAt;
@@ -571,7 +595,7 @@ class OrzAudioPlayer {
         this._audioBuffer = buffer;
         this.currentSource = this.audioCtx.createBufferSource();
         this.currentSource.buffer = buffer;
-        this.currentSource.connect(this.audioCtx.destination);
+        this.currentSource.connect(this._outputNode());
         this.currentSource.start(0, offset);
         this._setPlaying(true);
         this.duration = buffer.duration;
@@ -599,7 +623,7 @@ class OrzAudioPlayer {
         }
         this.currentSource = this.audioCtx.createBufferSource();
         this.currentSource.buffer = this._audioBuffer;
-        this.currentSource.connect(this.audioCtx.destination);
+        this.currentSource.connect(this._outputNode());
         this.currentSource.start(0, offset);
         this.currentTime = offset;
         this._audioBufferClockStart = this.audioCtx.currentTime - offset;
@@ -671,7 +695,7 @@ class OrzAudioPlayer {
             // 调度播放 — 直接注册到 this._streamSources 以便 stop() 能立即停止
             const source = this.audioCtx.createBufferSource();
             source.buffer = audioBuffer;
-            source.connect(this.audioCtx.destination);
+            source.connect(this._outputNode());
             source.start(playTime);
             this._streamSources.push(source);
 

@@ -8,12 +8,35 @@ struct SongController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let songs = routes.grouped("api", "songs")
         songs.get(use: index)
+        songs.get("formats", use: formats)
         songs.get("search", use: search)
         songs.group(":id") { song in
             song.get(use: show)
             song.get("stream", use: stream)
             song.get("raw", use: raw)
         }
+    }
+
+    struct FormatCount: Content {
+        let format: String
+        let count: Int
+    }
+
+    struct FormatSummary: Content {
+        let total: Int
+        let formats: [FormatCount]
+    }
+
+    /// GET /api/songs/formats — total and per-format counts for library navigation.
+    @Sendable
+    func formats(req: Request) async throws -> FormatSummary {
+        let values = try await Song.query(on: req.db).field(\.$fileFormat).all().map { $0.fileFormat.lowercased() }
+        let counts = Dictionary(values.map { ($0, 1) }, uniquingKeysWith: +)
+        return FormatSummary(
+            total: values.count,
+            formats: counts.map { FormatCount(format: $0.key, count: $0.value) }
+                .sorted { $0.format < $1.format }
+        )
     }
 
     /// GET /api/songs — 歌曲列表（分页，支持 &format= 过滤）
@@ -29,6 +52,7 @@ struct SongController: RouteCollection {
         }
 
         let page = try await query.paginate(for: req)
+        try await backfillDurations(for: page.items, req: req)
 
         let baseURL = baseURL(from: req)
         return .init(
@@ -49,18 +73,64 @@ struct SongController: RouteCollection {
 
         guard !safeQuery.isEmpty else { return [] }
 
-        let songs = try await Song.query(on: req.db)
+        var query = Song.query(on: req.db)
+        if let format = req.query[String.self, at: "format"]?.trimmingCharacters(in: .whitespacesAndNewlines), !format.isEmpty {
+            query = query.filter(\.$fileFormat == format.lowercased())
+        }
+        query = query
             .join(Artist.self, on: \Artist.$id == \Song.$artist.$id, method: .left)
             .filter(.sql(unsafeRaw: "LOWER(title) LIKE '%\(safeQuery.lowercased())%' OR LOWER(\"artists\".\"name\") LIKE '%\(safeQuery.lowercased())%'"))
-            .limit(50)
-            .all()
+        let songs = try await query.limit(50).all()
 
         let baseURL = baseURL(from: req)
         for song in songs {
             try await song.$artist.load(on: req.db)
             try await song.$album.load(on: req.db)
         }
+        try await backfillDurations(for: songs, req: req)
         return songs.map { SongResponse(song: $0, baseURL: baseURL) }
+    }
+
+    /// Lazily repairs historical rows scanned before native decoder metadata
+    /// was used. Work is bounded to four files at a time and persisted, so
+    /// subsequent list requests do not repeat decoder initialization.
+    private func backfillDurations(for songs: [Song], req: Request) async throws {
+        let missing = songs.compactMap { song -> (Song, String)? in
+            guard song.duration == nil,
+                  AudioFormat(rawValue: song.fileFormat) != nil else { return nil }
+            let path = req.application.casStorage.resolve(sha256: song.sha256, format: song.fileFormat)
+            guard FileManager.default.fileExists(atPath: path) else { return nil }
+            return (song, path)
+        }
+
+        for batchStart in stride(from: 0, to: missing.count, by: 4) {
+            let batch = missing[batchStart..<min(batchStart + 4, missing.count)]
+            let resolved = await withTaskGroup(of: (Song, Double?).self) { group in
+                for (song, path) in batch {
+                    group.addTask {
+                        let duration: Double?
+                        if CDecoderBridge.canDecode(format: song.fileFormat) {
+                            duration = try? CDecoderBridge.duration(filePath: path, format: song.fileFormat)
+                        } else {
+                            let output = try? await ProcessRunner.execute(arguments: [
+                                "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                                "-of", "default=noprint_wrappers=1:nokey=1", path,
+                            ])
+                            duration = output.flatMap(Double.init).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+                        }
+                        return (song, duration)
+                    }
+                }
+                var values: [(Song, Double?)] = []
+                for await value in group { values.append(value) }
+                return values
+            }
+            for (song, duration) in resolved {
+                guard let duration else { continue }
+                song.duration = duration
+                try await song.update(on: req.db)
+            }
+        }
     }
 
     /// GET /api/songs/:id — 歌曲详情

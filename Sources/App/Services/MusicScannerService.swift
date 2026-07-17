@@ -118,7 +118,7 @@ public struct MusicScannerService {
                     fileSize: fileSize
                 )
                 song.$artist.id = artist?.id
-                song.duration = await extractDuration(filePath: fullPath)
+                song.duration = await extractDuration(filePath: fullPath, format: ext)
 
                 // 尝试生成音频指纹（可选，静默跳过失败）
                 if let fp = try? await generateFingerprint(filePath: fullPath) {
@@ -205,7 +205,11 @@ public struct MusicScannerService {
         return artist
     }
 
-    func extractDuration(filePath: String) async -> Double? {
+    func extractDuration(filePath: String, format: String) async -> Double? {
+        if CDecoderBridge.canDecode(format: format),
+           let duration = try? CDecoderBridge.duration(filePath: filePath, format: format) {
+            return duration
+        }
         do {
             let result = try await ProcessRunner.execute(arguments: [
                 "ffprobe", "-v", "quiet",

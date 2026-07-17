@@ -13,6 +13,37 @@ import OrzAudioKitCXX
 ///                  → PCMData
 public enum CDecoderBridge {
 
+    /// Reads decoder metadata without rendering PCM. This is suitable for
+    /// library scans and duration backfills because it uses an independent
+    /// decoder instance and releases it immediately.
+    public static func duration(filePath: String, format: String) throws -> Double {
+        let source = try Data(contentsOf: URL(fileURLWithPath: filePath), options: .mappedIfSafe)
+        guard !source.isEmpty, source.count <= Int(Int32.max) else {
+            throw AudioError.invalidPCMData("Invalid decoder input size: \(source.count)")
+        }
+        return try source.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                throw AudioError.invalidPCMData("Empty file data")
+            }
+            let decoder = format.withCString {
+                orz_decoder_create(
+                    $0,
+                    baseAddress.assumingMemoryBound(to: UInt8.self),
+                    Int32(rawBuffer.count)
+                )
+            }
+            guard let decoder else {
+                throw AudioError.decodeFailed("C decoder failed to load format '\(format)'")
+            }
+            defer { orz_decoder_destroy(decoder) }
+            let value = orz_decoder_get_duration(decoder)
+            guard value.isFinite, value > 0 else {
+                throw AudioError.decodeFailed("Decoder returned invalid duration \(value)")
+            }
+            return value
+        }
+    }
+
     /// Decode directly into a PCM WAV file without retaining the complete
     /// float or int16 stream in memory. The destination is committed with a
     /// same-directory rename only after the WAV header has been finalized.

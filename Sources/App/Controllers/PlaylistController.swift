@@ -20,7 +20,11 @@ struct PlaylistController: RouteCollection {
     @Sendable
     func index(req: Request) async throws -> [PlaylistResponse] {
         let playlists = try await Playlist.query(on: req.db).all()
-        return playlists.map { PlaylistResponse(playlist: $0) }
+        let pivots = try await PlaylistSongPivot.query(on: req.db).all()
+        let counts = Dictionary(grouping: pivots, by: { $0.$playlist.id }).mapValues(\.count)
+        return playlists.map { playlist in
+            PlaylistResponse(playlist: playlist, songCount: playlist.id.flatMap { counts[$0] } ?? 0)
+        }
     }
 
     /// POST /api/playlists
@@ -29,11 +33,28 @@ struct PlaylistController: RouteCollection {
         struct CreateBody: Content {
             var name: String
             var description: String?
+            var songIds: [UUID]?
         }
         let body = try req.content.decode(CreateBody.self)
-        let playlist = Playlist(name: body.name, description: body.description)
-        try await playlist.create(on: req.db)
-        return PlaylistResponse(playlist: playlist)
+        let songIds = body.songIds ?? []
+        return try await req.db.transaction { database in
+            // Resolve every ID before inserting anything. A missing song
+            // aborts the transaction instead of leaving a partial playlist.
+            for songId in songIds {
+                guard try await Song.find(songId, on: database) != nil else {
+                    throw Abort(.notFound, reason: "Song not found: \(songId)")
+                }
+            }
+            let playlist = Playlist(name: body.name, description: body.description)
+            try await playlist.create(on: database)
+            guard let playlistId = playlist.id else { throw Abort(.internalServerError) }
+            for (position, songId) in songIds.enumerated() {
+                try await PlaylistSongPivot(
+                    playlistId: playlistId, songId: songId, position: position
+                ).create(on: database)
+            }
+            return PlaylistResponse(playlist: playlist, songCount: songIds.count)
+        }
     }
 
     /// GET /api/playlists/:id

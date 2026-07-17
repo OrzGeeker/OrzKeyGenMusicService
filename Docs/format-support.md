@@ -1,11 +1,11 @@
-# OrzPlayer 格式支持状态
+# OrzMusic 格式支持状态
 
-> 最后更新：2026-07-16
+> 最后更新：2026-07-18
 
 ## 总览
 
 - **支持格式：** 28 / 28 种音频格式 ✅
-- **总文件数：** ~3000 首（keygenmusic 目录）
+- **当前库总文件数：** 2963 首（数量由扫描结果决定，页面通过 API 实时显示）
 - **源码编译，零系统依赖**
 
 ---
@@ -70,13 +70,19 @@
 
 | 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
 |:-----|------:|:-------|:----:|:--------:|
-| `v2m` | 88 | v2m-player | ✅ | ✅ |
+| `v2m` | 87 | v2m-player | ✅ | ✅ |
 
 ### MIDI — wavetable 合成器
 
 | 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
 |:-----|------:|:-------|:----:|:--------:|
 | **`mid`** | **54** | **wavetable（sine/square/saw/triangle）** | ✅ | **✅ 自包含** |
+
+### SoundMon V.2 — 内置 Paula 引擎
+
+| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
+|:-----|------:|:-------|:----:|:--------:|
+| `bp` | 3 | 内置 SoundMon V.2 sample/synth 解码器 | ✅ | ✅ |
 
 ### 浏览器原生播放（directFile）
 
@@ -92,8 +98,8 @@
 
 | 格式 | 文件数 | 策略 | 备注 |
 |:-----|------:|:-----|:------|
-| `wav` | 8 | serverDecode | ADPCM/GSM 编码需 ffmpeg 转 PCM |
-| `bp` | 3 | serverDecode | 私有自定义格式 |
+| `wav` | 8 | serverDecode | PCM/float 可直接返回；ADPCM/GSM 转为 PCM WAV |
+| `sc68` | 36 | serverDecode | libsc68 可编译到 WASM，但当前产品默认由服务端原生解码以保证实时性与稳定性 |
 
 ---
 
@@ -114,6 +120,7 @@
     ├── v2m/              ← v2m-player 包装器
     ├── ym6/              ← YM2149 自包含模拟器
     ├── midi/             ← wavetable 合成器
+    ├── bp/               ← SoundMon V.2 / Paula 解码器
     └── helpers/          ← C++ 异常安全包装
 
          ↓ Emscripten           ↓ clang + SPM
@@ -143,12 +150,22 @@ SongController.stream()
   ↓
 AudioEngine.resolveStreamStrategy()
   ├─ directFile   → 返回原始文件给 <audio>
-  ├─ wasmDecode   → 返回原始文件，浏览器端 WASM 解码
-  └─ serverDecode → 服务端 ffmpeg 转 PCM WAV 并缓存
+  ├─ wasmDecode   → 返回原始文件，Worker/WASM 实时解码
+  └─ serverDecode → 服务端原生解码或 ffmpeg 回退，生成 PCM WAV 缓存
 ```
 
 浏览器端 WASM 解码：
 ```
-fetch → ArrayBuffer → orz_load(format, data, len)
-  → orz_render(out, frames) → AudioContext.play()
+fetch → ArrayBuffer → Worker → orz_decoder_create(format, data, len)
+  → orz_decoder_render(out, frames) → SharedArrayBuffer ring
+  → AudioWorklet → AudioContext
 ```
+
+> 表格中的 WASM/SPM 列表示解码器的编译能力；“播放策略”表示 Web 产品实际采用的默认路径，两者不必相同。例如 SC68 具备 WASM 构建能力，但当前默认使用 `serverDecode`。
+
+## 存储与缓存
+
+- CAS 保存扫描或上传得到的原始文件，文件名由内容 SHA-256 和扩展名组成。
+- 数据库保存 SHA-256、格式和元数据，不保存预处理后的替代音频。
+- `serverDecode` 生成的 PCM WAV 位于独立缓存中，缓存键包含解码器版本、采样率、声道和 subsong 等策略参数。
+- 解码失败不会替换或删除 CAS 原始文件，也不会提交不完整的 WAV 缓存。
