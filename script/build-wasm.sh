@@ -337,15 +337,6 @@ build_libsc68() {
         done
     done
     # 排除 io68/paula*.c，避免与 ahx2play 的 paula.o 冲突
-    local filtered=()
-    for f in "${C_FILES[@]}"; do
-        case "$f" in
-            */paula*.c) ;;
-            *) filtered+=("$f") ;;
-        esac
-    done
-    C_FILES=("${filtered[@]}")
-
     if [ ${#C_FILES[@]} -eq 0 ]; then
         warn "No sc68 source files found"
         popd >/dev/null
@@ -368,6 +359,8 @@ build_libsc68() {
             -Wno-pointer-sign \
             -Wno-incompatible-function-pointer-types \
             -O3 \
+            -D paula=sc68_paula \
+            -D paulav=sc68_paulav \
             -D EMSCRIPTEN \
             -D 'EMSCRIPTEN_KEEPALIVE=__attribute__((used))' \
             -s WASM=1 2>/dev/null || {
@@ -972,15 +965,11 @@ generate_wrapper() {
     fi
 
     # libsc68 (Atari ST YM / Amiga)
-    local sc68_result=""
-    local sc68_a=$(find "$BUILD_DIR/sc68" -name "libsc68.a" 2>/dev/null | head -1)
-    if [ -n "$sc68_a" ]; then
-        local sc68_src_dir=$(find "$BUILD_DIR/src/sc68" -maxdepth 0 -type d 2>/dev/null)
-        sc68_result="${sc68_a}|${sc68_src_dir}"
-        log "Using cached libsc68: $sc68_a"
-    else
-        sc68_result=$(build_libsc68)
-    fi
+    # This library is small enough to rebuild, and its compile-time symbol
+    # namespace is part of correctness. Reusing an archive built before those
+    # flags changed silently brought back the no-op Paula path.
+    local sc68_result
+    sc68_result=$(build_libsc68)
 
     local sc68_lib=""
     local sc68_inc=""
@@ -1065,57 +1054,6 @@ STUBC
     for dir in "${inc_dirs[@]}"; do
         inc_flags="$inc_flags -I$dir"
     done
-
-    # 生成 sc68 paula 存根（避免与 ahx2play 的 paula 符号冲突）
-    # sc68 的 api68 在 .sc68 格式（YM2149）下不使用 paula 音频输出，
-    # 因此只需提供符号占位，不定义实际的 paula[] 数组（由 ahx2play 提供）。
-    # 注意：paula_io 必须是 io68_t 类型（非自定义的 paula_io_t），否则 EMU68
-    # I/O 插件系统遍历函数指针时会读到垃圾值导致 "null function" crash。
-    local paula_stubs="$BUILD_DIR/src/paula_stubs.c"
-    cat > "$paula_stubs" << 'PAULA_STUBS'
-#include <stdint.h>
-#include <string.h>
-/* io68_t 结构体定义（from emu68/struct68.h） */
-typedef unsigned int cycle68_t;
-typedef unsigned int u32;
-typedef struct _int68_s { int vector; int level; } int68_t;
-#define IO68_NO_INT (0x80000000)
-typedef u32 (*memrfunc68_t)(u32 addr, cycle68_t cycle);
-typedef void (*memwfunc68_t)(u32 addr, u32 value, cycle68_t cycle);
-typedef struct _io68_t {
-    struct _io68_t * next; char name[32];
-    u32 addr_low, addr_high;
-    memrfunc68_t Rfunc[3]; memwfunc68_t Wfunc[3];
-    int68_t *(*interrupt)(cycle68_t);
-    cycle68_t (*next_int)(cycle68_t);
-    void (*adjust_cycle)(cycle68_t);
-    int (*reset)(void);
-    cycle68_t rcycle_penalty, wcycle_penalty;
-} io68_t;
-/* No-op I/O handlers */
-static u32 stub_readB(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
-static u32 stub_readW(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
-static u32 stub_readL(u32 a, cycle68_t c) { (void)a;(void)c; return 0; }
-static void stub_writeB(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
-static void stub_writeW(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
-static void stub_writeL(u32 a, u32 v, cycle68_t c) { (void)a;(void)v;(void)c; }
-static int68_t *stub_int(cycle68_t c) { (void)c; return 0; }
-static cycle68_t stub_nextint(cycle68_t c) { (void)c; return IO68_NO_INT; }
-static void stub_subcycle(cycle68_t s) { (void)s; }
-static int stub_reset(void) { return 0; }
-/* 正确的 io68_t paula_io，所有函数指针为非 NULL 空操作 */
-io68_t paula_io = { NULL, "Paula(stub)", 0xFFDFF000, 0xFFDFF0DF,
-    {stub_readB,stub_readW,stub_readL},
-    {stub_writeB,stub_writeW,stub_writeL},
-    stub_int, stub_nextint, stub_subcycle, stub_reset, 0, 0 };
-/* paula[] 和 paulav[] 不由存根提供 — 由 ahx2play 定义 */
-/* PL (Paula Mixer) 存根 — sc68 格式（YM2149）不需要实际 Paula 输出 */
-unsigned int PL_sampling_rate(unsigned int r) { return r; }
-int PL_reset(void) { return 0; }
-int PL_init(void) { return 0; }
-void PL_mix(uint32_t *b, uint8_t *m, int n) { (void)b;(void)m;(void)n; }
-PAULA_STUBS
-    source_files+=("$paula_stubs")
 
     log "Linking WASM with libraries: ${libs[*]}"
 

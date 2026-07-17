@@ -412,7 +412,7 @@ class OrzAudioPlayer {
         const control = new Int32Array(controlBuffer);
         Atomics.store(control, 3, generation);
         this._workerControl = control;
-        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-ym-lhasa-v1');
+        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-sc68-v2m-v1');
         this._decoderWorker = worker;
         let workletNode = null;
 
@@ -446,8 +446,8 @@ class OrzAudioPlayer {
             worker.onerror = event => reject(new Error(event.message));
         });
         const moduleJs = ['bp', 'mid', 'ym'].includes(format)
-            ? '/audio/orz_audio_builtin.js?v=20260717-ym-lhasa-v1'
-            : '/audio/orz_audio.js?v=20260717-ym-lhasa-v1';
+            ? '/audio/orz_audio_builtin.js?v=20260717-sc68-v2m-v1'
+            : '/audio/orz_audio.js?v=20260717-sc68-v2m-v1';
         worker.postMessage({ type: 'decode', generation, format, subsong, moduleJs, data, control: controlBuffer,
             samples: sampleBuffer, capacityFrames, channels, startFrames }, [data]);
         try {

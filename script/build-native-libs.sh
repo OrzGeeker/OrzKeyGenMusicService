@@ -450,7 +450,9 @@ build_libsc68() {
 
     local inc_flags="-I$src_dir -I$src_dir/file68 -I$src_dir/api68"
     # EMSCRIPTEN_KEEPALIVE 在原生编译时定义为空
-    local cflags="-Wno-pointer-sign -Wno-incompatible-function-pointer-types -O3 -DEMSCRIPTEN_KEEPALIVE= -DEMSCRIPTEN=1"
+    # ahx2play also exports `paula`; namespace sc68's Paula state so both real
+    # emulators can be linked without substituting a silent implementation.
+    local cflags="-Wno-pointer-sign -Wno-incompatible-function-pointer-types -O3 -DEMSCRIPTEN_KEEPALIVE= -DEMSCRIPTEN=1 -Dpaula=sc68_paula -Dpaulav=sc68_paulav"
     local compile_ok=0
     for cfile in "${C_FILES[@]}"; do
         local basename="${cfile##*/}"

@@ -49,14 +49,16 @@ static void *context_create(const char *format, const unsigned char *data, int l
     // Play 调用启动回放（必须在 load 时调用一次，不要在 render 重复调用，
     // 因为 V2MPlayer::Play() 内部会 Stop() + Reset()，重复调用会丢失进度）
     ctx->player->Play(0);
-    ctx->duration_frames = (uint64_t)ctx->player->Length() * ctx->sample_rate / 1000U;
+    // Length() is expressed in seconds even though Play() accepts milliseconds.
+    // Treating it as milliseconds truncated tunes to 1/1000 of their duration.
+    ctx->duration_frames = (uint64_t)ctx->player->Length() * ctx->sample_rate;
 
     return ctx;
 }
 
 static double context_get_duration(void *opaque) {
     V2MContext *ctx = (V2MContext *)opaque;
-    return ctx && ctx->player ? (double)ctx->player->Length() / 1000.0 : 0;
+    return ctx && ctx->player ? (double)ctx->player->Length() : 0;
 }
 
 static int context_get_sample_rate(void *opaque) { return opaque ? ((V2MContext *)opaque)->sample_rate : 0; }

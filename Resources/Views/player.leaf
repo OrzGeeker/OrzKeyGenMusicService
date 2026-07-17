@@ -7,7 +7,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" href="/favicon.png" type="image/png" sizes="192x192">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script defer src="/audio/player.js?v=20260717-ym-lhasa-v1"></script>
+    <script defer src="/audio/player.js?v=20260717-sc68-v2m-v1"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -348,19 +348,23 @@
             playlists: [],
             newPlaylistName: '',
 
+            attachPlayerCallbacks() {
+                if (!player) return false;
+                player.volume = this.volume;
+                player.onTimeUpdate = (ct, dur) => {
+                    this.currentTime = ct;
+                    this.duration = dur;
+                    this.progressPercent = dur > 0 ? (ct / dur) * 100 : 0;
+                };
+                player.onEnded = () => this.next();
+                player.onError = (e) => {
+                    console.error('Playback error:', e);
+                };
+                return true;
+            },
+
             async init() {
-                if (player) {
-                    player.volume = this.volume;
-                    player.onTimeUpdate = (ct, dur) => {
-                        this.currentTime = ct;
-                        this.duration = dur;
-                        this.progressPercent = dur > 0 ? (ct / dur) * 100 : 0;
-                    };
-                    player.onEnded = () => this.next();
-                    player.onError = (e) => {
-                        console.error('Playback error:', e);
-                    };
-                }
+                this.attachPlayerCallbacks();
                 await this.loadSongs();
                 await this.loadPlaylists();
                 // 原生 JS 监听窗口滚动，触发加载更多
@@ -431,6 +435,9 @@
             async playSong(song) {
                 const playRequest = (this.playRequestGen = (this.playRequestGen || 0) + 1);
                 if (!player) return;
+                // DOMContentLoaded and Alpine initialization ordering differs
+                // between browsers. Bind again at the guaranteed-use point.
+                this.attachPlayerCallbacks();
                 this.currentSong = song;
                 this.isPlaying = false;
                 this.progressPercent = 0;

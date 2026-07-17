@@ -596,9 +596,25 @@ final class DecoderInvariantTests: XCTestCase {
     func testV2MUsesPlayerLengthAndIsChunkInvariant() throws {
         let v2m = "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/RESURRECTiON/RESURRECTiON - PowerCHM 5.x kg.v2m"
         let duration = try decoderDuration(relativePath: v2m, format: "v2m")
-        XCTAssertGreaterThan(duration, 0)
+        XCTAssertEqual(duration, 195, accuracy: 0.001, "V2MPlayer::Length is measured in seconds")
         XCTAssertNotEqual(duration, 120, "must not use the former file-size heuristic")
         try assertChunkInvariant(relativePath: v2m, format: "v2m")
+    }
+
+    func testV2MDoesNotStopBeforeFirstAudibleNote() throws {
+        let v2m = "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/iOTA/iOTA - ACDSee Pro 5.3 build 168 crk.v2m"
+        let pcm = try render(relativePath: v2m, format: "v2m", chunkFrames: 2_048, limitFrames: 44_100)
+        XCTAssertEqual(pcm.count, 88_200)
+        XCTAssertTrue(pcm.allSatisfy(\.isFinite))
+        XCTAssertTrue(pcm.contains { abs($0) > 0.01 }, "V2M output remained silent")
+    }
+
+    func testSC68AmigaPaulaProducesAudio() throws {
+        let sc68 = "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/LEGEND/LEGEND - Dynamite Dick intro_1.sc68"
+        let pcm = try render(relativePath: sc68, format: "sc68", chunkFrames: 2_048, limitFrames: 88_200)
+        XCTAssertEqual(pcm.count, 176_400)
+        XCTAssertTrue(pcm.allSatisfy(\.isFinite))
+        XCTAssertTrue(pcm.contains { abs($0) > 0.01 }, "SC68 Paula output remained silent")
     }
 
     func testCDecoderStreamsWAVToDisk() throws {
