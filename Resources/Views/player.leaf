@@ -7,7 +7,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" href="/favicon.png" type="image/png" sizes="192x192">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script defer src="/audio/player.js?v=20260717-sc68-v2m-v1"></script>
+    <script defer src="/audio/player.js?v=20260717-controls-seek-v1"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -354,9 +354,15 @@
                 player.onTimeUpdate = (ct, dur) => {
                     this.currentTime = ct;
                     this.duration = dur;
+                    // Worker playback becomes active after play() has returned
+                    // once its ring buffer reaches the start threshold.
+                    this.isPlaying = player.isPlaying;
                     this.progressPercent = dur > 0 ? (ct / dur) * 100 : 0;
                 };
                 player.onEnded = () => this.next();
+                player.onPlaybackStateChange = (isPlaying) => {
+                    this.isPlaying = isPlaying;
+                };
                 player.onError = (e) => {
                     console.error('Playback error:', e);
                 };
@@ -456,28 +462,30 @@
                 this.queueIndex = this.queue.findIndex(s => s.id === song.id);
             },
 
-            togglePlay() {
+            async togglePlay() {
                 if (!this.currentSong) return;
-                if (player) player.togglePlay();
-                if (player) this.isPlaying = player.isPlaying;
+                if (player) this.isPlaying = await player.togglePlay();
             },
 
             prev() {
-                if (this.queueIndex > 0) {
-                    this.playSong(this.queue[this.queueIndex - 1]);
-                }
+                const list = this.songs.some(song => song.id === this.currentSong?.id) ? this.songs : this.queue;
+                const index = list.findIndex(song => song.id === this.currentSong?.id);
+                if (index > 0) this.playSong(list[index - 1]);
             },
 
             next() {
-                if (this.queueIndex < this.queue.length - 1) {
-                    this.playSong(this.queue[this.queueIndex + 1]);
-                }
+                const list = this.songs.some(song => song.id === this.currentSong?.id) ? this.songs : this.queue;
+                const index = list.findIndex(song => song.id === this.currentSong?.id);
+                if (index >= 0 && index < list.length - 1) this.playSong(list[index + 1]);
             },
 
             seek(e) {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const pct = (e.clientX - rect.left) / rect.width;
-                if (player) player.seek(pct);
+                if (player && player.seek(pct)) {
+                    this.currentTime = pct * this.duration;
+                    this.progressPercent = pct * 100;
+                }
             },
 
             toggleMute() {

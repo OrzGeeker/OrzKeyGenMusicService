@@ -46,19 +46,29 @@ self.onmessage = async event => {
 
     try {
         const wasm = wasmInstance = await wasmModule(message.moduleJs);
-        const formatLength = wasm.lengthBytesUTF8(message.format) + 1;
-        const formatPointer = wasm._malloc(formatLength);
         const data = new Uint8Array(message.data);
-        const dataPointer = wasm._malloc(data.length);
-        wasm.stringToUTF8(message.format, formatPointer, formatLength);
-        wasm.HEAPU8.set(data, dataPointer);
-        decoder = wasm._orz_decoder_create(formatPointer, dataPointer, data.length);
-        wasm._free(formatPointer);
-        wasm._free(dataPointer);
+        const createDecoder = () => {
+            const formatLength = wasm.lengthBytesUTF8(message.format) + 1;
+            const formatPointer = wasm._malloc(formatLength);
+            const dataPointer = wasm._malloc(data.length);
+            if (!formatPointer || !dataPointer) {
+                if (formatPointer) wasm._free(formatPointer);
+                if (dataPointer) wasm._free(dataPointer);
+                throw new Error('cannot allocate decoder input');
+            }
+            wasm.stringToUTF8(message.format, formatPointer, formatLength);
+            wasm.HEAPU8.set(data, dataPointer);
+            const handle = wasm._orz_decoder_create(formatPointer, dataPointer, data.length);
+            wasm._free(formatPointer);
+            wasm._free(dataPointer);
+            if (handle && message.subsong > 0 && wasm._orz_decoder_select_subsong(handle, message.subsong) !== 0) {
+                wasm._orz_decoder_destroy(handle);
+                throw new Error(`subsong ${message.subsong} is not supported`);
+            }
+            return handle;
+        };
+        decoder = createDecoder();
         if (!decoder) throw new Error(`cannot decode ${message.format}`);
-        if (message.subsong > 0 && wasm._orz_decoder_select_subsong(decoder, message.subsong) !== 0) {
-            throw new Error(`subsong ${message.subsong} is not supported`);
-        }
 
         const sampleRate = wasm._orz_decoder_get_sample_rate(decoder) || 44100;
         const duration = wasm._orz_decoder_get_duration(decoder) || 0;
@@ -71,14 +81,24 @@ self.onmessage = async event => {
             if (seekRequested !== null) {
                 const position = seekRequested;
                 seekRequested = null;
+                Atomics.store(control, 0, 0);
+                Atomics.store(control, 1, 0);
+                Atomics.store(control, 2, 0);
                 if (wasm._orz_decoder_seek_ms(decoder, position) !== 0) {
-                    self.postMessage({ type: 'seekUnsupported', generation: myGeneration });
-                } else {
-                    Atomics.store(control, 0, 0);
-                    Atomics.store(control, 1, 0);
-                    Atomics.store(control, 2, 0);
-                    rendered = Math.floor(position * sampleRate / 1000);
+                    wasm._orz_decoder_destroy(decoder);
+                    decoder = createDecoder();
+                    if (!decoder) throw new Error(`cannot recreate ${message.format} for seek`);
+                    let remaining = Math.floor(position * sampleRate / 1000);
+                    let chunks = 0;
+                    while (remaining > 0 && generation === myGeneration) {
+                        const count = wasm._orz_decoder_render(decoder, pcmPointer, Math.min(chunkFrames, remaining));
+                        if (count <= 0) throw new Error(`cannot seek ${message.format} to ${position}ms`);
+                        remaining -= count;
+                        if (++chunks % 64 === 0) await waitTurn();
+                    }
                 }
+                rendered = Math.floor(position * sampleRate / 1000);
+                self.postMessage({ type: 'seeked', generation: myGeneration, positionMs: position });
             }
             const write = Atomics.load(control, 0);
             const read = Atomics.load(control, 1);

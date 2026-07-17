@@ -7,10 +7,14 @@ class FakeAudio {
     constructor() {
         this.src = '';
         this.volume = 1;
+        this.currentTime = 0;
+        this.duration = Number.NaN;
+        this.listeners = new Map();
     }
-    addEventListener() {}
-    pause() {}
-    play() { return Promise.resolve(); }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    dispatch(type) { this.listeners.get(type)?.(); }
+    pause() { this.paused = true; }
+    async play() { this.paused = false; }
 }
 
 const source = await readFile(new URL('../../Resources/Public/audio/player.js', import.meta.url), 'utf8');
@@ -104,4 +108,52 @@ test('AudioWorklet module is registered only once across many songs', async () =
     await Promise.all(Array.from({ length: 20 }, () => player._ensureWorkletModule()));
 
     assert.equal(registrations, 1);
+});
+
+test('direct playback state follows completed play, pause, and ended events', async () => {
+    const player = new Player();
+    const states = [];
+    player.currentSong = { id: 'direct' };
+    player.onPlaybackStateChange = state => states.push(state);
+
+    assert.equal(await player.togglePlay(), true);
+    assert.equal(player.audioEl.paused, false);
+    assert.equal(await player.togglePlay(), false);
+    assert.equal(player.audioEl.paused, true);
+    await player.togglePlay();
+    player.audioEl.dispatch('ended');
+
+    assert.equal(player.isPlaying, false);
+    assert.deepEqual(states, [true, false, true, false]);
+});
+
+test('direct seek waits for metadata and clamps the requested position', () => {
+    const player = new Player();
+    player.seek(2);
+    assert.equal(player._pendingDirectSeek, 1);
+
+    player.audioEl.duration = 120;
+    player.audioEl.dispatch('loadedmetadata');
+    assert.equal(player.audioEl.currentTime, 120);
+    assert.equal(player._pendingDirectSeek, null);
+
+    player.seek(-1);
+    assert.equal(player.audioEl.currentTime, 0);
+});
+
+test('worker seek updates the clock only after decoder confirmation', () => {
+    const player = new Player();
+    const messages = [];
+    player._usingWasm = true;
+    player.duration = 100;
+    player.currentTime = 10;
+    player._streamGen = 7;
+    player._decoderWorker = { postMessage: message => messages.push(message) };
+
+    assert.equal(player.seek(0.75), true);
+    assert.equal(player.currentTime, 10);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, 'seek');
+    assert.equal(messages[0].generation, 7);
+    assert.equal(messages[0].positionMs, 75000);
 });

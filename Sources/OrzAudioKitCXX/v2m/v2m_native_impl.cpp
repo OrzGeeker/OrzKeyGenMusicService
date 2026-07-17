@@ -8,8 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <new>
+#include <mutex>
 #include "audio_engine.h"
 #include "v2mplayer.h"
+
+// v2mplayer's reference CLI converts every historical V2M revision to the
+// newest synth parameter layout before Open(). Opening older files directly
+// often succeeds but maps their patches incorrectly and produces silence.
+extern void sdInit();
+extern void ConvertV2M(const unsigned char *input, int input_len,
+                       unsigned char **output, int *output_len);
+
+static std::once_flag v2m_sounddef_once;
 
 // ── 合成器状态 ──
 
@@ -32,10 +42,17 @@ static void *context_create(const char *format, const unsigned char *data, int l
     V2MContext *ctx = new(std::nothrow) V2MContext();
     if (!ctx) return NULL;
 
-    // 复制数据（V2MPlayer::Open 要求数据指针在 player 生命周期内有效）
-    ctx->owned_data = (unsigned char *)malloc((size_t)len);
-    if (!ctx->owned_data) { delete ctx; return NULL; }
-    memcpy(ctx->owned_data, data, (size_t)len);
+    std::call_once(v2m_sounddef_once, [] { sdInit(); });
+    unsigned char *converted = NULL;
+    int converted_len = 0;
+    ConvertV2M(data, len, &converted, &converted_len);
+    if (!converted || converted_len <= 0) { delete[] converted; delete ctx; return NULL; }
+
+    // V2MPlayer::Open requires the converted data for the player lifetime.
+    ctx->owned_data = (unsigned char *)malloc((size_t)converted_len);
+    if (!ctx->owned_data) { delete[] converted; delete ctx; return NULL; }
+    memcpy(ctx->owned_data, converted, (size_t)converted_len);
+    delete[] converted;
 
     ctx->player = new(std::nothrow) V2MPlayer();
     if (!ctx->player) { context_destroy(ctx); return NULL; }

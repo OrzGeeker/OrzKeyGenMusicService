@@ -46,10 +46,20 @@ class OrzAudioPlayer {
         this.onEnded = null;
         this.onTimeUpdate = null;
         this.onError = null;
+        this.onPlaybackStateChange = null;
+        this._pendingDirectSeek = null;
+        this._audioBuffer = null;
+        this._audioBufferClockStart = 0;
 
         // 初始化 audio 元素
         this.audioEl.volume = this.volume;
         this.audioEl.addEventListener('timeupdate', () => this._onAudioTimeUpdate());
+        this.audioEl.addEventListener('loadedmetadata', () => {
+            if (this._pendingDirectSeek !== null && Number.isFinite(this.audioEl.duration)) {
+                this.audioEl.currentTime = this._pendingDirectSeek * this.audioEl.duration;
+                this._pendingDirectSeek = null;
+            }
+        });
         this.audioEl.addEventListener('ended', () => this._onEnded());
         this.audioEl.addEventListener('error', (e) => this._onAudioError(e));
     }
@@ -154,27 +164,32 @@ class OrzAudioPlayer {
     /**
      * 暂停/继续
      */
-    togglePlay() {
-        if (!this.currentSong) return;
+    async togglePlay() {
+        if (!this.currentSong) return false;
 
         if (this._usingWasm) {
             if (this.isPlaying) {
-                this.audioCtx?.suspend();
-                this.isPlaying = false;
+                await this.audioCtx?.suspend();
+                this._setPlaying(false);
             } else {
-                this.audioCtx?.resume();
-                this.isPlaying = true;
+                await this.audioCtx?.resume();
+                this._setPlaying(this.audioCtx?.state === 'running');
             }
         } else {
             if (this.isPlaying) {
                 this.audioEl.pause();
-                this.isPlaying = false;
+                this._setPlaying(false);
             } else {
-                this.audioEl.play().then(() => {
-                    this.isPlaying = true;
-                }).catch(e => console.error(e));
+                try {
+                    await this.audioEl.play();
+                    this._setPlaying(true);
+                } catch (error) {
+                    this._setPlaying(false);
+                    if (this.onError) this.onError(error);
+                }
             }
         }
+        return this.isPlaying;
     }
 
     /**
@@ -230,25 +245,34 @@ class OrzAudioPlayer {
         this.audioEl.pause();
         this.audioEl.src = '';
 
-        this.isPlaying = false;
+        this._setPlaying(false);
         this._usingWasm = false;
+        this._audioBuffer = null;
     }
 
     /**
      * 跳转到指定位置 (0-1)
      */
     seek(position) {
+        position = Math.max(0, Math.min(1, Number(position) || 0));
+        const target = position * this.duration;
         if (this._usingWasm) {
-            this.currentTime = position * this.duration;
             if (this._decoderWorker) {
-                this._workerTimeOffset = this.currentTime;
-                this._workerClockStart = this.audioCtx.currentTime;
                 this._decoderWorker.postMessage({ type: 'seek', generation: this._streamGen,
-                    positionMs: Math.round(this.currentTime * 1000) });
+                    positionMs: Math.round(target * 1000) });
+                return true;
             }
-        } else if (this.audioEl.duration) {
+            if (this._audioBuffer) {
+                this._restartAudioBufferAt(target);
+                return true;
+            }
+            return false;
+        } else if (Number.isFinite(this.audioEl.duration) && this.audioEl.duration > 0) {
             this.audioEl.currentTime = position * this.audioEl.duration;
+            return true;
         }
+        this._pendingDirectSeek = position;
+        return true;
     }
 
     /**
@@ -270,7 +294,7 @@ class OrzAudioPlayer {
         this.audioEl.src = url;
         await this.audioEl.play();
         this._assertCurrentPlayback(playGen);
-        this.isPlaying = true;
+        this._setPlaying(true);
         this.duration = this.audioEl.duration || 0;
     }
 
@@ -412,7 +436,7 @@ class OrzAudioPlayer {
         const control = new Int32Array(controlBuffer);
         Atomics.store(control, 3, generation);
         this._workerControl = control;
-        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-sc68-v2m-v1');
+        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-controls-seek-v1');
         this._decoderWorker = worker;
         let workletNode = null;
 
@@ -438,7 +462,12 @@ class OrzAudioPlayer {
                     resolve();
                 } else if (message.type === 'started') {
                     this.diagnostics.firstFrameMs = performance.now() - startedAt;
-                    this.isPlaying = true;
+                    this._setPlaying(this.audioCtx.state === 'running');
+                } else if (message.type === 'seeked') {
+                    this.currentTime = message.positionMs / 1000;
+                    this._workerTimeOffset = this.currentTime;
+                    this._workerClockStart = this.audioCtx.currentTime;
+                    if (this.onTimeUpdate) this.onTimeUpdate(this.currentTime, this.duration);
                 } else if (message.type === 'ended') {
                     this.diagnostics.decodeRate = message.decodeRate;
                 } else if (message.type === 'error') reject(new Error(message.message));
@@ -446,8 +475,8 @@ class OrzAudioPlayer {
             worker.onerror = event => reject(new Error(event.message));
         });
         const moduleJs = ['bp', 'mid', 'ym'].includes(format)
-            ? '/audio/orz_audio_builtin.js?v=20260717-sc68-v2m-v1'
-            : '/audio/orz_audio.js?v=20260717-sc68-v2m-v1';
+            ? '/audio/orz_audio_builtin.js?v=20260717-controls-seek-v1'
+            : '/audio/orz_audio.js?v=20260717-controls-seek-v1';
         worker.postMessage({ type: 'decode', generation, format, subsong, moduleJs, data, control: controlBuffer,
             samples: sampleBuffer, capacityFrames, channels, startFrames }, [data]);
         try {
@@ -533,23 +562,24 @@ class OrzAudioPlayer {
     /**
      * 播放 AudioBuffer
      */
-    _playAudioBuffer(buffer) {
+    _playAudioBuffer(buffer, offset = 0) {
         if (this.currentSource) {
             try { this.currentSource.stop(); } catch(e) {}
             this.currentSource.disconnect();
         }
 
+        this._audioBuffer = buffer;
         this.currentSource = this.audioCtx.createBufferSource();
         this.currentSource.buffer = buffer;
         this.currentSource.connect(this.audioCtx.destination);
-        this.currentSource.start();
-        this.isPlaying = true;
+        this.currentSource.start(0, offset);
+        this._setPlaying(true);
         this.duration = buffer.duration;
 
-        const startTime = this.audioCtx.currentTime;
+        this._audioBufferClockStart = this.audioCtx.currentTime - offset;
         const tick = () => {
             if (!this.isPlaying) return;
-            this.currentTime = this.audioCtx.currentTime - startTime;
+            this.currentTime = this.audioCtx.currentTime - this._audioBufferClockStart;
             if (this.onTimeUpdate) this.onTimeUpdate(this.currentTime, this.duration);
             if (this.currentTime < this.duration) {
                 this._washProgressRAF = requestAnimationFrame(tick);
@@ -558,6 +588,24 @@ class OrzAudioPlayer {
             }
         };
         this._washProgressRAF = requestAnimationFrame(tick);
+    }
+
+    _restartAudioBufferAt(offset) {
+        if (!this._audioBuffer) return false;
+        const wasPlaying = this.isPlaying;
+        if (this.currentSource) {
+            try { this.currentSource.stop(); } catch (_) {}
+            this.currentSource.disconnect();
+        }
+        this.currentSource = this.audioCtx.createBufferSource();
+        this.currentSource.buffer = this._audioBuffer;
+        this.currentSource.connect(this.audioCtx.destination);
+        this.currentSource.start(0, offset);
+        this.currentTime = offset;
+        this._audioBufferClockStart = this.audioCtx.currentTime - offset;
+        if (!wasPlaying) Promise.resolve(this.audioCtx.suspend()).catch(() => {});
+        if (this.onTimeUpdate) this.onTimeUpdate(this.currentTime, this.duration);
+        return true;
     }
 
     /**
@@ -652,7 +700,7 @@ class OrzAudioPlayer {
         this._destroyWasmDecoder();
 
         this.currentSource = (this._streamSources && this._streamSources[this._streamSources.length - 1]) || null;
-        this.isPlaying = true;
+        this._setPlaying(true);
 
         // 时间进度跟踪
         const tick = () => {
@@ -665,7 +713,7 @@ class OrzAudioPlayer {
                 this.onTimeUpdate(this.currentTime, this.duration);
             }
             if (this.currentTime >= this.duration) {
-                this.isPlaying = false;
+                this._setPlaying(false);
                 this._onEnded();
                 return;
             }
@@ -693,7 +741,15 @@ class OrzAudioPlayer {
     }
 
     _onEnded() {
+        this._setPlaying(false);
         if (this.onEnded) this.onEnded();
+    }
+
+    _setPlaying(value) {
+        const next = Boolean(value);
+        if (this.isPlaying === next) return;
+        this.isPlaying = next;
+        if (this.onPlaybackStateChange) this.onPlaybackStateChange(next);
     }
 
     _onAudioError(e) {

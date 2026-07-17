@@ -609,6 +609,19 @@ final class DecoderInvariantTests: XCTestCase {
         XCTAssertTrue(pcm.contains { abs($0) > 0.01 }, "V2M output remained silent")
     }
 
+    func testV2MConvertsHistoricalSynthLayoutsBeforePlayback() throws {
+        let samples = [
+            "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/kZ/kZ - DeskSoft HardCopy Pro 3.2.1 crk.v2m",
+            "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/DimitarSerg/DimitarSerg - Resource Builder 3.0.3.25 kg.v2m"
+        ]
+        for sample in samples {
+            let pcm = try render(relativePath: sample, format: "v2m", chunkFrames: 2_048, limitFrames: 5 * 44_100)
+            XCTAssertEqual(pcm.count, 10 * 44_100, "Unexpected early end: \(sample)")
+            XCTAssertTrue(pcm.allSatisfy(\.isFinite), "Non-finite V2M output: \(sample)")
+            XCTAssertTrue(pcm.contains { abs($0) > 0.01 }, "Historical V2M remained silent: \(sample)")
+        }
+    }
+
     func testSC68AmigaPaulaProducesAudio() throws {
         let sc68 = "Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/LEGEND/LEGEND - Dynamite Dick intro_1.sc68"
         let pcm = try render(relativePath: sc68, format: "sc68", chunkFrames: 2_048, limitFrames: 88_200)
