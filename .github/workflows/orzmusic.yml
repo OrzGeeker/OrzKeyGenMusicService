@@ -42,6 +42,7 @@ jobs:
         with: {submodules: recursive}
       - uses: actions/setup-node@v4
         with: {node-version: 22}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: ./script/update-audio-core-server.sh
       - run: swift test
       - run: node --test Tests/Browser/*.test.mjs
