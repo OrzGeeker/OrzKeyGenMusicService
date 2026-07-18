@@ -99,7 +99,7 @@ swift run Run
 # 构建原生静态库（首次需要）
 ./script/build-native-libs.sh
 
-# 使用锁定的独立服务端 SDK（Linux 默认模式）
+# 使用锁定的独立原生 SDK（Linux 与 Apple Silicon macOS 默认模式）
 ./script/update-audio-core-server.sh
 swift build -c release
 

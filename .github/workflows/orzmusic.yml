@@ -46,3 +46,12 @@ jobs:
       - run: swift test
       - run: node --test Tests/Browser/*.test.mjs
       - run: docker compose config --quiet
+
+  macos-audio-core-smoke:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./script/update-audio-core-server.sh
+      - run: ./script/verify-audio-core-server-sdk.sh
+      - run: swift run OrzAudioCoreSmoke

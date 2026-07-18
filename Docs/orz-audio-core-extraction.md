@@ -4,20 +4,20 @@
 
 独立仓库已于 2026-07-18 建立 `main`，初始 SDK 提交为 `5fe6d07`。
 
-当前稳定版本为 `v1.0.0`。OrzMusic 通过根目录
+当前稳定版本为 `v1.1.1`。OrzMusic 通过根目录
 `audio-core-sdk.lock.json` 固定 Web builtin-lite 制品、提交与 SHA-256；更新时运行
 `script/update-audio-core-web.sh`。同一锁文件也固定 Linux full/server 制品，使用
 `script/update-audio-core-server.sh` 安装到被忽略的 `.audio-core-sdk/server` 目录，随后运行
 `script/verify-audio-core-server-sdk.sh` 校验版本、ABI consumer 链接调用和公共导出符号。
 Linux CI 会对锁定的 Release 制品执行同一套验证，防止应用升级到无法消费的 SDK 包。
-Linux 上 SwiftPM 默认让 `OrzAudioKit` 导入系统模块 `OrzAudioCoreSDK` 并链接
+Linux 与 Apple Silicon macOS 上 SwiftPM 默认让 `OrzAudioKit` 导入系统模块 `OrzAudioCoreSDK` 并链接
 `.audio-core-sdk/server`，不再编译 `OrzAudioKitCXX`；`ORZ_AUDIO_CORE_EXTERNAL=1`
 仍可在其他平台显式选择外部 SDK。`ORZ_AUDIO_CORE_EMBEDDED_LEGACY=1` 仅保留给
 一个发布周期内的双轨诊断与回退。
 `OrzAudioCoreSmoke` 在 CI 中通过该模式创建 Decoder 并渲染有声 MIDI PCM。
 生产 Dockerfile 已使用这一外部模式：构建阶段按 lock 下载并校验 full/server SDK，运行镜像
 只复制 `libOrzAudioCore.so`、decoder manifest、SBOM 和许可证，通过 `LD_LIBRARY_PATH` 加载。
-1.0.0 同时发布 Linux x86_64 与 arm64 full 制品。安装脚本根据目标环境的 `uname -m`
+1.1.1 发布 Linux x86_64/arm64 与兼容 macOS 13+ 的 macOS arm64 full 制品。安装脚本根据目标环境的操作系统与 `uname -m`
 自动选择并校验对应 SDK，Docker 默认使用宿主/目标平台的原生 Swift 镜像，不要求 QEMU。
 Linux 1.0.0 的最低运行基线为 Ubuntu 24.04（glibc 2.38），因此构建与运行镜像均使用 noble。
 ARM 开发机可先运行 `docker build --target audio-core-smoke .`，快速验证真实 Linux arm64

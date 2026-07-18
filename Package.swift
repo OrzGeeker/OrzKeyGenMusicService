@@ -4,7 +4,7 @@ import Foundation
 
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let nativeLibraryPath = "\(packageRoot)/Libraries/OrzAudioKit/native"
-#if os(Linux)
+#if os(Linux) || os(macOS)
 let platformDefaultsToExternalAudioCore = true
 #else
 let platformDefaultsToExternalAudioCore = false

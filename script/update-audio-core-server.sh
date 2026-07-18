@@ -13,20 +13,32 @@ repo="$(read_lock repository)"
 tag="$(read_lock tag)"
 version="$(read_lock version)"
 
+system="$(uname -s)"
 machine="${ORZ_AUDIO_CORE_ARCH:-$(uname -m)}"
-case "$machine" in
-  x86_64|amd64)
+case "$system:$machine" in
+  Linux:x86_64|Linux:amd64)
     arch="x86_64"
+    preset="linux-x86_64"
     asset="$(read_lock serverAssetX86_64)"
     expected="$(read_lock serverAssetSha256X86_64)"
+    library="libOrzAudioCore.so"
     ;;
-  arm64|aarch64)
+  Linux:arm64|Linux:aarch64)
     arch="arm64"
+    preset="linux-arm64"
     asset="$(read_lock serverAssetArm64)"
     expected="$(read_lock serverAssetSha256Arm64)"
+    library="libOrzAudioCore.so"
+    ;;
+  Darwin:arm64)
+    arch="arm64"
+    preset="macos-arm64"
+    asset="$(read_lock nativeAssetMacosArm64)"
+    expected="$(read_lock nativeAssetSha256MacosArm64)"
+    library="libOrzAudioCore.dylib"
     ;;
   *)
-    echo "Unsupported OrzAudioCore server architecture: $machine" >&2
+    echo "Unsupported OrzAudioCore native platform: $system $machine" >&2
     exit 1
     ;;
 esac
@@ -48,8 +60,8 @@ fi
 
 mkdir -p "$work/unpacked"
 tar -xzf "$archive" -C "$work/unpacked"
-stage="$work/unpacked/OrzAudioCore-$version-linux-$arch"
-test -s "$stage/native/lib/libOrzAudioCore.so"
+stage="$work/unpacked/OrzAudioCore-$version-$preset"
+test -s "$stage/native/lib/$library"
 test -s "$stage/native/include/orz_audio_core.h"
 test -s "$stage/metadata/decoder-manifest.json"
 test "$(read_json_string "$stage/metadata/decoder-manifest.json" sdkVersion)" = "$version"
@@ -59,4 +71,4 @@ mkdir -p "$(dirname "$DEST")"
 mv "$stage" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
-printf 'Installed OrzAudioCore %s Linux %s server SDK (%s)\n' "$version" "$arch" "$expected"
+printf 'Installed OrzAudioCore %s %s native SDK (%s)\n' "$version" "$preset" "$expected"
