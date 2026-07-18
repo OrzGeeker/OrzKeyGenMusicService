@@ -9,6 +9,7 @@ let externalAudioCoreRoot = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_
     ?? "\(packageRoot)/.audio-core-sdk/server"
 let audioCoreModule = useExternalAudioCore ? "OrzAudioCoreSDK" : "OrzAudioKitCXX"
 let audioCoreSwiftSettings: [SwiftSetting] = useExternalAudioCore ? [.define("ORZ_AUDIO_CORE_EXTERNAL")] : []
+let appTestExcludes = useExternalAudioCore ? ["DecoderInvariantTests.swift"] : []
 let audioCoreLinkerSettings: [LinkerSetting] = useExternalAudioCore ? [
     .unsafeFlags(["-L\(externalAudioCoreRoot)/native/lib", "-Xlinker", "-rpath", "-Xlinker", "\(externalAudioCoreRoot)/native/lib"]),
     .linkedLibrary("z", .when(platforms: [.linux]))
@@ -130,6 +131,6 @@ let package = Package(
             .target(name: audioCoreModule),
             .product(name: "XCTVapor", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
-        ], swiftSettings: audioCoreSwiftSettings, linkerSettings: audioCoreLinkerSettings)
+        ], exclude: appTestExcludes, swiftSettings: audioCoreSwiftSettings, linkerSettings: audioCoreLinkerSettings)
     ]
 )
