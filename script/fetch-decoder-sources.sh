@@ -5,7 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT/.wasm-build"
 CACHE_DIR="$BUILD_DIR/cache"
 SRC_DIR="$BUILD_DIR/src"
-VENDOR_DIR="$ROOT/third_party/sources"
+VENDOR_DIR="${ORZ_DECODER_VENDOR_DIR:-$ROOT/third_party/sources}"
+if [[ ! -d "$VENDOR_DIR" ]] && [[ -d "$ROOT/SDK/Standalone/third_party/sources" ]]; then
+  VENDOR_DIR="$ROOT/SDK/Standalone/third_party/sources"
+fi
 
 mkdir -p "$CACHE_DIR" "$SRC_DIR"
 
