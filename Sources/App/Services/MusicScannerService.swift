@@ -16,12 +16,14 @@ public struct MusicScannerService {
         public let totalScanned: Int
         public let songsCreated: Int
         public let duplicatesSkipped: Int
+        public let failedFiles: Int
         public let elapsed: String
 
-        public init(totalScanned: Int, songsCreated: Int, duplicatesSkipped: Int, elapsed: String) {
+        public init(totalScanned: Int, songsCreated: Int, duplicatesSkipped: Int, failedFiles: Int, elapsed: String) {
             self.totalScanned = totalScanned
             self.songsCreated = songsCreated
             self.duplicatesSkipped = duplicatesSkipped
+            self.failedFiles = failedFiles
             self.elapsed = elapsed
         }
     }
@@ -43,12 +45,14 @@ public struct MusicScannerService {
         var totalScanned = 0
         var songsCreated = 0
         var duplicatesSkipped = 0
+        var failedFiles = 0
 
         for sourcePath in sourcePaths {
             let result = try await scanSource(sourcePath: sourcePath)
             totalScanned += result.scanned
             songsCreated += result.created
             duplicatesSkipped += result.skipped
+            failedFiles += result.failed
         }
 
         // 不再需要 cleanupRemovedFiles — CAS 模式下 DB 是 append-only 的元数据仓库，
@@ -61,6 +65,7 @@ public struct MusicScannerService {
             totalScanned: totalScanned,
             songsCreated: songsCreated,
             duplicatesSkipped: duplicatesSkipped,
+            failedFiles: failedFiles,
             elapsed: elapsed
         )
     }
@@ -71,15 +76,17 @@ public struct MusicScannerService {
         let scanned: Int
         let created: Int
         let skipped: Int
+        let failed: Int
     }
 
     private func scanSource(sourcePath: String) async throws -> SourceScanResult {
         var scanned = 0
         var created = 0
         var skipped = 0
+        var failed = 0
 
         guard let enumerator = fileManager.enumerator(atPath: sourcePath) else {
-            return SourceScanResult(scanned: 0, created: 0, skipped: 0)
+            return SourceScanResult(scanned: 0, created: 0, skipped: 0, failed: 0)
         }
 
         while let relativePath = enumerator.nextObject() as? String {
@@ -130,11 +137,12 @@ public struct MusicScannerService {
 
             } catch {
                 // 单个文件失败不影响扫描继续
+                failed += 1
                 continue
             }
         }
 
-        return SourceScanResult(scanned: scanned, created: created, skipped: skipped)
+        return SourceScanResult(scanned: scanned, created: created, skipped: skipped, failed: failed)
     }
 
     // MARK: - Metadata Parsing
@@ -152,7 +160,7 @@ public struct MusicScannerService {
         let parentDir = ((relativePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
 
         let artistFromDir: String
-        if parentDir == "KEYGENMUSiC MusicPack" || parentDir == "!Others" || parentDir == "." || parentDir.hasPrefix(".") {
+        if parentDir.isEmpty || parentDir == "KEYGENMUSiC MusicPack" || parentDir == "!Others" || parentDir == "." || parentDir.hasPrefix(".") {
             artistFromDir = "Unknown"
         } else {
             artistFromDir = parentDir

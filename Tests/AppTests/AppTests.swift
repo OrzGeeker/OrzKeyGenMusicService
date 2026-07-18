@@ -617,6 +617,40 @@ final class AppTests: XCTestCase {
         }
     }
 
+    func testCasStorageHashesAndCopiesSourceFile() async throws {
+        let temporaryRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cas-store-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+
+        let source = temporaryRoot.appendingPathComponent("source.ym")
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        try Data("OrzMusic\n".utf8).write(to: source)
+
+        let cas = CasStorageService(root: temporaryRoot.appendingPathComponent("cas").path)
+        let stored = try await cas.store(sourcePath: source.path)
+
+        XCTAssertEqual(stored.sha256, "9acb24a3dd4c066176e619bb6441eee64f727c62372631e6474f40c7f72947e7")
+        XCTAssertEqual(stored.ext, "ym")
+        XCTAssertEqual(stored.fileSize, 9)
+        XCTAssertTrue(cas.contains(sha256: stored.sha256, format: stored.ext))
+        let destination = URL(fileURLWithPath: cas.resolve(sha256: stored.sha256, format: stored.ext))
+        XCTAssertEqual(try Data(contentsOf: destination), Data("OrzMusic\n".utf8))
+    }
+
+    func testScannerUsesFilenameArtistWhenScanningSourceDirectoryRoot() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let scanner = MusicScannerService(sourcePaths: [], cas: app.casStorage, db: app.db)
+
+        let metadata = scanner.parseMetadata(
+            relativePath: "iOTA - ACDSee Pro 5.3 build 168 crk.v2m",
+            fileName: "iOTA - ACDSee Pro 5.3 build 168 crk.v2m"
+        )
+
+        XCTAssertEqual(metadata.artistName, "iOTA")
+        XCTAssertEqual(metadata.songTitle, "ACDSee Pro 5.3 build 168")
+    }
+
     // MARK: - Playlist Reorder
 
     func testPlaylistReorder() throws {

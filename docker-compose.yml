@@ -20,6 +20,17 @@ x-shared_environment: &shared_environment
   CAS_ROOT: /data/music
 
 services:
+  cas-init:
+    image: music-service:latest
+    build:
+      context: .
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 999:999 /data/music"]
+    volumes:
+      - cas_data:/data/music
+    restart: "no"
+
   app:
     image: music-service:latest
     build:
@@ -29,6 +40,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      cas-init:
+        condition: service_completed_successfully
     ports:
       - '8080:8080'
     volumes:
@@ -64,6 +77,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      cas-init:
+        condition: service_completed_successfully
     volumes:
       - cas_data:/data/music
       - ${KEYGEN_DIR:-./Resources/Public/keygenmusic}:/sources/keygen:ro

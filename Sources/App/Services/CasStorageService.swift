@@ -79,11 +79,15 @@ public struct CasStorageService: Sendable {
 
     // MARK: - SHA-256
 
-    /// 计算文件的 SHA-256 哈希（使用 shasum -a 256）
+    /// 计算文件的 SHA-256 哈希。
+    /// macOS 提供 `shasum -a 256`，Linux 运行镜像提供 `sha256sum`。
     private func computeSHA256(filePath: String) async throws -> String {
-        let result = try await ProcessRunner.execute(
-            arguments: ["shasum", "-a", "256", filePath]
-        )
+        #if os(Linux)
+        let arguments = ["sha256sum", filePath]
+        #else
+        let arguments = ["shasum", "-a", "256", filePath]
+        #endif
+        let result = try await ProcessRunner.execute(arguments: arguments)
         guard let hash = result.split(separator: " ").first else {
             throw CasError.sha256Failed(path: filePath)
         }
