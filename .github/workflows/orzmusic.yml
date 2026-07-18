@@ -1,0 +1,48 @@
+name: OrzMusic
+
+on:
+  push:
+    paths:
+      - "Sources/App/**"
+      - "Sources/Run/**"
+      - "Resources/**"
+      - "Tests/AppTests/**"
+      - "Tests/Browser/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "audio-core-sdk.lock.json"
+      - "script/update-audio-core-server.sh"
+      - ".github/workflows/orzmusic.yml"
+  pull_request:
+    paths:
+      - "Sources/App/**"
+      - "Sources/Run/**"
+      - "Resources/**"
+      - "Tests/AppTests/**"
+      - "Tests/Browser/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "audio-core-sdk.lock.json"
+      - "script/update-audio-core-server.sh"
+      - ".github/workflows/orzmusic.yml"
+
+jobs:
+  application-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ORZ_AUDIO_CORE_EXTERNAL: "1"
+      LD_LIBRARY_PATH: ${{ github.workspace }}/.audio-core-sdk/server/native/lib
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: recursive}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: ./script/update-audio-core-server.sh
+      - run: swift test
+      - run: node --test Tests/Browser/*.test.mjs
+      - run: docker compose config --quiet
