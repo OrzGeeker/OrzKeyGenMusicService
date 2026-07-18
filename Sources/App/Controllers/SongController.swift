@@ -212,8 +212,8 @@ struct SongController: RouteCollection {
     /// 首次请求转码（AudioEngine → C 解码器 / ffmpeg），后续直接读缓存
     private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, subsong: Int, cas: CasStorageService) async throws -> String {
         let cacheDir = "\(cas.root)/.cache/wav/"
-        // Version output semantics so decoder/format changes never reuse stale PCM.
-        let cachePath = "\(cacheDir)\(sha256)-decoder-v3-rate-native-ch-native-sub-\(subsong).wav"
+        // Version output semantics so SDK/decoder upgrades never reuse stale PCM.
+        let cachePath = "\(cacheDir)\(sha256)-\(AudioDecoder.cacheFingerprint)-\(format.rawValue)-rate-native-ch-native-sub-\(subsong).wav"
 
         let fm = FileManager.default
         if fm.fileExists(atPath: cachePath) {

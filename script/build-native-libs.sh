@@ -35,6 +35,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
     export MACOSX_DEPLOYMENT_TARGET
     NATIVE_CFLAGS="$NATIVE_CFLAGS -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
     NATIVE_CXXFLAGS="$NATIVE_CXXFLAGS -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+else
+    # Full/server SDK produces a shared object on Linux, so every archive
+    # linked into it (including TLS-based AHX state) must be position independent.
+    NATIVE_CFLAGS="$NATIVE_CFLAGS -fPIC"
+    NATIVE_CXXFLAGS="$NATIVE_CXXFLAGS -fPIC"
 fi
 
 # Detect host architecture for --host flag in configure
@@ -64,10 +69,12 @@ err()  { printf "${RED}[ERR]${NC} %s\n" "$*"; exit 1; }
 
 CLEAN=false
 ONLY_LIB=""
+STRICT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean) CLEAN=true; shift ;;
+        --strict) STRICT=true; shift ;;
         --only-*) ONLY_LIB="${1#--only-}"; shift ;;
         *) err "Unknown option: $1" ;;
     esac
@@ -391,12 +398,21 @@ build_adplug() {
             return 1
         }
 
-    # AdPlug uses the same old libtool archive rules as libbinio.
-    make -j1 >/dev/null 2>&1 || make -j1 >/dev/null 2>&1 || {
-        warn "AdPlug make failed"
+    # Only build the library target: the adplugdb CLI is not part of the SDK
+    # and does not link reliably when libtool 1.x meets modern toolchains.
+    make -j1 src/libadplug.la >/dev/null 2>&1 || true
+    # Old libtool can leave a symbol-table-only archive. Rebuild the archive
+    # deterministically from the successfully compiled library objects.
+    local adplug_objects=(src/libadplug_la-*.o)
+    if [ ! -f "${adplug_objects[0]}" ]; then
+        warn "AdPlug library objects were not produced"
         popd >/dev/null
         return 1
-    }
+    fi
+    ar rcs "$output" "${adplug_objects[@]}"
+    ranlib "$output"
+    mkdir -p "$build_dir/src/.libs"
+    cp "$output" "$build_dir/src/.libs/libadplug.a"
 
     popd >/dev/null
 
@@ -410,7 +426,7 @@ build_adplug() {
         return 1
     fi
 
-    cp "$libfile" "$output"
+    [ "$libfile" = "$output" ] || cp "$libfile" "$output"
     log "libadplug.a → $output ($(du -h "$output" | cut -f1))"
     echo "$NATIVE_DIR"
 }
@@ -674,20 +690,20 @@ if [ -n "$ONLY_LIB" ]; then
     esac
 else
     log "Building all native libraries..."
-
-    build_libopenmpt || warn "libopenmpt build failed (will use stub)"
-
-    build_libgme || warn "libgme build failed (will use stub)"
-
-    build_libsidplayfp || warn "libsidplayfp build failed (will use stub)"
-
-    build_libbinio || warn "libbinio build failed"
-    build_adplug || warn "AdPlug build failed (will use stub)"
-    build_libsc68 || warn "sc68 build failed (will use stub)"
-    build_libasap || warn "ASAP build failed (will use stub)"
-    build_libuade || warn "uade build failed (will use stub)"
-    build_libv2m || warn "v2m build failed (will use stub)"
-    build_libahx2play || warn "ahx2play build failed (will use stub)"
+    failures=()
+    build_libopenmpt || failures+=(libopenmpt)
+    build_libgme || failures+=(gme)
+    build_libsidplayfp || failures+=(sidplayfp)
+    build_libbinio || failures+=(binio)
+    build_adplug || failures+=(adplug)
+    build_libsc68 || failures+=(sc68)
+    build_libasap || failures+=(asap)
+    build_libv2m || failures+=(v2m)
+    build_libahx2play || failures+=(ahx2play)
+    if (( ${#failures[@]} > 0 )); then
+        warn "Failed native libraries: ${failures[*]}"
+        $STRICT && err "Strict full-profile build requires every decoder library"
+    fi
 fi
 
 install_native_libraries

@@ -7,12 +7,15 @@ DerivedData/
 db.sqlite
 *.o
 .swiftpm
+node_modules/
 .env
 Public/**/*
 .vscode/
 
 # WASM build artifacts
 .wasm-build/
+.audio-core-sdk/
+.cmake-build/
 Resources/Public/audio/ym-raw/
 .wasm-build/src/uade/
 

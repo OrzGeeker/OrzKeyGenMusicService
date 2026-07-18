@@ -1,7 +1,8 @@
 # ================================
 # Build image
 # ================================
-FROM swift:6.1-jammy as build
+# Release Linux SDKs are built on Ubuntu 24.04 and require glibc 2.38.
+FROM swift:6.1-noble AS build-base
 
 # Set up a build area
 WORKDIR /build
@@ -13,17 +14,41 @@ RUN swift package resolve
 # Copy entire repo into container
 COPY . .
 
-# Build native static libraries (zero system dependency)
-RUN ./script/build-native-libs.sh
+# Release SDK download/checksum tools only; decoder libraries remain fully
+# contained in the immutable OrzAudioCore artifact.
+RUN apt-get -q update \
+    && apt-get -q install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Build everything, with optimizations
-RUN swift build -c release
+# Install the immutable full/server SDK. The script verifies the release asset
+# checksum and manifest version from audio-core-sdk.lock.json.
+RUN ./script/update-audio-core-server.sh
+
+# Fast cross-platform validation target. It links the official Swift binding
+# to the released Linux SDK and renders audible PCM without compiling Vapor.
+FROM build-base AS audio-core-smoke
+RUN ORZ_AUDIO_CORE_EXTERNAL=1 swift build --product OrzAudioCoreSmoke \
+    && cp "$(swift build --show-bin-path)/OrzAudioCoreSmoke" /usr/local/bin/OrzAudioCoreSmoke
+ENV LD_LIBRARY_PATH=/build/.audio-core-sdk/server/native/lib
+ENTRYPOINT ["/usr/local/bin/OrzAudioCoreSmoke"]
+
+FROM build-base AS build
+
+# Build the service against the external ABI-v1 SDK. OrzAudioKitCXX and its
+# third-party decoder archives are not part of this build graph.
+RUN ORZ_AUDIO_CORE_EXTERNAL=1 swift build -c release --product OrzMusicService
 
 # Switch to the staging area
 WORKDIR /staging
 
 # Copy main executable to staging area
-RUN cp "$(swift build --package-path /build -c release --show-bin-path)/Run" ./
+RUN cp "$(swift build --package-path /build -c release --show-bin-path)/OrzMusicService" ./Run
+
+# Runtime decoder SDK and its license/SBOM metadata.
+RUN mkdir -p ./lib ./audio-core-metadata \
+    && cp /build/.audio-core-sdk/server/native/lib/libOrzAudioCore.so ./lib/ \
+    && cp -Ra /build/.audio-core-sdk/server/licenses ./audio-core-metadata/ \
+    && cp -Ra /build/.audio-core-sdk/server/metadata ./audio-core-metadata/
 
 # Copy resources bundled by SPM to staging area
 RUN find -L "$(swift build --package-path /build -c release --show-bin-path)/" -regex '.*\.resources$' -exec cp -Ra {} ./ \;
@@ -34,24 +59,25 @@ RUN [ -d /build/Resources ] && { cp -Ra /build/Resources ./Resources && chmod -R
 # ================================
 # Run image
 # ================================
-FROM swift:6.1-jammy-slim
+FROM swift:6.1-noble-slim
 
 # Make sure all system packages are up to date, and install runtime deps.
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
-    && apt-get -q update \
-    && apt-get -q dist-upgrade -y \
-    && apt-get -q install -y \
+    && apt-get -q -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+    && apt-get -q -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
       ca-certificates \
       tzdata \
       ffmpeg \
       curl \
-    && rm -r /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a vapor user and group with /app as its home directory
 RUN useradd --user-group --create-home --system --skel /dev/null --home-dir /app vapor
 
 # Switch to the new home directory
 WORKDIR /app
+
+ENV LD_LIBRARY_PATH=/app/lib
 
 # Copy built executable and any staged resources from builder
 COPY --from=build --chown=vapor:vapor /staging /app

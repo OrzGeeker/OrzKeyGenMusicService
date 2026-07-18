@@ -1,7 +1,11 @@
 import Foundation
 import XCTest
 import OrzAudioKit
+#if ORZ_AUDIO_CORE_EXTERNAL
+import OrzAudioCoreSDK
+#else
 import OrzAudioKitCXX
+#endif
 
 final class DecoderInvariantTests: XCTestCase {
     private final class FailureBox: @unchecked Sendable {
@@ -675,6 +679,45 @@ final class DecoderInvariantTests: XCTestCase {
             destinationPath: output.path
         ))
         XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+    }
+
+    func testStableABIVersionFormatCatalogAndErrors() throws {
+        XCTAssertEqual(orz_abi_version() >> 16, 1)
+        XCTAssertGreaterThanOrEqual(orz_get_format_count(), 3)
+        XCTAssertEqual(String(cString: orz_status_message(ORZ_ERROR_INVALID_ARGUMENT)), "invalid argument")
+        var info = orz_format_info()
+        info.struct_size = UInt32(MemoryLayout<orz_format_info>.size)
+        info.abi_version = orz_abi_version()
+        XCTAssertEqual(orz_get_format_info(0, &info), ORZ_OK)
+        XCTAssertNotNil(info.format_id)
+        XCTAssertNotNil(info.decoder_id)
+        XCTAssertEqual(Set(AudioDecoder.supportedFormats.map(\.id)), DecoderManifest.decodableFormatIDs)
+    }
+
+    func testSwiftSDKOwnsInputAndSupportsResetAndCancel() throws {
+        var input = ym6Data(interleaved: true)
+        let decoder = try AudioDecoder(data: input, format: "ym")
+        input.removeAll(keepingCapacity: false)
+        let first = try decoder.render(maxFrames: 127)
+        XCTAssertEqual(first.count, 254)
+        XCTAssertTrue(first.contains { abs($0) > 0.001 })
+        try decoder.reset()
+        XCTAssertEqual(try decoder.render(maxFrames: 127), first)
+        decoder.cancel()
+        XCTAssertThrowsError(try decoder.render(maxFrames: 127))
+    }
+
+    func testABIv1MatchesCompatibilityHandlePCM() throws {
+        let fixtures: [(String, Data)] = [
+            ("ym", ym6Data(interleaved: true)),
+            ("mid", multiTrackTempoMIDI)
+        ]
+        for (format, data) in fixtures {
+            let compatibility = try Self.firstHandleBlock(data: data, format: format)
+            let decoder = try AudioDecoder(data: data, format: format)
+            let abiV1 = try decoder.render(maxFrames: 512)
+            XCTAssertEqual(abiV1, compatibility, "ABI v1 PCM differs for \(format)")
+        }
     }
 
 }

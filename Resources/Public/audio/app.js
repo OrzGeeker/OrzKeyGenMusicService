@@ -1,10 +1,9 @@
 /* OrzPlayer library UI — intentionally dependency-free apart from Alpine. */
+const ORZ_COLORS={modules:'#8be9fd',retro:'#fbbf24',synth:'#39e58c',standard:'#a1a1aa',other:'#94a3b8'};
 const ORZ_FORMATS = [
-    ['xm','XM','modules','#8be9fd'],['mod','MOD','modules','#7dd3fc'],['it','IT','modules','#a5b4fc'],['s3m','S3M','modules','#c4b5fd'],['mo3','MO3','modules','#d8b4fe'],['mtm','MTM','modules','#93c5fd'],['fc13','FC 1.3','modules','#67e8f9'],['fc14','FC 1.4','modules','#5eead4'],
-    ['sid','SID','retro','#fbbf24'],['nsf','NSF','retro','#fb923c'],['spc','SPC','retro','#f87171'],['sc68','SC68','retro','#fca5a5'],['ym','YM','retro','#fde047'],['sap','SAP','retro','#fdba74'],['ahx','AHX','retro','#f0abfc'],
-    ['mid','MIDI','synth','#39e58c'],['v2m','V2M','synth','#4ade80'],['bp','BP','synth','#86efac'],['rad','RAD','synth','#34d399'],['d00','D00','synth','#2dd4bf'],['hsc','HSC','synth','#6ee7b7'],['amd','AMD','synth','#a7f3d0'],
-    ['mp3','MP3','standard','#94a3b8'],['ogg','OGG','standard','#a1a1aa'],['flac','FLAC','standard','#cbd5e1'],['wav','WAV','standard','#d4d4d8'],['m4a','M4A','standard','#9ca3af'],['aac','AAC','standard','#b6bbc4']
-].map(([id,label,group,color])=>({id,label,group,color}));
+    ...(globalThis.ORZ_DECODER_FORMATS||[]).map(item=>({...item,color:ORZ_COLORS[item.group]||ORZ_COLORS.other})),
+    ...[['mp3','MP3'],['ogg','OGG'],['flac','FLAC'],['wav','WAV'],['m4a','M4A'],['aac','AAC']].map(([id,label])=>({id,label,group:'standard',color:ORZ_COLORS.standard}))
+];
 const ORZ_GROUPS=[['modules','模块音乐'],['retro','复古主机'],['synth','芯片与合成'],['standard','常规音频'],['other','其他格式']];
 const clamp=(value,min=0,max=1)=>Math.min(max,Math.max(min,Number(value)||0));
 const formatClock=seconds=>{if(!Number.isFinite(Number(seconds))||Number(seconds)<0)return '0:00';const n=Math.floor(Number(seconds)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=String(n%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`};

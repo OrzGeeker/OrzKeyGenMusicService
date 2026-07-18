@@ -12,6 +12,8 @@ OrzMusic 是一个现代化的芯片音乐/模块音乐播放服务，支持 28 
 
 ## 架构
 
+解码能力通过版本化的 **OrzAudioCore ABI v1** 下沉。当前仓库同时提供 C/C++ CMake package、Swift Package 产品和 TypeScript/WASM 封装；详细接口与发布规则见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)，独立仓库迁移门禁见 [Docs/orz-audio-core-extraction.md](Docs/orz-audio-core-extraction.md)。
+
 ```
 同一份 C 源码 → WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
 
@@ -97,6 +99,10 @@ swift run Run
 # 构建原生静态库（首次需要）
 ./script/build-native-libs.sh
 
+# 使用锁定的独立服务端 SDK（Linux / 生产模式）
+./script/update-audio-core-server.sh
+ORZ_AUDIO_CORE_EXTERNAL=1 swift build -c release
+
 # Docker 部署
 docker compose up --build -d
 ```
@@ -119,4 +125,4 @@ docker compose up --build -d
 - **数据库**: PostgreSQL + Fluent ORM
 - **前端**: Alpine.js + Worker + SharedArrayBuffer + AudioWorklet/WASM
 - **WASM 编译**: Emscripten 6.0
-- **解码器**: 全部源码编译，零系统库依赖
+- **解码器**: OrzAudioCore ABI v1；Docker 使用校验过的独立 full SDK，本地保留源码回退构建

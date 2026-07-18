@@ -17,5 +17,6 @@ WEAK const Decoder decoder_v2m = {0};
 WEAK const Decoder decoder_sc68 = {0};
 WEAK const Decoder decoder_uade_ahx = {0};
 WEAK const Decoder decoder_adplug = {0};
-WEAK const Decoder decoder_midi = {0};
-WEAK const Decoder decoder_bp = {0};
+/* BP, MIDI and YM are mandatory in every build profile and therefore must
+ * remain strong unresolved references so static archive linkers pull their
+ * implementation objects into consumers. */

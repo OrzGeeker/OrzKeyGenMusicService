@@ -4,8 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../../Resources/Public/audio/app.js', import.meta.url), 'utf8');
+const manifestSource = readFileSync(new URL('../../Resources/Public/audio/decoder-manifest.generated.js', import.meta.url), 'utf8');
 const document = { body: {}, activeElement: null };
 const context = { globalThis: {}, module: { exports: {} }, document, setTimeout() {}, URLSearchParams };
+vm.runInNewContext(manifestSource, context);
 vm.runInNewContext(source, context);
 const { clamp, formatDuration, releaseShortcutFocus, shortcutAction, formats } = context.module.exports;
 

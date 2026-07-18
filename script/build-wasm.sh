@@ -22,7 +22,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_DIR/Resources/Public/audio"
+OUTPUT_DIR="${ORZ_WASM_OUTPUT_DIR:-$PROJECT_DIR/Resources/Public/audio}"
 BUILD_DIR="$PROJECT_DIR/.wasm-build"
 CACHE_DIR="$BUILD_DIR/cache"
 
@@ -35,6 +35,7 @@ GME_URL="https://github.com/libgme/game-music-emu/archive/refs/tags/${GME_VERSIO
 
 # libsidplayfp — 用于 SID (Commodore 64) 格式
 SIDPLAYFP_VERSION="3.0.2"
+SIDPLAYFP_URL="https://github.com/libsidplayfp/libsidplayfp/releases/download/v${SIDPLAYFP_VERSION}/libsidplayfp-${SIDPLAYFP_VERSION}.tar.gz"
 
 # mpg123 — 用于 MO3 中 MP3 压缩采样的解码
 MPG123_VERSION="1.32.6"
@@ -228,7 +229,7 @@ build_libopenmpt() {
         --without-flac \
         --without-zlib \
         CC=emcc CXX=em++ \
-        --prefix="$build_dir/install" || {
+        --prefix="$build_dir/install" >&2 || {
             warn "libopenmpt configure failed"
             popd >/dev/null
             echo ""
@@ -236,7 +237,7 @@ build_libopenmpt() {
         }
 
     log "Building libopenmpt..."
-    emmake make -j"$JOBS" || {
+    emmake make -j"$JOBS" >&2 || {
         warn "libopenmpt make failed"
         popd >/dev/null
         echo ""
@@ -276,7 +277,7 @@ build_libgme() {
         -DGME_ENABLE_GBS=OFF \
         -DGME_ENABLE_GYM=OFF \
         -DGME_ENABLE_HES=OFF \
-        -Wno-dev || {
+        -Wno-dev >&2 || {
             warn "gme cmake failed"
             popd >/dev/null
             echo ""
@@ -284,7 +285,7 @@ build_libgme() {
         }
 
     log "Building game-music-emu..."
-    emmake make -j"$JOBS" || {
+    emmake make -j"$JOBS" >&2 || {
         warn "gme make failed"
         popd >/dev/null
         echo ""
@@ -518,7 +519,7 @@ build_libsidplayfp() {
         --enable-static \
         --disable-silent-rules \
         CC=emcc CXX=em++ \
-        --prefix="$build_dir/install" || {
+        --prefix="$build_dir/install" >&2 || {
             warn "libsidplayfp configure failed"
             popd >/dev/null
             echo ""
@@ -526,7 +527,7 @@ build_libsidplayfp() {
         }
 
     log "Building libsidplayfp..."
-    emmake make -j"$JOBS" || {
+    emmake make -j"$JOBS" >&2 || {
         warn "libsidplayfp make failed"
         popd >/dev/null
         echo ""
@@ -583,10 +584,10 @@ build_mpg123() {
         --disable-modules \
         --with-cpu=generic \
         --enable-int-quality=no \
-        --prefix="$prefix" 2>&1 | tail -5
+        --prefix="$prefix" 2>&1 | tail -5 >&2
 
     log "Building mpg123..."
-    emmake make -j"$JOBS" install 2>&1 | tail -5
+    emmake make -j"$JOBS" install 2>&1 | tail -5 >&2
 
     local lib="$prefix/lib/libmpg123.a"
     if [ -f "$lib" ]; then
@@ -630,9 +631,9 @@ build_ogg() {
     emconfigure "$src_dir/configure" \
         --host="$host_triple" \
         --disable-shared --enable-static \
-        --prefix="$prefix" 2>&1 | tail -5
+        --prefix="$prefix" 2>&1 | tail -5 >&2
 
-    emmake make -j"$JOBS" install 2>&1 | tail -5
+    emmake make -j"$JOBS" install 2>&1 | tail -5 >&2
 
     local lib="$prefix/lib/libogg.a"
     if [ -f "$lib" ]; then
@@ -678,9 +679,9 @@ build_vorbis() {
         --host="$host_triple" \
         --disable-shared --enable-static \
         --with-ogg="$ogg_prefix" \
-        --prefix="$prefix" 2>&1 | tail -5
+        --prefix="$prefix" 2>&1 | tail -5 >&2
 
-    emmake make -j"$JOBS" install 2>&1 | tail -5
+    emmake make -j"$JOBS" install 2>&1 | tail -5 >&2
 
     local lib="$prefix/lib/libvorbis.a"
     local libfile="$prefix/lib/libvorbisfile.a"
@@ -1065,8 +1066,8 @@ STUBC
         -s WASM=1 \
         -s MODULARIZE=1 \
         -s EXPORT_NAME="OrzAudioKit" \
-        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAP32", "HEAPF32"]' \
-        -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_malloc", "_free"]' \
+        -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "getValue", "setValue", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAPU32", "HEAP32", "HEAPF32", "HEAPF64"]' \
+        -s EXPORTED_FUNCTIONS='["_orz_load", "_orz_get_duration", "_orz_get_sample_rate", "_orz_get_channels", "_orz_render", "_orz_destroy", "_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_orz_abi_version", "_orz_build_info", "_orz_status_message", "_orz_get_format_count", "_orz_get_format_info", "_orz_probe", "_orz_decoder_create_memory", "_orz_decoder_get_stream_info", "_orz_decoder_render_f32", "_orz_decoder_seek", "_orz_decoder_select_subsong_v1", "_orz_decoder_reset", "_orz_decoder_cancel", "_orz_decoder_destroy_v1", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=268435456 \
         -s ALLOW_MEMORY_GROWTH=0 \
         -s DISABLE_EXCEPTION_CATCHING=0 \
@@ -1097,8 +1098,8 @@ generate_builtin_wrapper() {
         "$ORZ_SRC/stub_decoders.c" \
         -I"$ORZ_SRC/include" \
         -s WASM=1 -s MODULARIZE=1 -s EXPORT_NAME="OrzAudioKit" \
-        -s EXPORTED_RUNTIME_METHODS='["stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAPF32"]' \
-        -s EXPORTED_FUNCTIONS='["_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_malloc", "_free"]' \
+        -s EXPORTED_RUNTIME_METHODS='["stringToUTF8", "lengthBytesUTF8", "HEAPU8", "HEAPU32", "HEAPF32", "HEAPF64"]' \
+        -s EXPORTED_FUNCTIONS='["_orz_decoder_create", "_orz_decoder_get_duration", "_orz_decoder_get_sample_rate", "_orz_decoder_get_channels", "_orz_decoder_render", "_orz_decoder_destroy", "_orz_decoder_get_subsong_count", "_orz_decoder_select_subsong", "_orz_decoder_seek_ms", "_orz_audio_can_decode", "_orz_abi_version", "_orz_build_info", "_orz_status_message", "_orz_get_format_count", "_orz_get_format_info", "_orz_probe", "_orz_decoder_create_memory", "_orz_decoder_get_stream_info", "_orz_decoder_render_f32", "_orz_decoder_seek", "_orz_decoder_select_subsong_v1", "_orz_decoder_reset", "_orz_decoder_cancel", "_orz_decoder_destroy_v1", "_malloc", "_free"]' \
         -s INITIAL_MEMORY=33554432 -s ALLOW_MEMORY_GROWTH=1 \
         --no-entry -O3 -o "$OUTPUT_DIR/orz_audio_builtin.js"
     log "Built dependency-free WASM bundle:"

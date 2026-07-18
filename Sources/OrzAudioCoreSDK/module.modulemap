@@ -1,0 +1,5 @@
+module OrzAudioCoreSDK [system] {
+    header "include/orz_audio_core_sdk.h"
+    link "OrzAudioCore"
+    export *
+}

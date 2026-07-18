@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/OrzGeeker/OrzAudioCore",
+  "version": "1.0.0-rc.7",
+  "tag": "v1.0.0-rc.7",
+  "commit": "04dfe2702cda2c77b3d113d684880634644b04ea",
+  "webAsset": "orzmusic-audio-core-1.0.0-rc.7.tgz",
+  "webAssetSha256": "0b09093ae9f87bf9d431e6c2e28771a0674265e99e7cc399f6d015c47b7e61ab",
+  "serverAssetX86_64": "OrzAudioCore-1.0.0-rc.7-linux-x86_64.tar.gz",
+  "serverAssetSha256X86_64": "a6804bc290e638135cedf00ca64b6ec9c648e8b8068090359b1baca5e4126b96",
+  "serverAssetArm64": "OrzAudioCore-1.0.0-rc.7-linux-arm64.tar.gz",
+  "serverAssetSha256Arm64": "a996bb775efa4950a574229e56f9e64770694ad7deeb86a3821dfd566033898e",
+  "profile": "builtin-lite"
+}

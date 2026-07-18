@@ -7,6 +7,104 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(import.meta.url);
+let builtinModulePromise;
+
+function builtinModule() {
+    if (!builtinModulePromise) {
+        const createModule = require(path.join(root, 'Resources/Public/audio/orz_audio_builtin.js'));
+        builtinModulePromise = createModule({
+            wasmBinary: fs.readFileSync(path.join(root, 'Resources/Public/audio/orz_audio_builtin.wasm'))
+        });
+    }
+    return builtinModulePromise;
+}
+
+test('builtin WASM is pinned to the immutable OrzAudioCore release', async () => {
+    const lock = JSON.parse(fs.readFileSync(path.join(root, 'audio-core-sdk.lock.json'), 'utf8'));
+    assert.equal(lock.version, '1.0.0-rc.7');
+    assert.match(lock.serverAssetX86_64, /linux-x86_64\.tar\.gz$/);
+    assert.match(lock.serverAssetSha256X86_64, /^[a-f0-9]{64}$/);
+    assert.match(lock.serverAssetArm64, /linux-arm64\.tar\.gz$/);
+    assert.match(lock.serverAssetSha256Arm64, /^[a-f0-9]{64}$/);
+    assert.match(lock.webAssetSha256, /^[0-9a-f]{64}$/);
+    const wasm = await builtinModule();
+    const buildInfo = JSON.parse(wasm.UTF8ToString(wasm._orz_build_info()));
+    assert.equal(buildInfo.version, lock.version);
+    assert.equal(buildInfo.fingerprint, `orzcore-${lock.version}-m1`);
+});
+
+function createV1(wasm, tune, formatName) {
+    const format = wasm._malloc(formatName.length + 1);
+    const data = wasm._malloc(tune.length);
+    const output = wasm._malloc(4);
+    wasm.stringToUTF8(formatName, format, formatName.length + 1);
+    wasm.HEAPU8.set(tune, data);
+    wasm.HEAPU32[output >> 2] = 0;
+    const status = wasm._orz_decoder_create_memory(data, tune.length, format, 0, output);
+    const decoder = wasm.HEAPU32[output >> 2];
+    wasm._free(output); wasm._free(format); wasm._free(data);
+    assert.equal(status, 0);
+    assert.notEqual(decoder, 0);
+    return decoder;
+}
+
+function renderV1(wasm, decoder, frames, channels = 2) {
+    const pcm = wasm._malloc(frames * channels * 4);
+    const rendered = wasm._malloc(4);
+    try {
+        assert.equal(wasm._orz_decoder_render_f32(decoder, pcm, frames, rendered), 0);
+        const count = wasm.HEAPU32[rendered >> 2];
+        assert.equal(count, frames);
+        return wasm.HEAPF32.slice(pcm >> 2, (pcm >> 2) + count * channels);
+    } finally {
+        wasm._free(rendered);
+        wasm._free(pcm);
+    }
+}
+
+test('WASM exposes ABI v1 and owns decoder input memory', async () => {
+    const wasm = await builtinModule();
+    assert.equal(wasm._orz_abi_version(), 0x10000);
+    const tune = fs.readFileSync(path.join(root, 'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
+    const decoder = createV1(wasm, tune, 'ym');
+    try {
+        const info = wasm._malloc(64);
+        wasm.HEAPU8.fill(0, info, info + 64);
+        wasm.HEAPU32[info >> 2] = 64;
+        wasm.HEAPU32[(info + 4) >> 2] = 0x10000;
+        assert.equal(wasm._orz_decoder_get_stream_info(decoder, info), 0);
+        assert.equal(wasm.HEAPU32[(info + 12) >> 2], 2);
+        wasm._free(info);
+        const pcm = wasm._malloc(512 * 2 * 4), rendered = wasm._malloc(4);
+        assert.equal(wasm._orz_decoder_render_f32(decoder, pcm, 512, rendered), 0);
+        assert.equal(wasm.HEAPU32[rendered >> 2], 512);
+        wasm._free(rendered); wasm._free(pcm);
+    } finally { wasm._orz_decoder_destroy_v1(decoder); }
+});
+
+test('remote RC builtin and embedded full core produce matching YM PCM', async () => {
+    const builtin = await builtinModule();
+    const createFullModule = require(path.join(root, 'Resources/Public/audio/orz_audio.js'));
+    const full = await createFullModule({
+        wasmBinary: fs.readFileSync(path.join(root, 'Resources/Public/audio/orz_audio.wasm'))
+    });
+    const tune = fs.readFileSync(path.join(root, 'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
+    const builtinDecoder = createV1(builtin, tune, 'ym');
+    const fullDecoder = createV1(full, tune, 'ym');
+    try {
+        const expected = renderV1(full, fullDecoder, 4096);
+        const actual = renderV1(builtin, builtinDecoder, 4096);
+        assert.equal(actual.length, expected.length);
+        let maximumError = 0;
+        for (let index = 0; index < actual.length; index++) {
+            maximumError = Math.max(maximumError, Math.abs(actual[index] - expected[index]));
+        }
+        assert.ok(maximumError <= 1e-7, `YM PCM maximum error ${maximumError}`);
+    } finally {
+        builtin._orz_decoder_destroy_v1(builtinDecoder);
+        full._orz_decoder_destroy_v1(fullDecoder);
+    }
+});
 
 test('full WASM V2M decoder reports seconds and renders audible PCM', async () => {
     const createModule = require(path.join(root, 'Resources/Public/audio/orz_audio.js'));

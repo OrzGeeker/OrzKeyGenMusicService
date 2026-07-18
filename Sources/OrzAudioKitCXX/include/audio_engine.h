@@ -1,6 +1,8 @@
 #ifndef ORZ_AUDIO_ENGINE_H
 #define ORZ_AUDIO_ENGINE_H
 
+#include "orz_audio_core.h"
+
 // 每个解码器实现的统一接口
 typedef struct {
     const char *name;       // 日志用

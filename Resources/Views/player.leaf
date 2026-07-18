@@ -10,6 +10,7 @@
     <link rel="apple-touch-icon" href="/brand/orz-logo-192.png">
     <link rel="stylesheet" href="/audio/app.css?v=20260718-brand-title-v1">
     <script defer src="/audio/player.js?v=20260718-master-volume-v1"></script>
+    <script defer src="/audio/decoder-manifest.generated.js?v=20260718-sdk-v1"></script>
     <script defer src="/audio/app.js?v=20260718-focus-ring-v1"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>

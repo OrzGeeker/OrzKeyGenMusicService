@@ -5,6 +5,8 @@
 #endif
 #include <string.h>
 #include "audio_engine.h"
+#include "orz_audio_core.h"
+#include "decoder_registry.h"
 
 // ── 导入各解码器的实例 ──
 extern const Decoder decoder_openmpt;
@@ -38,54 +40,54 @@ extern const Decoder decoder_midi;
 extern const Decoder decoder_bp;
 
 
-// ── 解码器自动注册 ──
-static int registered = 0;
+// Static, immutable registry. It is safe during concurrent first use and has
+// no arbitrary decoder count limit. Weak zero-valued decoder stubs allow lite
+// builds to omit modules; accessors filter those entries by their context API.
+#define BASE_CAPS (ORZ_CAP_RENDER | ORZ_CAP_DURATION | ORZ_CAP_PROBE | ORZ_CAP_CONCURRENT_INSTANCES)
+#define NAV_CAPS (BASE_CAPS | ORZ_CAP_SEEK | ORZ_CAP_SUBSONG)
+#define ALL_PLATFORMS 0x07u /* native, wasm, future mobile wrapper */
+#define ENTRY(fmt, title, id, ver, group, caps, symbol) \
+    { fmt, title, id, ver, group, caps, ALL_PLATFORMS, &symbol }
 
-__attribute__((used)) __attribute__((noinline)) void register_all() {
-    if (registered) return;
-    registered = 1;
+static const OrzDecoderDescriptor registry[] = {
+#include "decoder_manifest.generated.inc"
+};
 
-    // 只注册有真实实现的解码器（.load != NULL 表示非存根）
-    // stub_decoders.c 提供 __attribute__((weak)) 零值存根，
-    // 未编译的解码器所有函数指针为 NULL。
-
-    if (decoder_openmpt.load)
-        orz_register_decoder("xm,mod,it,s3m,mo3,mtm,fc13,fc14", &decoder_openmpt);
-
-    if (decoder_gme.load)
-        orz_register_decoder("nsf,spc", &decoder_gme);
-
-    if (decoder_asap.load)
-        orz_register_decoder("sap", &decoder_asap);
-
-    if (decoder_sidplayfp.load)
-        orz_register_decoder("sid", &decoder_sidplayfp);
-
-    if (decoder_v2m.load)
-        orz_register_decoder("v2m", &decoder_v2m);
-
-    if (decoder_sc68.load)
-        orz_register_decoder("sc68", &decoder_sc68);
-
-    if (decoder_ym6.load)
-        orz_register_decoder("ym", &decoder_ym6);
-
-    if (decoder_uade_ahx.load)
-        orz_register_decoder("ahx,thx", &decoder_uade_ahx);
-
-    if (decoder_adplug.load)
-        orz_register_decoder("rad,d00,hsc,amd", &decoder_adplug);
-
-    if (decoder_midi.load)
-        orz_register_decoder("mid", &decoder_midi);
-
-    if (decoder_bp.load)
-        orz_register_decoder("bp", &decoder_bp);
+static int available(const OrzDecoderDescriptor *entry) {
+    const Decoder *decoder = entry->decoder;
+    return decoder && decoder->create && decoder->context_get_duration &&
+           decoder->context_get_sample_rate && decoder->context_get_channels &&
+           decoder->context_render && decoder->context_destroy;
 }
+
+uint32_t orz_registry_count(void) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(registry) / sizeof(registry[0])); ++i)
+        if (available(&registry[i])) ++count;
+    return count;
+}
+
+const OrzDecoderDescriptor *orz_registry_at(uint32_t index) {
+    uint32_t current = 0;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(registry) / sizeof(registry[0])); ++i) {
+        if (!available(&registry[i])) continue;
+        if (current++ == index) return &registry[i];
+    }
+    return NULL;
+}
+
+const OrzDecoderDescriptor *orz_registry_find(const char *format) {
+    if (!format) return NULL;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(registry) / sizeof(registry[0])); ++i)
+        if (available(&registry[i]) && strcmp(registry[i].format_id, format) == 0) return &registry[i];
+    return NULL;
+}
+
+// Compatibility symbol retained for one release. Registration is now static.
+__attribute__((used)) __attribute__((noinline)) void register_all(void) {}
 
 // ── orz_audio_can_decode（保留，供 JS 调用）──
 EMSCRIPTEN_KEEPALIVE
 int orz_audio_can_decode(const char *extension) {
-    register_all();
     return orz_can_decode(extension);
 }

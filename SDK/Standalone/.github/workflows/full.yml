@@ -1,0 +1,29 @@
+name: Full Server SDK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  linux-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .wasm-build/cache
+          key: orz-decoder-sources-${{ runner.os }}-${{ hashFiles('script/fetch-decoder-sources.sh') }}
+      - name: Fetch locked decoder sources
+        run: ./script/fetch-decoder-sources.sh
+      - name: Build native decoder archives
+        run: ./script/build-native-libs.sh --strict
+      - name: Build and test full SDK
+        run: ./script/build-sdk.sh linux-x86_64
+      - name: Package full server SDK
+        run: SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" ./script/package-sdk.sh linux-x86_64 "$RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrzAudioCore-linux-full
+          path: |
+            ${{ runner.temp }}/release/*.tar.gz
+            ${{ runner.temp }}/release/*.sha256

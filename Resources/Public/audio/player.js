@@ -396,28 +396,38 @@ class OrzAudioPlayer {
             step = 'copy_data';
             this.wasmKit.HEAPU8.set(data, dataPtr);
 
-            step = 'orz_decoder_create';
-            const decoderHandle = this.wasmKit._orz_decoder_create(fmtPtr, dataPtr, data.length);
+            step = 'orz_decoder_create_memory';
+            const handlePtr = this.wasmKit._malloc(4);
+            this.wasmKit.HEAPU32[handlePtr >> 2] = 0;
+            const createStatus = this.wasmKit._orz_decoder_create_memory(dataPtr, data.length, fmtPtr, 0, handlePtr);
+            const decoderHandle = this.wasmKit.HEAPU32[handlePtr >> 2];
+            this.wasmKit._free(handlePtr);
             this.wasmKit._free(fmtPtr);
             this.wasmKit._free(dataPtr);
             console.log('WASM: decoder handle =', decoderHandle);
 
-            if (!decoderHandle) {
-                throw new Error('WASM: failed to load module');
+            if (createStatus !== 0 || !decoderHandle) {
+                throw new Error(`WASM: failed to load module (status ${createStatus})`);
             }
             this.decoderHandle = decoderHandle;
-            if (subsong > 0 && this.wasmKit._orz_decoder_select_subsong(decoderHandle, subsong) !== 0) {
+            if (subsong > 0 && this.wasmKit._orz_decoder_select_subsong_v1(decoderHandle, subsong) !== 0) {
                 throw new Error(`WASM: subsong ${subsong} is not supported`);
             }
 
-            step = 'get_duration';
-            const duration = this.wasmKit._orz_decoder_get_duration(decoderHandle);
+            step = 'get_stream_info';
+            const infoPtr = this.wasmKit._malloc(64);
+            this.wasmKit.HEAPU8.fill(0, infoPtr, infoPtr + 64);
+            this.wasmKit.HEAPU32[infoPtr >> 2] = 64;
+            this.wasmKit.HEAPU32[(infoPtr + 4) >> 2] = this.wasmKit._orz_abi_version();
+            const infoStatus = this.wasmKit._orz_decoder_get_stream_info(decoderHandle, infoPtr);
+            if (infoStatus !== 0) throw new Error(`WASM: stream info failed (status ${infoStatus})`);
+            const duration = this.wasmKit.HEAPF64[(infoPtr + 16) >> 3];
             console.log('WASM: duration =', duration);
             if (duration > 0) this.duration = duration;
 
-            step = 'get_format_info';
-            const sampleRate = this.wasmKit._orz_decoder_get_sample_rate(decoderHandle) || 44100;
-            const channels = this.wasmKit._orz_decoder_get_channels(decoderHandle) || 2;
+            const sampleRate = this.wasmKit.HEAPU32[(infoPtr + 8) >> 2] || 44100;
+            const channels = this.wasmKit.HEAPU32[(infoPtr + 12) >> 2] || 2;
+            this.wasmKit._free(infoPtr);
             console.log('WASM: sr=', sampleRate, 'ch=', channels);
 
             const totalFrames = Math.ceil(duration * sampleRate);
@@ -666,10 +676,17 @@ class OrzAudioPlayer {
             const chunkPtr = this.wasmKit._malloc(CHUNK_FRAMES * channels * 4);
             if (!chunkPtr) break;
 
-            const frames = this.wasmKit._orz_decoder_render(this.decoderHandle, chunkPtr, CHUNK_FRAMES);
-            if (frames <= 0) {
+            const renderedPtr = this.wasmKit._malloc(4);
+            const status = this.wasmKit._orz_decoder_render_f32(this.decoderHandle, chunkPtr, CHUNK_FRAMES, renderedPtr);
+            const frames = this.wasmKit.HEAPU32[renderedPtr >> 2];
+            this.wasmKit._free(renderedPtr);
+            if (status === 1 || frames <= 0) {
                 this.wasmKit._free(chunkPtr);
                 break;
+            }
+            if (status !== 0) {
+                this.wasmKit._free(chunkPtr);
+                throw new Error(`WASM render failed (status ${status})`);
             }
 
             // 从 WASM heap 拷贝（free 前必须拷贝）
@@ -748,7 +765,7 @@ class OrzAudioPlayer {
 
     _destroyWasmDecoder() {
         if (!this.decoderHandle || !this.wasmKit) return;
-        try { this.wasmKit._orz_decoder_destroy(this.decoderHandle); } catch (_) {}
+        try { this.wasmKit._orz_decoder_destroy_v1(this.decoderHandle); } catch (_) {}
         this.decoderHandle = 0;
     }
 

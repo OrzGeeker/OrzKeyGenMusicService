@@ -1,10 +1,29 @@
 // swift-tools-version:6.0
 import PackageDescription
+import Foundation
+
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let nativeLibraryPath = "\(packageRoot)/Libraries/OrzAudioKit/native"
+let useExternalAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EXTERNAL"] == "1"
+let externalAudioCoreRoot = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_SERVER_DIR"]
+    ?? "\(packageRoot)/.audio-core-sdk/server"
+let audioCoreModule = useExternalAudioCore ? "OrzAudioCoreSDK" : "OrzAudioKitCXX"
+let audioCoreSwiftSettings: [SwiftSetting] = useExternalAudioCore ? [.define("ORZ_AUDIO_CORE_EXTERNAL")] : []
+let audioCoreLinkerSettings: [LinkerSetting] = useExternalAudioCore ? [
+    .unsafeFlags(["-L\(externalAudioCoreRoot)/native/lib", "-Xlinker", "-rpath", "-Xlinker", "\(externalAudioCoreRoot)/native/lib"]),
+    .linkedLibrary("z", .when(platforms: [.linux]))
+] : []
 
 let package = Package(
     name: "MusicService",
     platforms: [
        .macOS(.v13)
+    ],
+    products: [
+        .library(name: "OrzAudioCore", targets: ["OrzAudioKit"]),
+        .library(name: "OrzAudioCoreC", targets: [audioCoreModule]),
+        .executable(name: "OrzAudioCoreSmoke", targets: ["OrzAudioCoreSmoke"]),
+        .executable(name: "OrzMusicService", targets: ["Run"]),
     ],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor.git", from: "4.89.3"),
@@ -20,7 +39,10 @@ let package = Package(
         // Phase 3（进行中）：已启用 openmpt，逐个增补解码器。
         // 解码器目录通过 exclude 控制编译与否，对应的库、头文件路径、
         // 以及链接器标志通过 cSettings/linkerSettings 逐项添加。
-        .target(
+        useExternalAudioCore ? .systemLibrary(
+            name: "OrzAudioCoreSDK",
+            path: "Sources/OrzAudioCoreSDK"
+        ) : .target(
             name: "OrzAudioKitCXX",
             dependencies: [],
             exclude: [],
@@ -57,7 +79,7 @@ let package = Package(
                 .define("ORZ_HAVE_GME"),
             ],
             linkerSettings: [
-                .unsafeFlags(["-L/Users/joker/Developer/OrzPlayer/Service/Libraries/OrzAudioKit/native"]),
+                .unsafeFlags(["-L\(nativeLibraryPath)"]),
                 .linkedLibrary("openmpt"),
                 .linkedLibrary("gme"),
                 .linkedLibrary("sidplayfp"),
@@ -76,8 +98,15 @@ let package = Package(
         .target(
             name: "OrzAudioKit",
             dependencies: [
-                .target(name: "OrzAudioKitCXX"),
-            ]
+                .target(name: audioCoreModule),
+            ],
+            swiftSettings: audioCoreSwiftSettings,
+            linkerSettings: audioCoreLinkerSettings
+        ),
+
+        .executableTarget(
+            name: "OrzAudioCoreSmoke",
+            dependencies: [.target(name: "OrzAudioKit")]
         ),
 
         // ── App ──
@@ -98,7 +127,7 @@ let package = Package(
         .testTarget(name: "AppTests", dependencies: [
             .target(name: "App"),
             .target(name: "OrzAudioKit"),
-            .target(name: "OrzAudioKitCXX"),
+            .target(name: audioCoreModule),
             .product(name: "XCTVapor", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
         ])
