@@ -2,9 +2,9 @@ name: OrzAudioCore
 
 on:
   push:
-    paths: ["Sources/OrzAudioKitCXX/**", "Sources/OrzAudioKit/**", "SDK/**", "Tests/SDK/**", "decoder-manifest.json", "audio-core-sdk.lock.json", "CMakeLists.txt", "CMakePresets.json", "script/generate-decoder-manifest.mjs", "script/update-audio-core-server.sh", "script/verify-audio-core-server-sdk.sh", "script/verify-audio-core-pcm.sh", "script/compare-audio-core-pcm.mjs", ".github/workflows/orz-audio-core.yml"]
+    paths: ["Sources/OrzAudioKitCXX/**", "Sources/OrzAudioKit/**", "SDK/**", "Tests/SDK/**", "decoder-manifest.json", "audio-core-sdk.lock.json", "CMakeLists.txt", "CMakePresets.json", "script/generate-decoder-manifest.mjs", "script/fetch-decoder-sources.sh", "script/build-native-libs.sh", "script/update-audio-core-server.sh", "script/verify-audio-core-server-sdk.sh", "script/verify-audio-core-pcm.sh", "script/compare-audio-core-pcm.mjs", ".github/workflows/orz-audio-core.yml"]
   pull_request:
-    paths: ["Sources/OrzAudioKitCXX/**", "Sources/OrzAudioKit/**", "SDK/**", "Tests/SDK/**", "decoder-manifest.json", "audio-core-sdk.lock.json", "CMakeLists.txt", "CMakePresets.json", "script/generate-decoder-manifest.mjs", "script/update-audio-core-server.sh", "script/verify-audio-core-server-sdk.sh", "script/verify-audio-core-pcm.sh", "script/compare-audio-core-pcm.mjs", ".github/workflows/orz-audio-core.yml"]
+    paths: ["Sources/OrzAudioKitCXX/**", "Sources/OrzAudioKit/**", "SDK/**", "Tests/SDK/**", "decoder-manifest.json", "audio-core-sdk.lock.json", "CMakeLists.txt", "CMakePresets.json", "script/generate-decoder-manifest.mjs", "script/fetch-decoder-sources.sh", "script/build-native-libs.sh", "script/update-audio-core-server.sh", "script/verify-audio-core-server-sdk.sh", "script/verify-audio-core-pcm.sh", "script/compare-audio-core-pcm.mjs", ".github/workflows/orz-audio-core.yml"]
 
 jobs:
   abi-lite:
