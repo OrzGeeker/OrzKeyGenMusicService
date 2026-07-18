@@ -4,7 +4,7 @@
 
 独立仓库已于 2026-07-18 建立 `main`，初始 SDK 提交为 `5fe6d07`。
 
-当前候选版本为 `v1.0.0-rc.7`。OrzMusic 通过根目录
+当前稳定版本为 `v1.0.0`。OrzMusic 通过根目录
 `audio-core-sdk.lock.json` 固定 Web builtin-lite 制品、提交与 SHA-256；更新时运行
 `script/update-audio-core-web.sh`。同一锁文件也固定 Linux full/server 制品，使用
 `script/update-audio-core-server.sh` 安装到被忽略的 `.audio-core-sdk/server` 目录，随后运行
@@ -15,9 +15,9 @@ Linux CI 会对锁定的 Release 制品执行同一套验证，防止应用升�
 `OrzAudioCoreSmoke` 在 CI 中通过该模式创建 Decoder 并渲染有声 MIDI PCM。
 生产 Dockerfile 已使用这一外部模式：构建阶段按 lock 下载并校验 full/server SDK，运行镜像
 只复制 `libOrzAudioCore.so`、decoder manifest、SBOM 和许可证，通过 `LD_LIBRARY_PATH` 加载。
-RC7 同时发布 Linux x86_64 与 arm64 full 制品。安装脚本根据目标环境的 `uname -m`
+1.0.0 同时发布 Linux x86_64 与 arm64 full 制品。安装脚本根据目标环境的 `uname -m`
 自动选择并校验对应 SDK，Docker 默认使用宿主/目标平台的原生 Swift 镜像，不要求 QEMU。
-Linux RC7 的最低运行基线为 Ubuntu 24.04（glibc 2.38），因此构建与运行镜像均使用 noble。
+Linux 1.0.0 的最低运行基线为 Ubuntu 24.04（glibc 2.38），因此构建与运行镜像均使用 noble。
 ARM 开发机可先运行 `docker build --target audio-core-smoke .`，快速验证真实 Linux arm64
 动态链接、SDK 版本和 PCM 输出；完整 Vapor release 可在对应架构上原生构建。
 本地开发暂以默认内嵌模式作为一个发布周期的回退路径。

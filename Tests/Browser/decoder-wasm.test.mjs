@@ -21,7 +21,7 @@ function builtinModule() {
 
 test('builtin WASM is pinned to the immutable OrzAudioCore release', async () => {
     const lock = JSON.parse(fs.readFileSync(path.join(root, 'audio-core-sdk.lock.json'), 'utf8'));
-    assert.equal(lock.version, '1.0.0-rc.7');
+    assert.equal(lock.version, '1.0.0');
     assert.match(lock.serverAssetX86_64, /linux-x86_64\.tar\.gz$/);
     assert.match(lock.serverAssetSha256X86_64, /^[a-f0-9]{64}$/);
     assert.match(lock.serverAssetArm64, /linux-arm64\.tar\.gz$/);
