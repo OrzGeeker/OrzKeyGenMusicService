@@ -4,7 +4,14 @@ import Foundation
 
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let nativeLibraryPath = "\(packageRoot)/Libraries/OrzAudioKit/native"
-let useExternalAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EXTERNAL"] == "1"
+#if os(Linux)
+let platformDefaultsToExternalAudioCore = true
+#else
+let platformDefaultsToExternalAudioCore = false
+#endif
+let forceExternalAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EXTERNAL"] == "1"
+let forceEmbeddedAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EMBEDDED_LEGACY"] == "1"
+let useExternalAudioCore = !forceEmbeddedAudioCore && (platformDefaultsToExternalAudioCore || forceExternalAudioCore)
 let externalAudioCoreRoot = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_SERVER_DIR"]
     ?? "\(packageRoot)/.audio-core-sdk/server"
 let audioCoreModule = useExternalAudioCore ? "OrzAudioCoreSDK" : "OrzAudioKitCXX"

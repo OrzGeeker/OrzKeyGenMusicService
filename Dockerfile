@@ -27,7 +27,7 @@ RUN ./script/update-audio-core-server.sh
 # Fast cross-platform validation target. It links the official Swift binding
 # to the released Linux SDK and renders audible PCM without compiling Vapor.
 FROM build-base AS audio-core-smoke
-RUN ORZ_AUDIO_CORE_EXTERNAL=1 swift build --product OrzAudioCoreSmoke \
+RUN swift build --product OrzAudioCoreSmoke \
     && cp "$(swift build --show-bin-path)/OrzAudioCoreSmoke" /usr/local/bin/OrzAudioCoreSmoke
 ENV LD_LIBRARY_PATH=/build/.audio-core-sdk/server/native/lib
 ENTRYPOINT ["/usr/local/bin/OrzAudioCoreSmoke"]
@@ -36,7 +36,7 @@ FROM build-base AS build
 
 # Build the service against the external ABI-v1 SDK. OrzAudioKitCXX and its
 # third-party decoder archives are not part of this build graph.
-RUN ORZ_AUDIO_CORE_EXTERNAL=1 swift build -c release --product OrzMusicService
+RUN swift build -c release --product OrzMusicService
 
 # Switch to the staging area
 WORKDIR /staging

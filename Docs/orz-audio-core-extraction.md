@@ -10,8 +10,10 @@
 `script/update-audio-core-server.sh` 安装到被忽略的 `.audio-core-sdk/server` 目录，随后运行
 `script/verify-audio-core-server-sdk.sh` 校验版本、ABI consumer 链接调用和公共导出符号。
 Linux CI 会对锁定的 Release 制品执行同一套验证，防止应用升级到无法消费的 SDK 包。
-设置 `ORZ_AUDIO_CORE_EXTERNAL=1` 时，SwiftPM 会让 `OrzAudioKit` 导入系统模块
-`OrzAudioCoreSDK` 并链接 `.audio-core-sdk/server`，不再编译 `OrzAudioKitCXX`。
+Linux 上 SwiftPM 默认让 `OrzAudioKit` 导入系统模块 `OrzAudioCoreSDK` 并链接
+`.audio-core-sdk/server`，不再编译 `OrzAudioKitCXX`；`ORZ_AUDIO_CORE_EXTERNAL=1`
+仍可在其他平台显式选择外部 SDK。`ORZ_AUDIO_CORE_EMBEDDED_LEGACY=1` 仅保留给
+一个发布周期内的双轨诊断与回退。
 `OrzAudioCoreSmoke` 在 CI 中通过该模式创建 Decoder 并渲染有声 MIDI PCM。
 生产 Dockerfile 已使用这一外部模式：构建阶段按 lock 下载并校验 full/server SDK，运行镜像
 只复制 `libOrzAudioCore.so`、decoder manifest、SBOM 和许可证，通过 `LD_LIBRARY_PATH` 加载。
@@ -20,7 +22,8 @@ Linux CI 会对锁定的 Release 制品执行同一套验证，防止应用升�
 Linux 1.0.0 的最低运行基线为 Ubuntu 24.04（glibc 2.38），因此构建与运行镜像均使用 noble。
 ARM 开发机可先运行 `docker build --target audio-core-smoke .`，快速验证真实 Linux arm64
 动态链接、SDK 版本和 PCM 输出；完整 Vapor release 可在对应架构上原生构建。
-本地开发暂以默认内嵌模式作为一个发布周期的回退路径。
+macOS 本地开发暂以默认内嵌模式作为一个发布周期的回退路径；Linux 必须显式设置
+`ORZ_AUDIO_CORE_EMBEDDED_LEGACY=1` 才会重新编译旧内嵌核心。
 CI 还会从音乐子模块选择 22 种格式的固定代表曲目，分别通过当前内嵌核心与锁定 SDK
 渲染前 5 秒 float32 PCM。`script/verify-audio-core-pcm.sh` 对采样率、声道、帧数和
 逐样本误差进行比较，并发布 `pcm-conformance.json`；THX 暂与 AHX 共用解码器但缺少独立样本。

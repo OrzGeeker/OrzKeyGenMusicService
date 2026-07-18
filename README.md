@@ -99,9 +99,12 @@ swift run Run
 # 构建原生静态库（首次需要）
 ./script/build-native-libs.sh
 
-# 使用锁定的独立服务端 SDK（Linux / 生产模式）
+# 使用锁定的独立服务端 SDK（Linux 默认模式）
 ./script/update-audio-core-server.sh
-ORZ_AUDIO_CORE_EXTERNAL=1 swift build -c release
+swift build -c release
+
+# 仅在双轨诊断时显式启用旧内嵌核心
+ORZ_AUDIO_CORE_EMBEDDED_LEGACY=1 swift build
 
 # Docker 部署
 docker compose up --build -d

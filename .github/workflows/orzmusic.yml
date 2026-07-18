@@ -35,7 +35,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      ORZ_AUDIO_CORE_EXTERNAL: "1"
       LD_LIBRARY_PATH: ${{ github.workspace }}/.audio-core-sdk/server/native/lib
     steps:
       - uses: actions/checkout@v4
