@@ -25,4 +25,11 @@ test -s "$work/package/wasm/orz_audio_builtin.js"
 test -s "$work/package/wasm/orz_audio_builtin.wasm"
 cp "$work/package/wasm/orz_audio_builtin.js" "$OUT/orz_audio_builtin.js"
 cp "$work/package/wasm/orz_audio_builtin.wasm" "$OUT/orz_audio_builtin.wasm"
+
+# Full WASM bundle (all third-party decoders: openmpt, gme, sidplayfp, etc.)
+if [ -s "$work/package/wasm/orz_audio.js" ] && [ -s "$work/package/wasm/orz_audio.wasm" ]; then
+  cp "$work/package/wasm/orz_audio.js" "$OUT/orz_audio.js"
+  cp "$work/package/wasm/orz_audio.wasm" "$OUT/orz_audio.wasm"
+fi
+
 echo "Installed OrzAudioCore $(read_lock version) web assets ($expected)"
