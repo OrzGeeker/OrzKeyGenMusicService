@@ -3,24 +3,12 @@ import PackageDescription
 import Foundation
 
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-let nativeLibraryPath = "\(packageRoot)/Libraries/OrzAudioKit/native"
-#if os(Linux) || os(macOS)
-let platformDefaultsToExternalAudioCore = true
-#else
-let platformDefaultsToExternalAudioCore = false
-#endif
-let forceExternalAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EXTERNAL"] == "1"
-let forceEmbeddedAudioCore = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_EMBEDDED_LEGACY"] == "1"
-let useExternalAudioCore = !forceEmbeddedAudioCore && (platformDefaultsToExternalAudioCore || forceExternalAudioCore)
-let externalAudioCoreRoot = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_SERVER_DIR"]
+let serverSdkRoot = ProcessInfo.processInfo.environment["ORZ_AUDIO_CORE_SERVER_DIR"]
     ?? "\(packageRoot)/.audio-core-sdk/server"
-let audioCoreModule = useExternalAudioCore ? "OrzAudioCoreSDK" : "OrzAudioKitCXX"
-let audioCoreSwiftSettings: [SwiftSetting] = useExternalAudioCore ? [.define("ORZ_AUDIO_CORE_EXTERNAL")] : []
-let appTestExcludes = useExternalAudioCore ? ["DecoderInvariantTests.swift"] : []
-let audioCoreLinkerSettings: [LinkerSetting] = useExternalAudioCore ? [
-    .unsafeFlags(["-L\(externalAudioCoreRoot)/native/lib", "-Xlinker", "-rpath", "-Xlinker", "\(externalAudioCoreRoot)/native/lib"]),
+let audioCoreLinkerSettings: [LinkerSetting] = [
+    .unsafeFlags(["-L\(serverSdkRoot)/native/lib", "-Xlinker", "-rpath", "-Xlinker", "\(serverSdkRoot)/native/lib"]),
     .linkedLibrary("z", .when(platforms: [.linux]))
-] : []
+]
 
 let package = Package(
     name: "MusicService",
@@ -29,7 +17,7 @@ let package = Package(
     ],
     products: [
         .library(name: "OrzAudioCore", targets: ["OrzAudioKit"]),
-        .library(name: "OrzAudioCoreC", targets: [audioCoreModule]),
+        .library(name: "OrzAudioCoreC", targets: ["OrzAudioCoreSDK"]),
         .executable(name: "OrzAudioCoreSmoke", targets: ["OrzAudioCoreSmoke"]),
         .executable(name: "OrzMusicService", targets: ["Run"]),
     ],
@@ -41,74 +29,20 @@ let package = Package(
         .package(url: "https://github.com/vapor/leaf.git", from: "4.2.4"),
     ],
     targets: [
-        // ── C/C++ 解码器引擎 ──
-        // 纯 C/C++ target，按格式分类组织。
-        // 同一份源码同时用于 WASM 浏览器端和原生服务端解码。
-        // Phase 3（进行中）：已启用 openmpt，逐个增补解码器。
-        // 解码器目录通过 exclude 控制编译与否，对应的库、头文件路径、
-        // 以及链接器标志通过 cSettings/linkerSettings 逐项添加。
-        useExternalAudioCore ? .systemLibrary(
+        // ── OrzAudioCore SDK (system library from release artifact) ──
+        // Installed and checksum-verified by script/update-audio-core-server.sh.
+        .systemLibrary(
             name: "OrzAudioCoreSDK",
             path: "Sources/OrzAudioCoreSDK"
-        ) : .target(
-            name: "OrzAudioKitCXX",
-            dependencies: [],
-            exclude: [],
-            cSettings: [
-                .headerSearchPath("include"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/ahx2play"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
-                .define("ORZ_HAVE_OPENMPT"),
-                .define("ORZ_HAVE_GME"),
-            ],
-            cxxSettings: [
-                .headerSearchPath("include"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sidplayfp"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/adplug"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/binio"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/sc68"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/v2m_headers/v2m"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/ahx2play"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/include"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined"),
-                .headerSearchPath("../../Libraries/OrzAudioKit/thirdparty/uade_combined/frontends/include"),
-                .define("ORZ_HAVE_OPENMPT"),
-                .define("ORZ_HAVE_GME"),
-            ],
-            linkerSettings: [
-                .unsafeFlags(["-L\(nativeLibraryPath)"]),
-                .linkedLibrary("openmpt"),
-                .linkedLibrary("gme"),
-                .linkedLibrary("sidplayfp"),
-                .linkedLibrary("adplug"),
-                .linkedLibrary("binio"),
-                .linkedLibrary("asap"),
-                .linkedLibrary("sc68"),
-                .linkedLibrary("v2m"),
-                .linkedLibrary("ahx2play"),
-            ]
         ),
 
         // ── Audio Engine (Swift) ──
-        // 调用 OrzAudioKitCXX 的 C 解码器进行原生解码，
-        // 标准格式走 AVFoundation / ffmpeg CLI 降级。
+        // Calls OrzAudioCoreSDK via the stable ABI v1 Swift binding.
         .target(
             name: "OrzAudioKit",
             dependencies: [
-                .target(name: audioCoreModule),
+                .target(name: "OrzAudioCoreSDK"),
             ],
-            swiftSettings: audioCoreSwiftSettings,
             linkerSettings: audioCoreLinkerSettings
         ),
 
@@ -135,9 +69,9 @@ let package = Package(
         .testTarget(name: "AppTests", dependencies: [
             .target(name: "App"),
             .target(name: "OrzAudioKit"),
-            .target(name: audioCoreModule),
+            .target(name: "OrzAudioCoreSDK"),
             .product(name: "XCTVapor", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
-        ], exclude: appTestExcludes, swiftSettings: audioCoreSwiftSettings, linkerSettings: audioCoreLinkerSettings)
+        ], linkerSettings: audioCoreLinkerSettings)
     ]
 )

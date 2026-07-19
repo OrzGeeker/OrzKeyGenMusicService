@@ -1,9 +1,5 @@
 import Foundation
-#if ORZ_AUDIO_CORE_EXTERNAL
 import OrzAudioCoreSDK
-#else
-import OrzAudioKitCXX
-#endif
 
 public struct DecoderStreamInfo: Sendable, Equatable {
     public let sampleRate: Int

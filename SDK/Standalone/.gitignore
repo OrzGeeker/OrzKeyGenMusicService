@@ -1,8 +1,0 @@
-.build/
-.cmake-build/
-.swiftpm/
-.wasm-build/
-Libraries/OrzAudioKit/native/*.a
-node_modules/
-SDK/Web/dist/
-.DS_Store

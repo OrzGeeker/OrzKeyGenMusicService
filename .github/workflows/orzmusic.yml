@@ -53,5 +53,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./script/update-audio-core-server.sh
-      - run: ./script/verify-audio-core-server-sdk.sh
       - run: swift run OrzAudioCoreSmoke

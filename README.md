@@ -12,29 +12,16 @@ OrzMusic 是一个现代化的芯片音乐/模块音乐播放服务，支持 28 
 
 ## 架构
 
-解码能力通过版本化的 **OrzAudioCore ABI v1** 下沉。当前仓库同时提供 C/C++ CMake package、Swift Package 产品和 TypeScript/WASM 封装；详细接口与发布规则见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)，独立仓库迁移门禁见 [Docs/orz-audio-core-extraction.md](Docs/orz-audio-core-extraction.md)。
+解码能力通过版本化的 **OrzAudioCore ABI v1** 提供。当前仓库消费已发布的 OrzAudioCore v1.2.3 SDK（含全部 11 个解码器），不再内嵌 C 解码器源码。详细接口说明见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)。
 
 ```
-同一份 C 源码 → WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
-
-Sources/
-├── OrzAudioKitCXX/       ← 纯 C/C++ 解码器，按格式分类
-│   ├── openmpt/          ← libopenmpt（xm/mod/it/s3m/...）
-│   ├── gme/              ← Game Music Emu（nsf/spc）
-│   ├── sidplayfp/        ← libsidplayfp（sid）
-│   ├── adplug/           ← AdPlug（rad/d00/hsc/amd）
-│   ├── ym6/              ← YM2149 自包含模拟器（ym）
-│   ├── midi/             ← wavetable 合成器（mid）
-│   ├── sc68/             ← libsc68（sc68）
-│   ├── asap/             ← ASAP（sap）
-│   ├── uade/             ← ahx2play（ahx）
-│   ├── v2m/              ← v2m-player（v2m）
-│   ├── dispatch/         ← 注册表 + 调度
-│   └── helpers/          ← C++ 异常安全包装
-│
-├── OrzAudioKit/           ← 纯 Swift，解码编排
-│
-└── App/                  ← Vapor 服务
+OrzAudioCore SDK（已发布，校验锁定）
+  ├── 原生库（服务端，.dylib/.so）
+  └── WASM（浏览器端，orz_audio_builtin.js/.wasm）
+              ↓
+      OrzAudioKit（纯 Swift ABI 封装）
+              ↓
+    App（Vapor web 服务，含 CAS 存储）  
 ```
 
 ## 支持的格式
@@ -89,22 +76,13 @@ CAS 中保存的是导入时的原始音频文件，路径由 SHA-256 决定。�
 ## 快速启动
 
 ```bash
-# 原生构建（macOS）
+# 原生构建（macOS/Linux，自动使用锁定的 OrzAudioCore v1.2.3 SDK）
+./script/update-audio-core-server.sh   # 首次需要，安装服务端 SDK
 swift build
 swift run Run
 
-# 构建 WASM 解码器（前置：安装 Emscripten SDK）
-./script/build-wasm.sh
-
-# 构建原生静态库（首次需要）
-./script/build-native-libs.sh
-
-# 使用锁定的独立原生 SDK（Linux 与 Apple Silicon macOS 默认模式）
-./script/update-audio-core-server.sh
-swift build -c release
-
-# 仅在双轨诊断时显式启用旧内嵌核心
-ORZ_AUDIO_CORE_EMBEDDED_LEGACY=1 swift build
+# 安装 Web WASM SDK（浏览器解码）
+./script/update-audio-core-web.sh
 
 # Docker 部署
 docker compose up --build -d
@@ -127,5 +105,5 @@ docker compose up --build -d
 - **后端**: Vapor 4 (Swift 6.0)
 - **数据库**: PostgreSQL + Fluent ORM
 - **前端**: Alpine.js + Worker + SharedArrayBuffer + AudioWorklet/WASM
-- **WASM 编译**: Emscripten 6.0
-- **解码器**: OrzAudioCore ABI v1；Docker 使用校验过的独立 full SDK，本地保留源码回退构建
+- **WASM 编译**: OrzAudioCore SDK（含 Emscripten 编译的 WASM bundle）
+- **解码器**: OrzAudioCore ABI v1.0，校验锁定的外置 SDK

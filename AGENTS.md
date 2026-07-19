@@ -4,7 +4,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## 解码能力
 
-同一份 C 源码 → WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
+OrzAudioCore v1.2.3 作为外置 SDK 消费。解码逻辑封装在 `OrzAudioCoreSDK`（C system library），
+通过稳定 ABI v1 暴露。同一份 SDK 编译为 WASM（浏览器端）和原生库（服务端），零 brew/apt 依赖。
 
 ## Build & Test
 
@@ -15,7 +16,7 @@ swift build
 # Build (release)
 swift build -c release
 
-# Run tests (tests use SQLite in-memory, no Postgres needed)
+# Run tests
 swift test
 
 # Run a single test
@@ -27,118 +28,59 @@ swift run Run
 docker compose up --build -d
 ```
 
-## WASM Build
+## SDK 更新
 
 ```bash
-# Build OrzAudioKit WASM binary (for browser-side decoding)
-./script/build-wasm.sh
+# 安装/更新服务端 SDK（从 Release 下载，含校验）
+./script/update-audio-core-server.sh
 
-# Build native decoder .a libraries (zero brew/apt dependency)
-./script/build-native-libs.sh --only-openmpt
+# 安装/更新 Web WASM SDK
+./script/update-audio-core-web.sh
 ```
 
-## Architecture — Unified C Decoder + Swift Orchestration
+## Architecture
 
 ### Target Dependency Chain
 
 ```
-App (Vapor) → OrzAudioKit (Swift) → OrzAudioKitCXX (C/C++)
+App (Vapor) → OrzAudioKit (Swift) → OrzAudioCoreSDK (C system library)
 ```
 
-- **OrzAudioKitCXX** — pure C/C++ target. Same source code compiles to both WASM (browser via emscripten) and native (server via SPM). Decoders organized by format category under `Sources/OrzAudioKitCXX/`.
-- **OrzAudioKit** — pure Swift target. Wraps C decoders via `CDecoderBridge.swift`, falls back to ffmpeg CLI for unsupported formats.
-- **App** — Vapor web server. Contains routes, models, migrations, CAS storage, scanner.
+- **OrzAudioCoreSDK** — 已发布的 OrzAudioCore v1.2.3 system library target。包含所有 C 解码器（openmpt、gme、sidplayfp、adplug、ym6、midi、sc68、asap、ahx2play、v2m、bp）。
+  通过 `audio-core-sdk.lock.json` 锁定版本和校验和，由 CI 自动下载。
+- **OrzAudioKit** —纯 Swift target。封装 `OrzAudioCoreSDK` 的稳定 ABI，对不支持格式 fallback 到 ffmpeg CLI。
+- **App** — Vapor web 服务器。包含路由、模型、迁移、CAS 存储、扫描器。
 
-### C Decoder Architecture
+### 三种播放策略
 
-All C decoders implement a unified `Decoder` interface (`include/audio_engine.h`):
-
-```c
-typedef struct {
-    const char *name;
-    int  (*load)(const unsigned char *data, int len);
-    double (*get_duration)();
-    int   (*get_sample_rate)();
-    int   (*get_channels)();
-    int   (*render)(float *out, int frames);  // stereo float32 interleaved
-    void  (*destroy)();
-} Decoder;
-```
-
-Public calls use the versioned `orz_audio_core.h` ABI (`orz_decoder_create_memory`, `orz_decoder_render_f32`, and related functions). An immutable descriptor table generated from `decoder-manifest.json` maps formats to instance vtables. The old `orz_load/orz_render` API is hidden, deprecated compatibility code for one release cycle only.
-
-### Decoder Categories
-
-| Directory | Format | Library | Self-contained |
-|-----------|--------|---------|:---:|
-| `openmpt/` | xm, mod, it, s3m, mo3, mtm, fc13, fc14 | libopenmpt 0.8.0 | ✗ |
-| `gme/` | nsf, spc | game-music-emu 0.6.3 | ✗ |
-| `sidplayfp/` | sid | libsidplayfp 3.0.2 | ✗ |
-| `adplug/` | rad, d00, hsc, **amd** | adplug 2.4 + libbinio 1.5 | ✗ |
-| `ym6/` | ym | Built-in YM2149 emulator | ✅ |
-| `midi/` | mid | Built-in wavetable synth (sine/square/saw/triangle) | ✅ |
-| `sc68/` | sc68 | libsc68 | ✅ |
-| `asap/` | sap | ASAP | ✅ |
-| `uade/` | ahx | ahx2play (8bitbubsy C port) | ✅ |
-| `v2m/` | v2m | v2m-player | ✅ |
-| `bp/` | bp (SoundMon V.2) | Built-in Paula/sample+synth engine | ✅ |
-
-### Static Libraries
-
-Pre-compiled .a files and third-party headers live in `Libraries/OrzAudioKit/`:
-
-```
-Libraries/OrzAudioKit/
-├── native/          ← .a files (gitignored, built by build-native-libs.sh)
-│   ├── libopenmpt.a
-│   ├── libgme.a
-│   ├── libsidplayfp.a
-│   ├── libadplug.a
-│   └── libbinio.a
-└── thirdparty/      ← Library headers (committed to git)
-    ├── libopenmpt/
-    ├── gme/
-    ├── sidplayfp/
-    ├── adplug/
-    └── binio/
-```
-
-`Package.swift` resolves the repository-local native library directory from the package path. The portable SDK build and installation entry point is CMake; SwiftPM remains the OrzMusic integration build.
-
-### Three Play Strategies
-
-- **`directFile`** — Browser `<audio>` plays natively (mp3, ogg, flac, m4a, aac)
-- **`wasmDecode`** — Browser Worker/WASM decodes → SharedArrayBuffer → AudioWorklet (xm, mod, it, sid, mid, ym, bp, ...)
-- **`serverDecode`** — Server-side native decoder/ffmpeg fallback → WAV cache (sc68, wav with ADPCM/GSM)
+- **`directFile`** — 浏览器 `<audio>` 原生播放（mp3, ogg, flac, m4a, aac）
+- **`wasmDecode`** — Worker/WASM 解码 → SharedArrayBuffer → AudioWorklet（xm, mod, it, sid, mid, ym, bp, ...）
+- **`serverDecode`** — 服务器端原生解码 / ffmpeg 回退 → WAV 缓存（sc68, wav with ADPCM/GSM）
 
 ### Content-Addressed Storage (CAS)
 
-Files stored by SHA-256 hash: `{CAS_ROOT}/{sha256[:2]}/{sha256}.{ext}` (default `./data/music/`).
+文件按 SHA-256 哈希存储：`{CAS_ROOT}/{sha256[:2]}/{sha256}.{ext}`（默认 `./data/music/`）。
 
-DB stores only `sha256` + `fileFormat` (no `filePath`). `CasStorageService.swift` handles store/resolve/delete.
+数据库只存 `sha256` + `fileFormat`（不存路径）。`CasStorageService.swift` 负责 store/resolve/delete。
 
-### Key Files
+### 关键文件
 
 | File | Purpose |
 |------|---------|
-| `Package.swift` | SPM targets + C library linkage |
-| `Sources/OrzAudioKitCXX/include/orz_audio_core.h` | Stable, versioned public C ABI |
-| `decoder-manifest.json` | Single source of truth for formats and capabilities |
-| `Sources/OrzAudioKitCXX/dispatch/audio_engine.c` | Immutable generated format registry |
-| `Sources/OrzAudioKitCXX/dispatch/orz_dispatch.c` | ABI handles, lifecycle, probing and rendering |
-| `Sources/OrzAudioKit/AudioDecoder.swift` | Official Swift ABI wrapper |
-| `Sources/OrzAudioKit/CDecoderBridge.swift` | OrzMusic compatibility facade over `AudioDecoder` |
-| `Sources/OrzAudioKit/AudioFormat.swift` | Play strategy definitions |
-| `Sources/App/Services/CasStorageService.swift` | Content-addressed file storage |
-| `script/build-wasm.sh` | WASM build (emscripten, ~4.5MB wasm) |
-| `script/build-native-libs.sh` | Native static lib build (clang) |
-| `Resources/Public/audio/player.js` | Frontend WASM decode + playback |
+| `Package.swift` | SPM targets + OrzAudioCoreSDK system library linkage |
+| `audio-core-sdk.lock.json` | OrzAudioCore 版本锁定 + 制品校验和 |
+| `Sources/OrzAudioKit/AudioDecoder.swift` | 官方 Swift ABI 封装 |
+| `Sources/OrzAudioKit/AudioEngine.swift` | 流策略解析 + 解码编排 |
+| `Sources/App/Services/CasStorageService.swift` | 内容寻址存储 |
+| `script/update-audio-core-server.sh` | 服务端 SDK 安装/更新 |
+| `script/update-audio-core-web.sh` | Web WASM SDK 安装/更新 |
+| `Resources/Public/audio/player.js` | 前端 WASM 解码 + 播放 |
 
 ## Frontend
 
-- Single-page app with `Resources/Views/player.leaf` (Alpine.js + Leaf template)
-- UI brand is **OrzMusic**; the sidebar combines the abstract O/wave logo with the brand title.
-- Format navigation counts come from `GET /api/songs/formats`; search accepts an optional `format` filter.
-- The unsaved queue is page memory; saved playlists are persisted in the server database and currently are not user-scoped.
-- WASM bridge in `Resources/Public/audio/orz_audio.js` (generated by emscripten)
-- Playback loads the ABI-v1 WASM runtime in a Worker; the Worker calls `orz_decoder_*` and feeds the AudioWorklet ring buffer.
+- 单页应用 `Resources/Views/player.leaf`（Alpine.js + Leaf 模板）
+- 品牌为 **OrzMusic**；侧边栏显示抽象 O/波浪 Logo + 品牌标题
+- 格式导航曲目数来自 `GET /api/songs/formats`；搜索支持可选 `format` 过滤
+- 未保存队列在页面内存中；保存的播放列表持久化在服务端数据库，当前无用户隔离
+- WASM bridge 在 `Resources/Public/audio/orz_audio_builtin.js`（由 OrzAudioCore SDK 提供）
+- 播放加载 ABI-v1 WASM runtime 到 Worker；Worker 调用 `orz_decoder_*` 并写入 AudioWorklet ring buffer

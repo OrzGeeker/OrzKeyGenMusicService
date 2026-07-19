@@ -34,8 +34,7 @@ ENTRYPOINT ["/usr/local/bin/OrzAudioCoreSmoke"]
 
 FROM build-base AS build
 
-# Build the service against the external ABI-v1 SDK. OrzAudioKitCXX and its
-# third-party decoder archives are not part of this build graph.
+# Build the service against the immutable OrzAudioCore v1.2.3 ABI-v1 SDK.
 RUN swift build -c release --product OrzMusicService
 
 # Switch to the staging area

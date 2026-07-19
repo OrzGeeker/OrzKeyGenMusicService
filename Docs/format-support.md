@@ -106,36 +106,23 @@
 ## 架构
 
 ```
-同一份 C 源码 → 两种编译方式：
-
-  Sources/OrzAudioKitCXX/
-    ├── dispatch/         ← 调度 + 注册表
-    ├── openmpt/          ← libopenmpt 包装器
-    ├── gme/              ← GME 包装器
-    ├── sidplayfp/        ← libsidplayfp 包装器
-    ├── adplug/           ← AdPlug 包装器
-    ├── sc68/             ← libsc68 包装器
-    ├── asap/             ← ASAP 包装器
-    ├── uade/             ← ahx2play 包装器
-    ├── v2m/              ← v2m-player 包装器
-    ├── ym6/              ← YM2149 自包含模拟器
-    ├── midi/             ← wavetable 合成器
-    ├── bp/               ← SoundMon V.2 / Paula 解码器
-    └── helpers/          ← C++ 异常安全包装
-
-         ↓ Emscripten           ↓ clang + SPM
-    orz_audio.wasm        libOrzAudioKit.a（静态链接）
-    （浏览器端）              （服务端原生）
+OrzAudioCore SDK v1.2.3（校验锁定的外置 SDK）
+  ├── 原生库（服务端 .dylib/.so）
+  └── WASM bundle（浏览器端 orz_audio_builtin.js/.wasm）
+              ↓
+    Sources/OrzAudioKit/（纯 Swift ABI 封装）
+              ↓
+    Sources/App/（Vapor web 服务）
 ```
 
 ## 构建说明
 
 ```bash
-# WASM 构建（浏览器端）
-./script/build-wasm.sh
+# 安装服务端 SDK
+./script/update-audio-core-server.sh
 
-# 原生静态库（服务端）
-./script/build-native-libs.sh
+# 安装 Web WASM SDK
+./script/update-audio-core-web.sh
 
 # 服务端构建
 swift build
