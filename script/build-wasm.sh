@@ -550,7 +550,10 @@ build_libsidplayfp() {
         inc_path="$(dirname "$inc_h_path")"  # 升一级到包含 sidplayfp/ 的目录
     fi
 
-    echo "$lib_path|$inc_path"
+    # sidlite builder 头文件（sidlite.h），也是通过 fetch-decoder-sources 下载的
+    local sidlite_inc="$src_dir/src/builders/sidlite-builder"
+
+    echo "$lib_path|$inc_path|$sidlite_inc"
 }
 
 # ------------------------------------------------------------------
