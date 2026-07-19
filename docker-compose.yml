@@ -81,7 +81,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - cas_data:/data/music
-      - ${KEYGEN_DIR:-./Resources/Public/keygenmusic}:/sources/keygen:ro
+      - ${KEYGEN_DIR:-./keygenmusic}:/sources/keygen:ro
     ports:
       - '8081:8081'
     command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8081"]

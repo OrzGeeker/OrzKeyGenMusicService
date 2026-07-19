@@ -67,7 +67,7 @@ function renderV1(wasm, decoder, frames, channels = 2) {
 test('WASM exposes ABI v1 and owns decoder input memory', async () => {
     const wasm = await builtinModule();
     assert.equal(wasm._orz_abi_version(), 0x10000);
-    const tune = fs.readFileSync(path.join(root, 'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
+    const tune = fs.readFileSync(path.join(root, 'keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
     const decoder = createV1(wasm, tune, 'ym');
     try {
         const info = wasm._malloc(64);
@@ -90,7 +90,7 @@ test('remote RC builtin and embedded full core produce matching YM PCM', async (
     const full = await createFullModule({
         wasmBinary: fs.readFileSync(path.join(root, 'Resources/Public/audio/orz_audio.wasm'))
     });
-    const tune = fs.readFileSync(path.join(root, 'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
+    const tune = fs.readFileSync(path.join(root, 'keygenmusic/KEYGENMUSiC MusicPack/EDGE/EDGE - ChessTiger 2007 UCI kg.ym'));
     const builtinDecoder = createV1(builtin, tune, 'ym');
     const fullDecoder = createV1(full, tune, 'ym');
     try {
@@ -115,7 +115,7 @@ test('full WASM V2M decoder reports seconds and renders audible PCM', async () =
     const wasm = await createModule({ wasmBinary });
     const tune = fs.readFileSync(path.join(
         root,
-        'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/iOTA/iOTA - ACDSee Pro 5.3 build 168 crk.v2m'
+        'keygenmusic/KEYGENMUSiC MusicPack/iOTA/iOTA - ACDSee Pro 5.3 build 168 crk.v2m'
     ));
 
     const format = wasm._malloc(4);
@@ -150,8 +150,8 @@ test('full WASM converts older V2M synth layouts instead of rendering silence', 
         wasmBinary: fs.readFileSync(path.join(root, 'Resources/Public/audio/orz_audio.wasm'))
     });
     for (const relativePath of [
-        'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/kZ/kZ - DeskSoft HardCopy Pro 3.2.1 crk.v2m',
-        'Resources/Public/keygenmusic/KEYGENMUSiC MusicPack/DimitarSerg/DimitarSerg - Resource Builder 3.0.3.25 kg.v2m'
+        'keygenmusic/KEYGENMUSiC MusicPack/kZ/kZ - DeskSoft HardCopy Pro 3.2.1 crk.v2m',
+        'keygenmusic/KEYGENMUSiC MusicPack/DimitarSerg/DimitarSerg - Resource Builder 3.0.3.25 kg.v2m'
     ]) {
         const tune = fs.readFileSync(path.join(root, relativePath));
         const format = wasm._malloc(4);
