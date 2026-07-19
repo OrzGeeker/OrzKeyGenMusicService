@@ -32,9 +32,51 @@
             ],
             "name": "All Routes",
             "program": "${workspaceFolder:Service}/.build/debug/Run",
-            "args": ["routes"],
+            "args": [
+                "routes"
+            ],
             "cwd": "${workspaceFolder:Service}",
             "preLaunchTask": "swift: Build Debug Run"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "name": "Debug OrzAudioCoreSmoke",
+            "target": "OrzAudioCoreSmoke",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug OrzAudioCoreSmoke"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "name": "Release OrzAudioCoreSmoke",
+            "target": "OrzAudioCoreSmoke",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release OrzAudioCoreSmoke"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "name": "Debug OrzMusicService",
+            "target": "OrzMusicService",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug OrzMusicService"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Service}",
+            "name": "Release OrzMusicService",
+            "target": "OrzMusicService",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release OrzMusicService"
         }
     ]
 }

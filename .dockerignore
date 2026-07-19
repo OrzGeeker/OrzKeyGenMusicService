@@ -2,9 +2,6 @@
 .swiftpm/
 .git/
 .github/
-.cmake-build/
-.wasm-build/
 .audio-core-sdk/
 data/
 Resources/Public/keygenmusic/
-Libraries/OrzAudioKit/native/
