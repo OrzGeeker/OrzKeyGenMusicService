@@ -12,7 +12,7 @@ OrzMusic 是一个现代化的芯片音乐/模块音乐播放服务，支持 28 
 
 ## 架构
 
-解码能力通过版本化的 **OrzAudioCore ABI v1** 提供。当前仓库消费已发布的 OrzAudioCore v1.2.3 SDK（含全部 11 个解码器），不再内嵌 C 解码器源码。详细接口说明见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)。
+解码能力通过版本化的 **OrzAudioCore ABI v1** 提供。当前仓库消费已发布的 OrzAudioCore v1.2.4 SDK（含全部 11 个解码器），不再内嵌 C 解码器源码。详细接口说明见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)。
 
 ```
 OrzAudioCore SDK（已发布，校验锁定）
@@ -76,7 +76,7 @@ CAS 中保存的是导入时的原始音频文件，路径由 SHA-256 决定。�
 ## 快速启动
 
 ```bash
-# 原生构建（macOS/Linux，自动使用锁定的 OrzAudioCore v1.2.3 SDK）
+# 原生构建（macOS/Linux，自动使用锁定的 OrzAudioCore v1.2.4 SDK）
 ./script/update-audio-core-server.sh   # 首次需要，安装服务端 SDK
 swift build
 swift run Run

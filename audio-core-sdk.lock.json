@@ -1,15 +1,15 @@
 {
   "repository": "https://github.com/OrzGeeker/OrzAudioCore",
-  "version": "1.2.3",
-  "tag": "v1.2.3",
-  "commit": "6236a5ac88a769ce376a81b2454922340a080667",
-  "webAsset": "orzmusic-audio-core-1.2.3.tgz",
-  "webAssetSha256": "4432140f8b0e9b70691213f92643f6584d3c2963bd49e8bde4ea84a72a1c79a8",
-  "serverAssetX86_64": "OrzAudioCore-1.2.3-linux-x86_64.tar.gz",
-  "serverAssetSha256X86_64": "d05ebf9cc95da3c029b003a59bf8c5831201ceac4d6f6b8095caab80998edad8",
-  "serverAssetArm64": "OrzAudioCore-1.2.3-linux-arm64.tar.gz",
-  "serverAssetSha256Arm64": "ff175a67b71530bfdcbaa04cb66f06580ef13769560a173d47aeb3323dd5981f",
-  "nativeAssetMacosArm64": "OrzAudioCore-1.2.3-macos-arm64.tar.gz",
-  "nativeAssetSha256MacosArm64": "e71c6245394bfca8939fb1da0257cf31b9cdb9a9188d15bd03ac9e8a36cc522c",
-  "profile": "builtin-lite"
+  "version": "1.2.4",
+  "tag": "v1.2.4",
+  "commit": "d6c2265f9bb1d9a31902480e4d86d3f0f3105342",
+  "webAsset": "orzmusic-audio-core-1.2.4.tgz",
+  "webAssetSha256": "5f54c6ac0f35979a74485074a8d90645021060df948ef49f22bba60dc5ab2337",
+  "serverAssetX86_64": "OrzAudioCore-1.2.4-linux-x86_64.tar.gz",
+  "serverAssetSha256X86_64": "2a7ef8014b5064ed307b4350a6de787e219ed07b0c164510f85600b9c628512f",
+  "serverAssetArm64": "OrzAudioCore-1.2.4-linux-arm64.tar.gz",
+  "serverAssetSha256Arm64": "fac70e1ca3d14983f891c3019ebac54b34e2635469267cf6350727c42af886e9",
+  "nativeAssetMacosArm64": "OrzAudioCore-1.2.4-macos-arm64.tar.gz",
+  "nativeAssetSha256MacosArm64": "663bfb69c32ffb879dc76e2459230e1d3c0992fde0693d9230ba6faa464c1714",
+  "profile": "full"
 }

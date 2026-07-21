@@ -21,7 +21,7 @@ function builtinModule() {
 
 test('builtin WASM is pinned to the immutable OrzAudioCore release', async () => {
     const lock = JSON.parse(fs.readFileSync(path.join(root, 'audio-core-sdk.lock.json'), 'utf8'));
-    assert.equal(lock.version, '1.2.3');
+    assert.equal(lock.version, '1.2.4');
     assert.match(lock.nativeAssetMacosArm64, /macos-arm64\.tar\.gz$/);
     assert.match(lock.nativeAssetSha256MacosArm64, /^[a-f0-9]{64}$/);
     assert.match(lock.serverAssetX86_64, /linux-x86_64\.tar\.gz$/);
@@ -84,7 +84,7 @@ test('WASM exposes ABI v1 and owns decoder input memory', async () => {
     } finally { wasm._orz_decoder_destroy_v1(decoder); }
 });
 
-test('remote RC builtin and embedded full core produce matching YM PCM', async () => {
+test('released builtin and full cores produce matching YM PCM', async () => {
     const builtin = await builtinModule();
     const createFullModule = require(path.join(root, 'Resources/Public/audio/orz_audio.js'));
     const full = await createFullModule({
@@ -105,6 +105,24 @@ test('remote RC builtin and embedded full core produce matching YM PCM', async (
     } finally {
         builtin._orz_decoder_destroy_v1(builtinDecoder);
         full._orz_decoder_destroy_v1(fullDecoder);
+    }
+});
+
+test('full WASM includes AdPlug and renders audible HSC PCM', async () => {
+    const createModule = require(path.join(root, 'Resources/Public/audio/orz_audio.js'));
+    const wasm = await createModule({
+        wasmBinary: fs.readFileSync(path.join(root, 'Resources/Public/audio/orz_audio.wasm'))
+    });
+    const tune = fs.readFileSync(path.join(
+        root,
+        'keygenmusic/KEYGENMUSiC MusicPack/LEGEND/LEGEND - Dark Legions intro.hsc'
+    ));
+    const decoder = createV1(wasm, tune, 'hsc');
+    try {
+        const pcm = renderV1(wasm, decoder, 44_100);
+        assert.ok(pcm.some(sample => Math.abs(sample) > 0.001), 'AdPlug HSC output remained silent');
+    } finally {
+        wasm._orz_decoder_destroy_v1(decoder);
     }
 });
 

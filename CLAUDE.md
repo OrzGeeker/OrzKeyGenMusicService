@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 解码能力
 
-OrzAudioCore v1.2.3 作为外置 SDK 消费。同一份 SDK 编译为 WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
+OrzAudioCore v1.2.4 作为外置 SDK 消费。同一份 SDK 编译为 WASM 浏览器端 + 原生服务端，零 brew/apt 依赖。
 
 ## Build & Test
 
@@ -45,7 +45,7 @@ docker compose up --build -d
 App (Vapor) → OrzAudioKit (Swift) → OrzAudioCoreSDK (C system library from release artifact)
 ```
 
-- **OrzAudioCoreSDK** — 已发布的 OrzAudioCore v1.2.3 system library target。通过 `audio-core-sdk.lock.json` 锁定版本和 SHA-256 校验和，由 CI 从 GitHub Release 自动下载。
+- **OrzAudioCoreSDK** — 已发布的 OrzAudioCore v1.2.4 system library target。通过 `audio-core-sdk.lock.json` 锁定版本和 SHA-256 校验和，由 CI 从 GitHub Release 自动下载。
 - **OrzAudioKit** — 纯 Swift target。封装 `OrzAudioCoreSDK` 的稳定 ABI v1（`AudioDecoder.swift`），对不支持格式 fallback 到 ffmpeg CLI。
 - **App** — Vapor web 服务器。包含路由、模型、迁移、CAS 存储、扫描器。
 

@@ -14,6 +14,7 @@ on:
       - "docker-compose.yml"
       - "audio-core-sdk.lock.json"
       - "script/update-audio-core-server.sh"
+      - "script/update-audio-core-web.sh"
       - ".github/workflows/orzmusic.yml"
   pull_request:
     paths:
@@ -28,6 +29,7 @@ on:
       - "docker-compose.yml"
       - "audio-core-sdk.lock.json"
       - "script/update-audio-core-server.sh"
+      - "script/update-audio-core-web.sh"
       - ".github/workflows/orzmusic.yml"
 
 jobs:
@@ -43,6 +45,7 @@ jobs:
         with: {node-version: 22}
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: ./script/update-audio-core-server.sh
+      - run: ./script/update-audio-core-web.sh
       - run: swift test
       - run: node --test Tests/Browser/*.test.mjs
       - run: docker compose config --quiet

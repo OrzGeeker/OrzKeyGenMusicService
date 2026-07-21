@@ -106,7 +106,7 @@
 ## 架构
 
 ```
-OrzAudioCore SDK v1.2.3（校验锁定的外置 SDK）
+OrzAudioCore SDK v1.2.4（校验锁定的外置 SDK）
   ├── 原生库（服务端 .dylib/.so）
   └── WASM bundle（浏览器端 orz_audio_builtin.js/.wasm）
               ↓
