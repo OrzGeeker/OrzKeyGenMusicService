@@ -23,7 +23,7 @@ swift test
 swift test --filter testPlayStrategy
 
 # Run server (requires PostgreSQL)
-swift run Run
+swift run OrzMusicService
 # Or via Docker:
 docker compose up --build -d
 ```

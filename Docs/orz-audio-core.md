@@ -41,3 +41,7 @@ swift build --product OrzAudioCore
 - 新格式、能力或向后兼容字段：minor。
 - decoder 修复：patch。
 - OrzMusic 通过 `audio-core-sdk.lock.json` 固定依赖 SDK 版本；升级后旧缓存因 fingerprint 变化自动失效，可通过依赖版本直接回滚。
+
+## 后续任务
+
+不阻塞 OrzMusic 当前功能的 SDK 独立发布增强项，已拆分到 [OrzAudioCore 后续任务清单](orz-audio-core-backlog.md)。这些任务可逐项交给 5.5 轻度模型推进，主要覆盖 ABI 报告、消费者示例、安全测试、性能基线、SBOM、iOS/Android/Windows 平台验证和 OrzMusic 升级流程文档。

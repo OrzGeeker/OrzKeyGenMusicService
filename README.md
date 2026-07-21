@@ -12,7 +12,7 @@ OrzMusic 是一个现代化的芯片音乐/模块音乐播放服务，支持 28 
 
 ## 架构
 
-解码能力通过版本化的 **OrzAudioCore ABI v1** 提供。当前仓库消费已发布的 OrzAudioCore v1.2.4 SDK（含全部 11 个解码器），不再内嵌 C 解码器源码。详细接口说明见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)。
+解码能力通过版本化的 **OrzAudioCore ABI v1** 提供。当前仓库消费已发布的 OrzAudioCore v1.2.4 SDK（含全部 11 个解码器），不再内嵌 C 解码器源码。详细接口说明见 [Docs/orz-audio-core.md](Docs/orz-audio-core.md)，非阻塞后续任务见 [Docs/orz-audio-core-backlog.md](Docs/orz-audio-core-backlog.md)。
 
 ```
 OrzAudioCore SDK（已发布，校验锁定）
@@ -76,17 +76,52 @@ CAS 中保存的是导入时的原始音频文件，路径由 SHA-256 决定。�
 ## 快速启动
 
 ```bash
-# 原生构建（macOS/Linux，自动使用锁定的 OrzAudioCore v1.2.4 SDK）
-./script/update-audio-core-server.sh   # 首次需要，安装服务端 SDK
-swift build
-swift run Run
+# 安装/更新服务端 native SDK 与浏览器 WASM SDK
+make setup
 
-# 安装 Web WASM SDK（浏览器解码）
-./script/update-audio-core-web.sh
+# 原生构建与启动（需要本机 PostgreSQL）
+make build
+make run
+
+# 查看/停止/重启服务
+make status
+make stop
+make restart
+
+# 本地开发服务扫描（服务由 make run 提供）
+make scan-local SOURCE=/absolute/path/to/music
 
 # Docker 部署
-docker compose up --build -d
+make docker-up
+
+# Docker 扫描服务（默认把 ./keygenmusic 挂载为 /sources/keygen）
+make scan-docker
+make scan-docker-run
 ```
+
+常用 Makefile 入口：
+
+| 命令 | 用途 |
+|:-----|:-----|
+| `make setup` | 安装/更新 OrzAudioCore native SDK 与 Web/WASM SDK |
+| `make sdk-server` | 只更新服务端 native SDK |
+| `make sdk-web` | 只更新浏览器 WASM SDK |
+| `make status` | 查看 8080/8081 端口占用和 Docker 服务状态 |
+| `make run` | 本机启动 Vapor 服务 |
+| `make stop` | 停止本机 OrzMusic 服务和 Docker 服务 |
+| `make restart` | 停止本机 OrzMusic 服务后重新启动 |
+| `make scan-local SOURCE=/path` | 调用本机 `8080` 服务扫描本机路径 |
+| `make docker-up` | 通过 Docker 启动 PostgreSQL 与服务 |
+| `make docker-restart` | 重启 Docker 服务栈 |
+| `make scan-docker` | 启动 Docker 扫描服务，监听 `8081` |
+| `make scan-docker-run` | 调用 Docker 扫描服务扫描容器路径，默认 `/sources/keygen` |
+| `make test` | 运行 Swift、浏览器和 Docker compose 配置检查 |
+
+扫描路径说明：
+
+- 本地开发模式使用本机路径，例如 `make scan-local SOURCE=/Users/joker/Music/keygenmusic`。
+- Docker 模式使用容器路径，默认 `make scan-docker-run` 扫描 `/sources/keygen`。
+- Docker 扫描服务默认把本机 `./keygenmusic` 只读挂载为容器内 `/sources/keygen`；需要换目录时可设置 `KEYGEN_DIR=/path/to/music make scan-docker`。
 
 ## API
 
