@@ -13,7 +13,7 @@ struct SongResponse: Content {
     let rawUrl: String
     let playStrategy: String
 
-    init(song: Song, baseURL: String) {
+    init(song: Song) {
         self.id = song.id ?? UUID()
         self.title = song.title
         if let artist = song.artist {
@@ -29,8 +29,9 @@ struct SongResponse: Content {
         self.fileFormat = song.fileFormat
         self.fileSize = song.fileSize
         self.duration = song.duration
-        self.streamUrl = "\(baseURL)/api/songs/\(song.id?.uuidString ?? "")/stream"
-        self.rawUrl = "\(baseURL)/api/songs/\(song.id?.uuidString ?? "")/raw"
+        let songId = song.id?.uuidString ?? ""
+        self.streamUrl = "/api/songs/\(songId)/stream"
+        self.rawUrl = "/api/songs/\(songId)/raw"
         self.playStrategy = AudioFormat(rawValue: song.fileFormat)?.playStrategy.rawValue ?? "serverDecode"
     }
 }

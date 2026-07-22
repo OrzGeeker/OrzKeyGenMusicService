@@ -65,8 +65,7 @@ struct PlaylistController: RouteCollection {
         }
 
         let songs = try await playlist.$songs.get(on: req.db)
-        let baseURL = "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
-        let songResponses = songs.map { SongResponse(song: $0, baseURL: baseURL) }
+        let songResponses = songs.map { SongResponse(song: $0) }
 
         return PlaylistResponse(playlist: playlist, songs: songResponses)
     }

@@ -58,9 +58,8 @@ struct ArtistController: RouteCollection {
             .sort(\.$title, .ascending)
             .paginate(for: req)
 
-        let baseURL = "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
         return .init(
-            items: page.items.map { SongResponse(song: $0, baseURL: baseURL) },
+            items: page.items.map { SongResponse(song: $0) },
             metadata: page.metadata
         )
     }

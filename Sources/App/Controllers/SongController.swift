@@ -54,9 +54,8 @@ struct SongController: RouteCollection {
         let page = try await query.paginate(for: req)
         try await backfillDurations(for: page.items, req: req)
 
-        let baseURL = baseURL(from: req)
         return .init(
-            items: page.items.map { SongResponse(song: $0, baseURL: baseURL) },
+            items: page.items.map { SongResponse(song: $0) },
             metadata: page.metadata
         )
     }
@@ -82,13 +81,12 @@ struct SongController: RouteCollection {
             .filter(.sql(unsafeRaw: "LOWER(title) LIKE '%\(safeQuery.lowercased())%' OR LOWER(\"artists\".\"name\") LIKE '%\(safeQuery.lowercased())%'"))
         let songs = try await query.limit(50).all()
 
-        let baseURL = baseURL(from: req)
         for song in songs {
             try await song.$artist.load(on: req.db)
             try await song.$album.load(on: req.db)
         }
         try await backfillDurations(for: songs, req: req)
-        return songs.map { SongResponse(song: $0, baseURL: baseURL) }
+        return songs.map { SongResponse(song: $0) }
     }
 
     /// Lazily repairs historical rows scanned before native decoder metadata
@@ -142,7 +140,7 @@ struct SongController: RouteCollection {
         try await song.$artist.load(on: req.db)
         try await song.$album.load(on: req.db)
 
-        return SongResponse(song: song, baseURL: baseURL(from: req))
+        return SongResponse(song: song)
     }
 
     /// GET /api/songs/:id/stream — 音频流
@@ -173,7 +171,7 @@ struct SongController: RouteCollection {
 
         switch strategy {
         case .directFile(let path, let mime):
-            var res = try await req.fileio.asyncStreamFile(at: path)
+            let res = try await req.fileio.asyncStreamFile(at: path)
             res.headers.replaceOrAdd(name: .contentType, value: mime)
             return res
 
@@ -183,7 +181,7 @@ struct SongController: RouteCollection {
         case .serverDecode(let path, let fmt):
             // 尝试从转码缓存读取（避免重复 ffmpeg）
             let cachePath = try await cachedDecode(originalPath: path, sha256: song.sha256, format: fmt, subsong: subsong, cas: req.application.casStorage)
-            var res = try await req.fileio.asyncStreamFile(at: cachePath)
+            let res = try await req.fileio.asyncStreamFile(at: cachePath)
             res.headers.replaceOrAdd(name: .contentType, value: "audio/wav")
             return res
         }
@@ -232,9 +230,5 @@ struct SongController: RouteCollection {
             subsong: subsong
         )
         return cachePath
-    }
-
-    private func baseURL(from req: Request) -> String {
-        "\(req.headers.first(name: "x-forwarded-proto") ?? "http")://\(req.headers.first(name: "host") ?? "localhost:8080")"
     }
 }
