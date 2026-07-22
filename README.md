@@ -39,8 +39,8 @@ README 只保留项目入口信息。易变化或需要精确口径的内容维�
 |:-----|:-----|
 | [Docs/format-support.md](Docs/format-support.md) | 当前支持格式、格式数量、播放策略和存储/缓存口径。 |
 | [Docs/orz-audio-core.md](Docs/orz-audio-core.md) | OrzAudioCore SDK ABI、能力边界、版本与发布规则。 |
-| [Docs/orz-audio-core-backlog.md](Docs/orz-audio-core-backlog.md) | 不阻塞当前功能的 SDK 后续任务清单。 |
 | [Docs/migration.md](Docs/migration.md) | Docker/native 服务迁移流程与验收清单。 |
+| [Docs/backlog/](Docs/backlog/) | 待推进完成的计划、任务清单与可独立执行的实施项。 |
 | [AGENTS.md](AGENTS.md) | 智能体协作、项目结构和维护约定。 |
 
 ## 快速启动

@@ -197,8 +197,8 @@
 后续可以直接把下面模板交给轻度模型：
 
 ```text
-请领取 docs/orz-audio-core-backlog.md 中的任务 <任务编号>。
-先阅读 README.md、docs/orz-audio-core.md、docs/orz-audio-core-backlog.md 和相关脚本。
+请领取 Docs/backlog/orz-audio-core-backlog.md 中的任务 <任务编号>。
+先阅读 README.md、Docs/orz-audio-core.md、Docs/backlog/orz-audio-core-backlog.md 和相关脚本。
 只实现该任务范围内的内容，保留无关工作区改动。
 完成后运行与任务相关的最小验证，并更新任务文档中的状态或备注。
 不要发布 SDK，除非该任务明确要求并已通过本地验证。
