@@ -6,6 +6,7 @@
 |:-----|:-----|
 | [release-upgrade-plan.md](release-upgrade-plan.md) | 单机 Docker 版本发布、停机升级、回滚方案与可独立执行的实施任务。 |
 | [orz-audio-core-backlog.md](orz-audio-core-backlog.md) | 不阻塞当前功能的 OrzAudioCore SDK 后续任务清单。 |
+| [player-visualizer-location-plan.md](player-visualizer-location-plan.md) | 播放页全息声场、当前曲目定位的实施方案与低成本模型任务拆分。 |
 
 推进约定：
 
