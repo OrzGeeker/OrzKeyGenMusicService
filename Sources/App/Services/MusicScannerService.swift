@@ -127,8 +127,13 @@ public struct MusicScannerService {
                 song.$artist.id = artist?.id
                 song.duration = await extractDuration(filePath: fullPath, format: ext)
 
-                // 尝试生成音频指纹（可选，静默跳过失败）
-                if let fp = try? await generateFingerprint(filePath: fullPath) {
+                // 尝试生成音频指纹（可选，静默跳过失败）。
+                //
+                // 指纹工具链依赖 fpcalc/ffmpeg，更适合常规音频容器。对 XM/MOD/V2M/SC68
+                // 这类模块/芯片格式，ffmpeg 往往不支持或可能长时间挂起；扫描去重已经由
+                // CAS SHA-256 完成，因此这些格式不需要额外生成感知指纹。
+                if shouldGenerateAudioFingerprint(format: ext),
+                   let fp = try? await generateFingerprint(filePath: fullPath) {
                     song.audioFingerprint = fp
                 }
 
@@ -224,11 +229,24 @@ public struct MusicScannerService {
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 filePath
-            ])
+            ], timeout: 5)
             guard let duration = Double(result), duration > 0 else { return nil }
             return duration
         } catch {
             return nil
+        }
+    }
+
+    func shouldGenerateAudioFingerprint(format: String) -> Bool {
+        guard let audioFormat = AudioFormat.from(fileExtension: format) else { return false }
+        switch audioFormat {
+        case .mp3, .ogg, .wav, .flac, .m4a, .aac:
+            return true
+        case .xm, .mod, .it, .s3m, .mo3, .mtm,
+             .mid, .nsf, .spc, .sid, .sc68,
+             .hsc, .ym, .ahx, .amd, .fc13, .fc14,
+             .sap, .rad, .d00, .v2m, .bp:
+            return false
         }
     }
 

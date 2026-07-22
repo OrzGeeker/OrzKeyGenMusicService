@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make help)",
+      "Bash(make audit-fingerprints)",
+      "Bash(make audit-fingerprints ALL=1)",
+      "Bash(swift test)",
+      "Bash(swift test --filter *)",
+      "Bash(node --test Tests/Browser/*.test.mjs)",
+      "Bash(git status --short)",
+      "Bash(git diff -- *)",
+      "Bash(git diff --cached -- *)"
+    ],
+    "ask": [
+      "Bash(make run)",
+      "Bash(make scan-local *)",
+      "Bash(make docker-up)",
+      "Bash(make docker-restart)",
+      "Bash(make clean)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(.claude/settings.local.json)",
+      "Bash(rm -rf *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+      "Bash(dropdb *)",
+      "Bash(createdb *)"
+    ]
+  }
+}

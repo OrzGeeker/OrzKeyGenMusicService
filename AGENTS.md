@@ -22,6 +22,10 @@ swift test
 # Run a single test
 swift test --filter testPlayStrategy
 
+# Audit production audio fingerprint generation policy
+make audit-fingerprints
+make audit-fingerprints ALL=1
+
 # Run server (requires PostgreSQL)
 swift run OrzMusicService
 # Or via Docker:
@@ -37,6 +41,27 @@ docker compose up --build -d
 # 安装/更新 Web WASM SDK
 ./script/update-audio-core-web.sh
 ```
+
+## Agent Collaboration
+
+`AGENTS.md` 是本仓库跨智能体共享的项目知识源。Claude Code 通过 `CLAUDE.md` 的 `@AGENTS.md` 导入复用这些内容；不要在多个 agent 配置文件里复制同一段架构、命令或策略说明。
+
+### Shared configuration
+
+- `AGENTS.md`：共享项目知识、架构约束、构建/测试命令、扫描/指纹策略。
+- `CLAUDE.md`：Claude Code 入口，只保留 Claude 专属路由说明，并导入 `AGENTS.md`。
+- `.claude/settings.json`：可提交的 Claude Code 项目级权限/安全规则。
+- `.claude/settings.local.json`：个人本机权限，已 gitignore，不要提交。
+- `.claude/agents/`：Claude Code 项目级 subagents，用于架构审查、解码审计、前端审查和验证执行。
+
+### Claude Code subagents
+
+- `orz-architect`：架构评审、OrzAudioCore SDK 边界、跨平台复用和迁移顺序。
+- `orz-decoder-auditor`：解码、扫描、CAS、音频指纹、格式统计和播放策略审计。
+- `orz-frontend-reviewer`：播放器 UI、快捷键、队列、进度条、音量和可访问性审查。
+- `orz-verifier`：运行聚焦测试/构建/审计命令并汇总结果。
+
+Subagents 上下文隔离；委派任务时要明确目标、相关文件和期望验证命令。默认让 subagents 做只读审查或验证，主 agent 负责最终代码修改，除非用户明确要求并行实现。
 
 ## Architecture
 
@@ -63,6 +88,15 @@ App (Vapor) → OrzAudioKit (Swift) → OrzAudioCoreSDK (C system library)
 
 数据库只存 `sha256` + `fileFormat`（不存路径）。`CasStorageService.swift` 负责 store/resolve/delete。
 
+### Audio Fingerprints
+
+- 音频指纹只在扫描/上传创建新 `Song` 时尝试生成；二次扫描遇到相同 SHA-256 会跳过，不会补生成。
+- CAS SHA-256 是当前可靠去重主线；`audio_fingerprint` 是未来感知去重/相似匹配增强字段，不影响播放、格式分类或 CAS 存储。
+- 生产策略只对容器音频生成指纹：`mp3`、`ogg`、`wav`、`flac`、`m4a`、`aac`。
+- 模块/芯片/合成格式（如 `xm/mod/it/v2m/sc68/ym/sid/ahx/bp`）跳过指纹生成，避免 `fpcalc/ffmpeg` 对不支持格式长时间挂起。
+- `make audit-fingerprints` 按生产策略抽样验证；`ALL=1` 只全量验证会生成指纹的容器音频；`FORCE_ALL_FORMATS=1` 才强制跑所有格式，仅用于诊断超时保护。
+- 外部进程调用应保留超时保护。
+
 ### 关键文件
 
 | File | Purpose |
@@ -71,7 +105,10 @@ App (Vapor) → OrzAudioKit (Swift) → OrzAudioCoreSDK (C system library)
 | `audio-core-sdk.lock.json` | OrzAudioCore 版本锁定 + 制品校验和 |
 | `Sources/OrzAudioKit/AudioDecoder.swift` | 官方 Swift ABI 封装 |
 | `Sources/OrzAudioKit/AudioEngine.swift` | 流策略解析 + 解码编排 |
+| `Sources/OrzAudioKit/AudioFingerprinter.swift` | 容器音频指纹生成（fpcalc/ffmpeg/SHA-256 fallback） |
+| `Sources/OrzFingerprintAudit/main.swift` | 指纹策略审计 CLI |
 | `Sources/App/Services/CasStorageService.swift` | 内容寻址存储 |
+| `Sources/App/Services/MusicScannerService.swift` | 扫描入库、CAS 去重、生产指纹策略 |
 | `script/update-audio-core-server.sh` | 服务端 SDK 安装/更新 |
 | `script/update-audio-core-web.sh` | Web WASM SDK 安装/更新 |
 | `Resources/Public/audio/player.js` | 前端 WASM 解码 + 播放 |

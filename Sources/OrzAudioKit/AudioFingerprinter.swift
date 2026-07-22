@@ -87,7 +87,7 @@ public class AudioFingerprinter: @unchecked Sendable {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["fpcalc", "-raw", "-length", "30", filePath]
 
-        let result = try await ProcessRunner.run(process)
+        let result = try await ProcessRunner.run(process, timeout: 10)
 
         guard result.terminationStatus == 0,
               let output = result.stdoutString
@@ -117,7 +117,7 @@ public class AudioFingerprinter: @unchecked Sendable {
             "-f", "wav", outputPath
         ]
 
-        let result = try await ProcessRunner.run(process)
+        let result = try await ProcessRunner.run(process, timeout: 20)
 
         guard result.terminationStatus == 0 else {
             throw FingerprintError.ffmpegFailed("ffmpeg convert to WAV failed")

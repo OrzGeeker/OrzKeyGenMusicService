@@ -26,6 +26,7 @@ help:
 	@echo "  make stop           Stop local OrzMusic services and Docker services"
 	@echo "  make restart        Stop then run the local Vapor service"
 	@echo "  make scan-local     Trigger scan on the local service (SOURCE=/path/to/music)"
+	@echo "  make audit-fingerprints Validate production fingerprint policy (ALL=1 for eligible full scan)"
 	@echo "  make test           Run Swift and browser tests"
 	@echo "  make swift-test     Run Swift tests"
 	@echo "  make browser-test   Run browser/WASM tests"
@@ -118,6 +119,15 @@ scan-local:
 	curl -fsS -X POST "http://127.0.0.1:$(APP_PORT)/api/scan" \
 		-H "Content-Type: application/json" \
 		-d '{"sources":["$(SOURCE)"]}'
+
+.PHONY: audit-fingerprints
+audit-fingerprints:
+	@args='--source "$(SOURCE)"'; \
+	if [ "$(ALL)" = "1" ]; then args="$$args --all"; else args="$$args --limit-per-format \"$${LIMIT_PER_FORMAT:-1}\""; fi; \
+	if [ "$(FORCE_ALL_FORMATS)" = "1" ]; then args="$$args --force-all-formats"; fi; \
+	if [ -n "$(FORMATS)" ]; then args="$$args --formats \"$(FORMATS)\""; fi; \
+	echo "swift run OrzFingerprintAudit $$args"; \
+	eval swift run OrzFingerprintAudit "$$args"
 
 .PHONY: test
 test: swift-test browser-test docker-config

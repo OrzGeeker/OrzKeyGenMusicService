@@ -1,132 +1,103 @@
 # OrzMusic 格式支持状态
 
-> 最后更新：2026-07-18
+> 最后校验：2026-07-22
+> 口径：以当前 OrzMusic 后端 `AudioFormat`、`AudioEngine`、前端 SDK manifest 和本地 `/api/songs/formats` 返回为准。
 
-## 总览
+## 当前结论
 
-- **支持格式：** 28 / 28 种音频格式 ✅
-- **当前库总文件数：** 2963 首（数量由扫描结果决定，页面通过 API 实时显示）
-- **源码编译，零系统依赖**
+- **OrzMusic 应用层支持格式：27 种**，由 `Sources/OrzAudioKit/AudioFormat.swift` 决定。
+- **当前本地音乐库：5533 首**，来自 `/api/songs/formats` 的实时统计；这个数字随扫描源和数据库内容变化，不是固定能力上限。
+- **当前本地库中有曲目的格式：25 种**；`flac`、`m4a`、`aac` 已支持但当前库内数量为 0。
+- **OrzAudioCore SDK v1.2.4 是外置解码 SDK**，OrzMusic 不再直接编译内嵌 decoder 源码。
+- **SDK/Web manifest 目前包含 `thx`**，但 OrzMusic 后端 `AudioFormat` 尚未声明 `thx`，因此当前应用层扫描、上传、API 分类和播放策略不把 `thx` 视为已支持格式。
 
----
+## 当前库内格式数量
 
-## 格式支持详情
+> 以下数量是当前开发库快照，用来校验页面分类与数据库是否一致；不是项目长期承诺值。
 
-### 模块跟踪器 — libopenmpt
+| 分类 | 格式 | 当前数量 | 默认播放策略 | 说明 |
+|:-----|:-----|--------:|:-------------|:-----|
+| 模块音乐 | `xm` | 3396 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `mod` | 1093 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `it` | 254 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `s3m` | 94 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `mo3` | 5 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `mtm` | 1 | `wasmDecode` | OrzAudioCore / libopenmpt 路径 |
+| 模块音乐 | `fc13` | 4 | `wasmDecode` | Future Composer 1.3 |
+| 模块音乐 | `fc14` | 16 | `wasmDecode` | Future Composer 1.4 |
+| 复古/芯片 | `nsf` | 5 | `wasmDecode` | Game Music Emu 路径 |
+| 复古/芯片 | `spc` | 3 | `wasmDecode` | Game Music Emu 路径 |
+| 复古/芯片 | `sid` | 48 | `wasmDecode` | libsidplayfp 路径 |
+| 复古/芯片 | `sc68` | 120 | `serverDecode` | 服务端原生解码，避免浏览器端 68K 解释器性能问题 |
+| 复古/芯片 | `ym` | 21 | `wasmDecode` | YM2149 路径 |
+| 复古/芯片 | `sap` | 32 | `wasmDecode` | ASAP 路径 |
+| 复古/芯片 | `ahx` | 63 | `wasmDecode` | ahx2play 路径 |
+| 合成/FM | `mid` | 110 | `wasmDecode` | 浏览器端使用 WASM runtime；服务端缓存路径可走标准解码 fallback |
+| 合成/FM | `v2m` | 130 | `wasmDecode` | v2m-player 路径 |
+| 合成/FM | `bp` | 4 | `wasmDecode` | SoundMon BP 解码器 |
+| 合成/FM | `rad` | 13 | `wasmDecode` | AdPlug 路径 |
+| 合成/FM | `d00` | 10 | `wasmDecode` | AdPlug 路径 |
+| 合成/FM | `hsc` | 18 | `wasmDecode` | AdPlug 路径 |
+| 合成/FM | `amd` | 17 | `wasmDecode` | AdPlug 路径 |
+| 常规音频 | `mp3` | 15 | `directFile` | 浏览器原生播放 |
+| 常规音频 | `ogg` | 41 | `directFile` | 浏览器原生播放 |
+| 常规音频 | `wav` | 20 | 自动判定 | PCM/IEEE float 直放；压缩 WAV 走服务端解码 |
+| 常规音频 | `flac` | 0 | `directFile` | 已支持，当前库无样本 |
+| 常规音频 | `m4a` | 0 | `directFile` | 已支持，当前库无样本 |
+| 常规音频 | `aac` | 0 | `directFile` | 已支持，当前库无样本 |
 
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `xm` | 1680 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `mod` | 664 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `it` | 144 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `s3m` | 54 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `mo3` | 5 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `mtm` | 1 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `fc13` | 2 | libopenmpt 0.8.0 | ✅ | ✅ |
-| `fc14` | 12 | libopenmpt 0.8.0 | ✅ | ✅ |
+## 播放策略口径
 
-### 游戏主机仿真 — Game Music Emu
+OrzMusic 目前有三条播放路径：
 
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `nsf` | 5 | GME 0.6.3 | ✅ | ✅ |
-| `spc` | 2 | GME 0.6.3 | ✅ | ✅ |
+| 策略 | 适用格式 | 实际行为 |
+|:-----|:---------|:---------|
+| `directFile` | `mp3`、`ogg`、`flac`、`m4a`、`aac`、PCM/IEEE float `wav` | 服务端返回 CAS 原始文件，由浏览器 `<audio>` 原生播放。 |
+| `wasmDecode` | `xm`、`mod`、`it`、`s3m`、`mo3`、`mtm`、`fc13`、`fc14`、`nsf`、`spc`、`sid`、`ym`、`sap`、`ahx`、`amd`、`rad`、`d00`、`hsc`、`v2m`、`bp`、`mid` | 服务端返回原始文件，浏览器 Worker 加载 OrzAudioCore WASM，通过 ABI v1 `orz_decoder_*` 接口解码并写入 AudioWorklet ring buffer。 |
+| `serverDecode` | `sc68`、压缩编码 `wav` | 服务端使用 OrzAudioCore 原生库或 ffmpeg fallback 生成 PCM WAV 缓存，再交给浏览器播放。 |
 
-### Commodore 64 — libsidplayfp
+> `AudioFormat.playStrategy` 中 `wav` 的默认值是 `serverDecode`，但 `AudioEngine.resolveStreamStrategy()` 会读取 WAV 头：PCM/IEEE float 会被优化为 `directFile`，ADPCM/GSM 等压缩 WAV 才走 `serverDecode`。
 
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `sid` | 33 | libsidplayfp 3.0.2 | ✅ | ✅ |
-
-### Atari ST — libsc68 / YM2149
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `sc68` | 36 | libsc68 | ✅ | ✅ |
-| `ym` | 16 | ym6_impl.c (YM2149) | ✅ | ✅ |
-
-### AdLib OPL2/3 — AdPlug
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `rad` | 11 | adplug + libbinio | ✅ | ✅ |
-| `d00` | 3 | adplug + libbinio | ✅ | ✅ |
-| `hsc` | 12 | adplug + libbinio | ✅ | ✅ |
-| **`amd`** | **17** | **adplug + libbinio** | ✅ | **✅ 新修复** |
-
-### Atari POKEY — ASAP
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `sap` | 32 | ASAP | ✅ | ✅ |
-
-### Amiga — ahx2play（替代 UAE 全仿真）
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| **`ahx`** | **41** | **ahx2play（8bitbubsy C 移植）** | ✅ | **✅ 新替换** |
-
-### Farbrausch V2 — v2m-player
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `v2m` | 87 | v2m-player | ✅ | ✅ |
-
-### MIDI — wavetable 合成器
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| **`mid`** | **54** | **wavetable（sine/square/saw/triangle）** | ✅ | **✅ 自包含** |
-
-### SoundMon V.2 — 内置 Paula 引擎
-
-| 格式 | 文件数 | 解码器 | WASM | SPM 原生 |
-|:-----|------:|:-------|:----:|:--------:|
-| `bp` | 3 | 内置 SoundMon V.2 sample/synth 解码器 | ✅ | ✅ |
-
-### 浏览器原生播放（directFile）
-
-| 格式 | 文件数 | 策略 | 备注 |
-|:-----|------:|:-----|:-----|
-| `mp3` | 6 | directFile | 浏览器原生 |
-| `ogg` | 35 | directFile | 浏览器原生 |
-| `flac` | 0 | directFile | 浏览器原生 |
-| `m4a` | 0 | directFile | 浏览器原生 |
-| `aac` | 0 | directFile | 浏览器原生 |
-
-### 服务端转码（serverDecode）
-
-| 格式 | 文件数 | 策略 | 备注 |
-|:-----|------:|:-----|:------|
-| `wav` | 8 | serverDecode | PCM/float 可直接返回；ADPCM/GSM 转为 PCM WAV |
-| `sc68` | 36 | serverDecode | libsc68 可编译到 WASM，但当前产品默认由服务端原生解码以保证实时性与稳定性 |
-
----
-
-## 架构
+## SDK 与应用层边界
 
 ```
-OrzAudioCore SDK v1.2.4（校验锁定的外置 SDK）
-  ├── 原生库（服务端 .dylib/.so）
-  └── WASM bundle（浏览器端 orz_audio_builtin.js/.wasm）
+OrzAudioCore SDK v1.2.4（外置 SDK，校验锁定）
+  ├── Native library（服务端）
+  └── WASM bundle（浏览器）
               ↓
-    Sources/OrzAudioKit/（纯 Swift ABI 封装）
+Sources/OrzAudioKit/（Swift ABI 封装）
               ↓
-    Sources/App/（Vapor web 服务）
+Sources/App/（Vapor API、CAS、扫描、缓存）
+              ↓
+Resources/Public/audio/（Worker、AudioWorklet、播放器 UI）
 ```
 
-## 构建说明
+- OrzAudioCore 负责格式探测、元数据和 PCM 解码能力。
+- OrzMusic 负责 CAS、数据库、扫描、搜索、播放策略、WAV 缓存、播放队列和 UI。
+- `directFile` / `wasmDecode` / `serverDecode` 是 OrzMusic 产品策略，不是 OrzAudioCore 公共 ABI 的一部分。
+- 前端格式展示由 SDK manifest 与前端常规音频配置组合而来；后端入库/播放能力仍以 `AudioFormat` 为准。
+
+## 构建与 SDK 更新
 
 ```bash
-# 安装服务端 SDK
-./script/update-audio-core-server.sh
+# 查看项目常用命令
+make help
 
-# 安装 Web WASM SDK
-./script/update-audio-core-web.sh
+# 安装或更新服务端 Native SDK
+make sdk-server
 
-# 服务端构建
+# 安装或更新 Web WASM SDK
+make sdk-web
+
+# 构建服务端
 swift build
 ```
+
+OrzAudioCore SDK 版本和校验信息由 `audio-core-sdk.lock.json` 锁定。更新 SDK 后，应同时验证：
+
+- `Resources/Public/audio/decoder-manifest.generated.js` 是否与 SDK release manifest 一致。
+- `Sources/OrzAudioKit/AudioFormat.swift` 是否声明了应用层要支持的格式。
+- 前端格式分类、后端 `/api/songs/formats`、搜索 `format` 参数是否保持同一格式 ID 口径。
 
 ## 播放流程
 
@@ -136,23 +107,45 @@ swift build
 SongController.stream()
   ↓
 AudioEngine.resolveStreamStrategy()
-  ├─ directFile   → 返回原始文件给 <audio>
-  ├─ wasmDecode   → 返回原始文件，Worker/WASM 实时解码
-  └─ serverDecode → 服务端原生解码或 ffmpeg 回退，生成 PCM WAV 缓存
+  ├─ directFile   → 返回 CAS 原始文件给 <audio>
+  ├─ wasmDecode   → 返回 CAS 原始文件，Worker/WASM 实时解码
+  └─ serverDecode → 服务端解码为 PCM WAV，命中或写入 WAV 缓存
 ```
 
-浏览器端 WASM 解码：
+浏览器端 WASM 解码流程：
+
 ```
-fetch → ArrayBuffer → Worker → orz_decoder_create(format, data, len)
-  → orz_decoder_render(out, frames) → SharedArrayBuffer ring
-  → AudioWorklet → AudioContext
+fetch raw file
+  ↓
+ArrayBuffer
+  ↓
+Worker + OrzAudioCore WASM ABI v1
+  ↓
+SharedArrayBuffer ring
+  ↓
+AudioWorklet
+  ↓
+AudioContext 输出
 ```
 
-> 表格中的 WASM/SPM 列表示解码器的编译能力；“播放策略”表示 Web 产品实际采用的默认路径，两者不必相同。例如 SC68 具备 WASM 构建能力，但当前默认使用 `serverDecode`。
+## 存储、缓存与指纹
 
-## 存储与缓存
+- CAS 保存扫描或上传得到的**原始文件**，文件名由内容 SHA-256 和扩展名组成。
+- 数据库保存 SHA-256、格式、标题、艺术家、专辑、时长等元数据，不保存“预处理后替代文件”作为主音频。
+- `serverDecode` 生成的 PCM WAV 位于独立缓存中；缓存失效与 SDK 版本、解码器能力、输出参数、subsong 等因素有关。
+- 解码失败不会替换或删除 CAS 原始文件，也不会提交不完整 WAV 缓存。
 
-- CAS 保存扫描或上传得到的原始文件，文件名由内容 SHA-256 和扩展名组成。
-- 数据库保存 SHA-256、格式和元数据，不保存预处理后的替代音频。
-- `serverDecode` 生成的 PCM WAV 位于独立缓存中，缓存键包含解码器版本、采样率、声道和 subsong 等策略参数。
-- 解码失败不会替换或删除 CAS 原始文件，也不会提交不完整的 WAV 缓存。
+音频指纹策略：
+
+- 入库去重首先使用 CAS SHA-256。
+- `audio_fingerprint` 是感知去重/相似匹配的增强字段，不参与播放路径、格式分类或 CAS 存储。
+- 生产扫描只对常规容器音频生成指纹：`mp3`、`ogg`、`wav`、`flac`、`m4a`、`aac`。
+- 模块、芯片和合成格式（例如 `xm/mod/it/s3m/v2m/sc68/ym/sid/ahx/bp`）跳过指纹生成，避免 `fpcalc/ffmpeg` 在非容器格式上长时间失败或卡住。
+- `make audit-fingerprints` 验证生产指纹策略；`ALL=1` 全量验证会生成指纹的容器音频；`FORCE_ALL_FORMATS=1` 才强制跑所有格式的慢失败路径。
+
+## 已知边界与后续关注
+
+- `thx` 已出现在 Web/SDK manifest 中，但 OrzMusic 后端尚未纳入 `AudioFormat`；如果要正式支持，需要补后端 enum、扫描、API、前端分类和回归样本。
+- `sc68` 当前默认服务端解码，这是产品性能策略；不表示 SDK/WASM 永久不能支持。
+- `wav` 策略不是单纯按扩展名决定，而是按 WAV 编码类型动态决定。
+- 当前格式数量来自本地数据库快照；切换音乐源、清库重扫或导入新文件后，页面数量会变化。

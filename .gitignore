@@ -10,6 +10,8 @@ db.sqlite
 node_modules/
 .env
 .vscode/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # SDK install (checksum-verified, downloaded from release)
 .audio-core-sdk/

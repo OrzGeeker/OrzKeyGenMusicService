@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "OrzAudioCore", targets: ["OrzAudioKit"]),
         .library(name: "OrzAudioCoreC", targets: ["OrzAudioCoreSDK"]),
         .executable(name: "OrzAudioCoreSmoke", targets: ["OrzAudioCoreSmoke"]),
+        .executable(name: "OrzFingerprintAudit", targets: ["OrzFingerprintAudit"]),
         .executable(name: "OrzMusicService", targets: ["Run"]),
     ],
     dependencies: [
@@ -48,6 +49,11 @@ let package = Package(
 
         .executableTarget(
             name: "OrzAudioCoreSmoke",
+            dependencies: [.target(name: "OrzAudioKit")]
+        ),
+
+        .executableTarget(
+            name: "OrzFingerprintAudit",
             dependencies: [.target(name: "OrzAudioKit")]
         ),
 

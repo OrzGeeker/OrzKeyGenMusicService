@@ -15,6 +15,40 @@ public struct ProcessResult: Sendable {
     }
 }
 
+public enum ProcessRunnerError: LocalizedError {
+    case timedOut(arguments: [String], timeout: TimeInterval)
+
+    public var errorDescription: String? {
+        switch self {
+        case .timedOut(let arguments, let timeout):
+            return "Process timed out after \(timeout)s: \(arguments.joined(separator: " "))"
+        }
+    }
+}
+
+private final class ProcessContinuationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+    private let continuation: CheckedContinuation<ProcessResult, Error>
+
+    init(_ continuation: CheckedContinuation<ProcessResult, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ result: Result<ProcessResult, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return }
+        didResume = true
+        switch result {
+        case .success(let processResult):
+            continuation.resume(returning: processResult)
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
 /// 异步进程执行器
 ///
 /// 将 Foundation.Process 包装为 async/await 模式，
@@ -24,10 +58,12 @@ public enum ProcessRunner {
     /// 异步运行一个进程，返回 stdout/stderr
     /// - Parameter process: 已配置好的 Process 实例
     /// - Returns: ProcessResult（stdout、stderr、退出码）
-    public static func run(_ process: Process) async throws -> ProcessResult {
+    public static func run(_ process: Process, timeout: TimeInterval? = nil) async throws -> ProcessResult {
         // Process 本身不是 Sendable 的，所以在线程之间传递时要小心。
         // 关键是 terminationHandler 会在任意后台线程回调，但我们用 continuation 接回来。
         return try await withCheckedThrowingContinuation { continuation in
+            let continuationBox = ProcessContinuationBox(continuation)
+
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
             process.standardOutput = stdoutPipe
@@ -41,13 +77,21 @@ public enum ProcessRunner {
                     stderr: stderr,
                     terminationStatus: proc.terminationStatus
                 )
-                continuation.resume(returning: result)
+                continuationBox.resume(.success(result))
             }
 
             do {
                 try process.run()
+                if let timeout {
+                    let arguments = process.arguments ?? []
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+                        guard process.isRunning else { return }
+                        process.terminate()
+                        continuationBox.resume(.failure(ProcessRunnerError.timedOut(arguments: arguments, timeout: timeout)))
+                    }
+                }
             } catch {
-                continuation.resume(throwing: error)
+                continuationBox.resume(.failure(error))
             }
         }
     }
@@ -61,7 +105,8 @@ public enum ProcessRunner {
     public static func execute(
         _ executable: String = "/usr/bin/env",
         arguments: [String],
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        timeout: TimeInterval? = nil
     ) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -70,7 +115,7 @@ public enum ProcessRunner {
             process.environment = env
         }
 
-        let result = try await run(process)
+        let result = try await run(process, timeout: timeout)
         return (result.stdoutString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -81,13 +126,14 @@ public enum ProcessRunner {
     /// - Returns: stdout 的原始 Data
     public static func executeRaw(
         _ executable: String,
-        arguments: [String]
+        arguments: [String],
+        timeout: TimeInterval? = nil
     ) async throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
 
-        let result = try await run(process)
+        let result = try await run(process, timeout: timeout)
         return result.stdout
     }
 }

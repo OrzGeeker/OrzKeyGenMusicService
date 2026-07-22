@@ -651,6 +651,23 @@ final class AppTests: XCTestCase {
         XCTAssertEqual(metadata.songTitle, "ACDSee Pro 5.3 build 168")
     }
 
+    func testScannerOnlyFingerprintsContainerAudioFormats() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let scanner = MusicScannerService(sourcePaths: [], cas: app.casStorage, db: app.db)
+
+        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "mp3"))
+        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "ogg"))
+        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "wav"))
+
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "xm"))
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "mod"))
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "v2m"))
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "sc68"))
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "ym"))
+        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "unknown"))
+    }
+
     // MARK: - Playlist Reorder
 
     func testPlaylistReorder() throws {
