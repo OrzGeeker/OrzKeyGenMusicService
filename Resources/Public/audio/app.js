@@ -1,4 +1,4 @@
-/* OrzPlayer library UI — intentionally dependency-free apart from Alpine. */
+/* OrzMusic library UI — intentionally dependency-free apart from Alpine. */
 const ORZ_COLORS={modules:'#8be9fd',retro:'#fbbf24',synth:'#39e58c',standard:'#a1a1aa',other:'#94a3b8'};
 const ORZ_FORMATS = [
     ...(globalThis.ORZ_DECODER_FORMATS||[]).map(item=>({...item,color:ORZ_COLORS[item.group]||ORZ_COLORS.other})),
