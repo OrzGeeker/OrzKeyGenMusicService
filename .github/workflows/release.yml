@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 45
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/.audio-core-sdk/server/native/lib
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/orzmusic
+      IMAGE_NAME: ghcr.io/orzgeeker/orzmusic
     steps:
       - uses: actions/checkout@v4
         with:

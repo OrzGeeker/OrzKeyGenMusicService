@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.2] — 2026-07-23
+
+### 修复
+- 修正 Release workflow 的 GHCR 镜像名为全小写，避免 Docker buildx 拒绝 `ghcr.io/OrzGeeker/orzmusic`。
+
+### 发布说明
+- `v0.0.1` 已触发发布工作流但镜像构建阶段失败，未形成可用 Release 制品。
+- `v0.0.2` 作为首个可用发布候选继续执行发布流程。
+
 ## [0.0.1] — 2026-07-23
 
 ### 新增
