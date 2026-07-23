@@ -26,10 +26,10 @@ test('sidebar brand presents the OrzMusic title beside the logo', () => {
 
 test('expanded visualizer reserves library space and uses a smaller mobile height', () => {
     assert.match(view, /'visualizer-visible':currentSong && visualizerOpen/);
-    assert.match(css, /--viz-height:140px/);
+    assert.match(css, /--viz-height:156px/);
     assert.match(css, /\.visualizer-visible \.main-content\{padding-bottom:calc\(var\(--dock\) \+ var\(--viz-height\) \+ 34px\)\}/);
     assert.match(css, /\.viz-panel\{[^}]*inset:auto 0 calc\(var\(--dock\) - 1px\) var\(--sidebar\)/);
-    assert.match(css, /@media\(max-width:720px\)\{:root\{--viz-height:100px\}/);
+    assert.match(css, /@media\(max-width:720px\)\{:root\{--viz-height:112px\}/);
 });
 
 test('visualizer canvas stays decorative and controls have accessible names', () => {
@@ -38,6 +38,7 @@ test('visualizer canvas stays decorative and controls have accessible names', ()
     assert.match(view, /aria-label="展开可视化面板"/);
     assert.match(view, /aria-label="折叠可视化面板" aria-keyshortcuts="V"/);
     assert.match(view, /aria-label="展开可视化面板" aria-keyshortcuts="V"/);
+    assert.match(view, /aria-keyshortcuts="Shift\+V" title="切换声场类型 \(Shift \+ V\)"/);
     assert.match(app, /toggleVisualizer\(\)\{if\(!this\.currentSong\)return;this\.visualizerOpen=!this\.visualizerOpen;this\._syncVisualizer\(\)\}/);
 });
 

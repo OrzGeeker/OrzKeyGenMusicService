@@ -399,6 +399,7 @@ test('animation frames reuse frequency, time-domain, normalized, and bar buffers
     viz._normalizedBins,
     viz._smoothBins,
     viz._bars,
+    viz._peaks,
   ];
   assert.equal(env.runNextFrame(), true);
   assert.equal(viz._frequencyData, buffers[0]);
@@ -406,6 +407,7 @@ test('animation frames reuse frequency, time-domain, normalized, and bar buffers
   assert.equal(viz._normalizedBins, buffers[2]);
   assert.equal(viz._smoothBins, buffers[3]);
   assert.equal(viz._bars, buffers[4]);
+  assert.equal(viz._peaks, buffers[5]);
   assert.equal(env.frequencyReads, 2);
   assert.equal(env.timeReads, 2);
   viz.stop();

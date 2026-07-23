@@ -161,7 +161,10 @@
       this._timeDomainData = null;
       this._normalizedBins = null;
       this._bars = null;
+      this._peaks = null;
       this._barCount = 0;
+      this._phase = 0;
+      this._energy = 0;
 
       // Canvas 设备像素比
       this._dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -270,6 +273,7 @@
       this._timeDomainData = null;
       this._normalizedBins = null;
       this._bars = null;
+      this._peaks = null;
       this._particles = [];
     }
 
@@ -416,6 +420,7 @@
     _buildReusableBars(count) {
       if (!this._bars || this._barCount !== count) {
         this._bars = new Float32Array(count);
+        this._peaks = new Float32Array(count);
         this._barCount = count;
       }
       const binLen = this._smoothBins?.length || 0;
@@ -436,82 +441,145 @@
       return this._bars;
     }
 
-    // ── 频谱外观（低亮度占位 → 全息） ──
+    // ── 频谱外观（霓虹频谱 / 全息声场） ──
 
     _drawSpectrum(ctx, width, height, decayOnly = false) {
-      // 平滑衰减
       const smoothFactor = decayOnly ? 0.18 : (this.reducedMotion ? 1 : 0.3);
       let peak = 0;
+      let energy = 0;
       for (let i = 0; i < this._smoothBins.length; i++) {
         const target = decayOnly ? 0 : this._normalizedBins[i];
         this._smoothBins[i] += (target - this._smoothBins[i]) * smoothFactor;
         if (this._smoothBins[i] > peak) peak = this._smoothBins[i];
+        energy += this._smoothBins[i];
       }
 
-      const bars = this._buildReusableBars(this.reducedMotion ? 16 : 48);
-      const halfH = height / 2;
-      const barW = width / bars.length;
-      const maxBarH = halfH * 0.85;
-
-      // 半透明清屏（余辉效果）
-      if (this._mode === 'holographic') {
-        ctx.fillStyle = 'rgba(11,13,12,0.25)';
-        ctx.fillRect(0, 0, width, height);
-      } else {
-        ctx.clearRect(0, 0, width, height);
-      }
-
-      // 上下镜像柱
-      for (let i = 0; i < bars.length; i++) {
-        const barH = bars[i] * maxBarH;
-        if (barH < 0.5) continue;
-        const x = i * barW + 1;
-        const w = Math.max(1, barW - 2);
-        const color = spectrumColor(i / bars.length);
-        const alpha = 0.5 + bars[i] * 0.5;
-        ctx.fillStyle = rgba(color, alpha);
-
-        // 上镜像
-        ctx.fillRect(x, halfH - barH, w, barH);
-        // 下镜像（底部镜像）
-        ctx.fillRect(x, halfH, w, barH);
-      }
-
-      // 连续时域光带
-      if (this._mode === 'holographic' && !this.reducedMotion) {
-        this._drawWave(ctx, width, height, decayOnly ? peak : 1);
-      }
+      this._energy += ((energy / Math.max(1, this._smoothBins.length)) - this._energy) * 0.12;
+      this._phase += decayOnly ? 0.006 : 0.018;
+      const bars = this._buildReusableBars(this.reducedMotion ? 18 : (this._isMobile() ? 42 : 72));
+      if (this._mode === 'holographic') this._drawHolographic(ctx, width, height, bars, decayOnly);
+      else this._drawNeonSpectrum(ctx, width, height, bars, decayOnly);
       return peak;
     }
 
-    _drawWave(ctx, width, height, amplitude = 1) {
+    _drawHolographic(ctx, width, height, bars, decayOnly) {
+      const horizon = height * 0.54;
+      ctx.fillStyle = 'rgba(5,10,8,0.34)';
+      ctx.fillRect(0, 0, width, height);
+
+      // 透视扫描网格：提供深度，但保持低亮度避免抢夺波形焦点。
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(57,229,140,0.075)';
+      for (let i = -6; i <= 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(width * 0.5, horizon);
+        ctx.lineTo(width * 0.5 + i * width * 0.12, height);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 5; i++) {
+        const depth = i / 4;
+        const y = horizon + depth * depth * (height - horizon);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+
+      // 中央能量柱从中心向两侧扩散，形成舞台式声场。
+      const half = Math.floor(bars.length / 2);
+      const laneW = width / bars.length;
+      ctx.shadowColor = 'rgba(34,211,238,.7)';
+      ctx.shadowBlur = this.reducedMotion ? 0 : 10;
+      for (let i = 0; i < bars.length; i++) {
+        const source = Math.abs(i - half);
+        const value = bars[Math.min(bars.length - 1, source * 2)];
+        const pulse = 0.82 + Math.sin(this._phase * 2 + i * 0.24) * 0.18;
+        const barH = Math.max(1, value * height * 0.34 * pulse);
+        const color = spectrumColor(Math.min(1, value * 0.72 + Math.abs(i - half) / bars.length));
+        ctx.fillStyle = rgba(color, 0.22 + value * 0.62);
+        ctx.fillRect(i * laneW + laneW * 0.22, horizon - barH, Math.max(1, laneW * 0.56), barH * 2);
+      }
+      ctx.shadowBlur = 0;
+
+      // 三层相位错开的光丝带，亮度由实时音频能量驱动。
+      this._drawWaveRibbon(ctx, width, height, 0, 0.98, decayOnly);
+      this._drawWaveRibbon(ctx, width, height, 11, 0.56, decayOnly);
+      this._drawWaveRibbon(ctx, width, height, -11, 0.34, decayOnly);
+
+      // 中央脉冲核心与水平激光线。
+      const core = 3 + this._energy * 18;
+      ctx.shadowColor = 'rgba(57,229,140,.9)';
+      ctx.shadowBlur = this.reducedMotion ? 0 : 18 + this._energy * 20;
+      ctx.fillStyle = rgba(COLOR_GREEN, 0.5 + Math.min(0.4, this._energy));
+      ctx.beginPath();
+      ctx.arc(width * 0.5, horizon, core, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(113,255,190,.42)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, horizon);
+      ctx.lineTo(width, horizon);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    _drawWaveRibbon(ctx, width, height, offset, strength, decayOnly) {
       const data = this._timeDomainData;
       if (!data?.length) return;
       const pointCount = Math.min(data.length, Math.max(20, Math.floor(width / 3)));
       const step = Math.max(1, Math.floor(data.length / pointCount));
-      const half = height / 2;
-      const scale = height * 0.4 * amplitude;
+      const half = height * 0.54 + offset;
+      const scale = height * 0.34 * strength * (decayOnly ? Math.max(0.08, this._energy * 3) : 1);
+      ctx.shadowColor = strength > 0.8 ? 'rgba(57,229,140,.95)' : 'rgba(34,211,238,.65)';
+      ctx.shadowBlur = this.reducedMotion ? 0 : 8 * strength;
       ctx.beginPath();
       for (let i = 0, point = 0; i < data.length && point < pointCount; i += step, point++) {
         const x = point / Math.max(1, pointCount - 1) * width;
-        const y = half + ((data[i] / 255) * 2 - 1) * scale;
+        const carrier = Math.sin(point * 0.075 + this._phase * (2.2 + strength)) * this._energy * 7;
+        const y = half + ((data[i] / 255) * 2 - 1) * scale + carrier;
         if (point === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = rgba(COLOR_GREEN, 0.15);
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = strength > 0.8 ? rgba(COLOR_GREEN, 0.86) : rgba(COLOR_CYAN, 0.34 * strength);
+      ctx.lineWidth = 0.8 + strength * 2.2;
       ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
 
-      // 底部镜像波形
-      ctx.beginPath();
-      for (let i = 0, point = 0; i < data.length && point < pointCount; i += step, point++) {
-        const x = point / Math.max(1, pointCount - 1) * width;
-        const y = half + ((data[i] / 255) * 2 - 1) * scale;
-        if (point === 0) ctx.moveTo(x, height - y);
-        else ctx.lineTo(x, height - y);
+    _drawNeonSpectrum(ctx, width, height, bars, decayOnly) {
+      ctx.clearRect(0, 0, width, height);
+      const baseline = height * 0.78;
+      const barW = width / bars.length;
+      const maxH = height * 0.68;
+
+      // 淡入的频段轨道让低能量段仍有仪表质感。
+      ctx.fillStyle = 'rgba(57,229,140,.035)';
+      for (let i = 0; i < bars.length; i++) {
+        ctx.fillRect(i * barW + barW * 0.18, height * 0.1, Math.max(1, barW * 0.64), baseline - height * 0.1);
       }
-      ctx.strokeStyle = rgba(COLOR_GREEN, 0.08);
-      ctx.lineWidth = 1.5;
+
+      ctx.shadowColor = 'rgba(34,211,238,.72)';
+      ctx.shadowBlur = this.reducedMotion ? 0 : 9;
+      for (let i = 0; i < bars.length; i++) {
+        const value = bars[i];
+        const h = Math.max(1, value * maxH);
+        const x = i * barW + barW * 0.18;
+        const w = Math.max(1, barW * 0.64);
+        const color = spectrumColor(i / Math.max(1, bars.length - 1));
+        this._peaks[i] = Math.max(value, this._peaks[i] - (decayOnly ? 0.025 : 0.009));
+        ctx.fillStyle = rgba(color, 0.34 + value * 0.66);
+        ctx.fillRect(x, baseline - h, w, h);
+        ctx.fillStyle = rgba(color, 0.12 + value * 0.14);
+        ctx.fillRect(x, baseline + 3, w, h * 0.22);
+        ctx.fillStyle = rgba(color, 0.78);
+        ctx.fillRect(x, baseline - this._peaks[i] * maxH - 3, w, 2);
+      }
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(150,255,207,.22)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, baseline + 1);
+      ctx.lineTo(width, baseline + 1);
       ctx.stroke();
     }
 
