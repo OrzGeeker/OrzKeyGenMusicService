@@ -78,6 +78,10 @@ let package = Package(
             .target(name: "OrzAudioCoreSDK"),
             .product(name: "XCTVapor", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
+        ], exclude: [
+            "release-smoke-test.sh",
+            "db-backup-test.sh",
+            "release-scripts-test.sh",
         ], linkerSettings: audioCoreLinkerSettings)
     ]
 )
