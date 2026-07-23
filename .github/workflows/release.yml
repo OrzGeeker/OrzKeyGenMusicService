@@ -1,0 +1,118 @@
+# Release workflow
+#
+# 推送 vX.Y.Z 标签后自动验证、构建、推送镜像到 GHCR 并创建 GitHub Release。
+# 非匹配版本标签（不与 VERSION 文件一致）会失败。
+# 不推送或覆盖 latest 标签。
+#
+# 首次使用前确认：
+#   仓库 Settings → Actions → General → Workflow permissions 设为
+#   "Read and write permissions"。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/.audio-core-sdk/server/native/lib
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/orzmusic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # --- 版本校验 ---
+      - name: Validate version tag
+        run: |
+          VERSION_CONTENT=$(cat VERSION | tr -d '[:space:]')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION file: $VERSION_CONTENT"
+          echo "Tag version:  $TAG_VERSION"
+          if [ "$VERSION_CONTENT" != "$TAG_VERSION" ]; then
+            echo "ERROR: Tag '$GITHUB_REF_NAME' does not match VERSION file ($VERSION_CONTENT)"
+            exit 1
+          fi
+          echo "VERSION_TAG=$TAG_VERSION" >> "$GITHUB_ENV"
+          echo "COMMIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      # --- 安装运行时依赖 ---
+      - name: Install system deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      # --- 安装 SDK ---
+      - name: Install server SDK
+        run: ./script/update-audio-core-server.sh
+      - name: Install Web SDK
+        run: ./script/update-audio-core-web.sh
+
+      # --- 测试 ---
+      - name: Run Swift tests
+        run: swift test
+      - name: Run browser tests
+        run: node --test Tests/Browser/*.test.mjs
+      - name: Validate Docker Compose config
+        run: docker compose config --quiet
+
+      # --- Docker 构建与推送 ---
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ env.COMMIT_SHA }}
+          build-args: |
+            APP_VERSION=${{ env.VERSION_TAG }}
+            GIT_COMMIT=${{ env.COMMIT_SHA }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
+          labels: |
+            org.opencontainers.image.created=${{ env.BUILD_TIME }}
+            org.opencontainers.image.version=${{ env.VERSION_TAG }}
+            org.opencontainers.image.revision=${{ env.COMMIT_SHA }}
+            org.opencontainers.image.title=OrzMusic Service
+            org.opencontainers.image.description=Music management and streaming API for OrzPlayer
+
+      # --- 镜像 Digest ---
+      - name: Save image digest
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }} 2>/dev/null || echo "unknown")
+          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "Pushed digest: $DIGEST"
+
+      # --- GitHub Release ---
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ env.VERSION_TAG }}
+          body: |
+            ## OrzMusic ${{ env.VERSION_TAG }}
+
+            ### 发布制品
+            - Docker 镜像: `${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}`
+            - 镜像 Digest: `${{ env.IMAGE_DIGEST }}`
+            - Git Tag: `${{ github.ref_name }}`
+            - Git Commit: `${{ env.COMMIT_SHA }}`
+            - 构建时间: `${{ env.BUILD_TIME }}`
+          draft: false
+          prerelease: false
+          generate_release_notes: true

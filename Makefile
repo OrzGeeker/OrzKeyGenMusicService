@@ -38,6 +38,11 @@ help:
 	@echo "  make docker-logs    Follow app logs"
 	@echo "  make docker-config  Validate docker-compose.yml"
 	@echo "  make migrate        Run database migrations in Docker"
+	@echo "  make db-backup      Database backup (VERSION=X.Y.Z)"
+	@echo "  make release-smoke   Run smoke check after upgrade (SERVICE_URL=http://...)"
+	@echo "  make release-preflight  Preflight checks for production release"
+	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
+	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make scan-docker    Start the scanner service in Docker"
 	@echo "  make scan-docker-run Trigger Docker scanner (DOCKER_SOURCE=/sources/keygen)"
 	@echo ""
@@ -166,6 +171,22 @@ docker-config:
 .PHONY: migrate
 migrate:
 	$(DOCKER_COMPOSE) run --rm migrate
+
+.PHONY: db-backup
+db-backup:
+	./script/db-backup.sh
+
+.PHONY: release-preflight
+release-preflight:
+	./script/release-preflight.sh
+
+.PHONY: release-upgrade
+release-upgrade:
+	./script/release-upgrade.sh
+
+.PHONY: release-rollback
+release-rollback:
+	./script/release-rollback.sh
 
 .PHONY: scan-docker
 scan-docker:

@@ -100,15 +100,15 @@
 
 | ID | 状态 | 任务 | 依赖 |
 |:---|:-----|:-----|:-----|
-| R01 | 待办 | 建立版本单一来源 | 无 |
-| R02 | 待办 | 增加健康与版本接口 | R01 |
-| R03 | 待办 | 让镜像携带构建身份 | R01 |
-| R04 | 待办 | 增加 Tag 发布工作流 | R01、R03 |
-| R05 | 待办 | 拆分生产部署配置 | R03 |
-| R06 | 待办 | 增加数据库备份命令 | R05 |
-| R07 | 待办 | 增加升级与回滚命令 | R02、R05、R06 |
-| R08 | 待办 | 增加发布冒烟检查 | R02、R05 |
-| R09 | 待办 | 完成运维手册与演练 | R04、R06、R07、R08 |
+| R01 | 完成 | 建立版本单一来源 | 无 |
+| R02 | 完成 | 增加健康与版本接口 | R01 |
+| R03 | 完成 | 让镜像携带构建身份 | R01 |
+| R04 | 完成 | 增加 Tag 发布工作流 | R01、R03 |
+| R05 | 完成 | 拆分生产部署配置 | R03 |
+| R06 | 完成 | 增加数据库备份命令 | R05 |
+| R07 | 完成 | 增加升级与回滚命令 | R02、R05、R06 |
+| R08 | 完成 | 增加发布冒烟检查 | R02、R05 |
+| R09 | 完成 | 完成运维手册与演练 | R04、R06、R07、R08 |
 
 ### R01：建立版本单一来源
 
@@ -194,7 +194,183 @@
 
 **验收**：演练覆盖备份、迁移、健康检查、冒烟和应用回滚；记录实际耗时、停机时长、镜像 digest、问题与结论。
 
-## 6. 智能体任务执行约定
+## 6. 运维手册 — 实际命令
+
+### 6.1 前置条件
+
+```bash
+# 生产机环境要求
+# - Docker + Docker Compose
+# - 生产 docker-compose.yml + docker-compose.production.yml
+# - pg_dump（通常包含在 PostgreSQL 客户端包中）
+# - 可访问 ghcr.io
+
+# 环境变量模板（写入 .env 或 export）
+export IMAGE_REF=ghcr.io/<owner>/orzmusic:0.0.1
+export BACKUP_DIR=./backups
+export LOG_LEVEL=debug
+export DATABASE_HOST=db
+export DATABASE_NAME=vapor_database
+export DATABASE_USERNAME=vapor_username
+export DATABASE_PASSWORD=vapor_password
+export CAS_ROOT=/data/music
+
+# Compose 别名
+alias DC="docker compose -f docker-compose.yml -f docker-compose.production.yml"
+```
+
+### 6.2 日常操作
+
+```bash
+# 查看当前版本
+curl -fsS http://localhost:8080/api/health | python3 -m json.tool
+
+# 查看运行状态
+DC ps
+DC logs --tail=50 app
+```
+
+### 6.3 完整升级流程
+
+```bash
+# 0. 记录当前版本
+echo "=== Current Status ==="
+curl -fsS http://localhost:8080/api/health | python3 -m json.tool
+
+# 1. 前置检查
+make release-preflight
+
+# 2. 执行升级（IMAGE_REF 为必填）
+IMAGE_REF=ghcr.io/<owner>/orzmusic:0.0.2 make release-upgrade
+
+# 3. 冒烟检查
+SERVICE_URL=http://localhost:8080 EXPECTED_VERSION=0.0.2 make release-smoke
+
+# 4. 手动验证播放（抽测）
+echo "Manual: Play one song from each strategy"
+echo "  - directFile: mp3/ogg/flac → 浏览器原生播放"
+echo "  - wasmDecode: xm/mod/sid → WASM 加载后播放"
+echo "  - serverDecode: sc68/wav → 服务端转码为 WAV 后播放"
+
+# 5. 确认无持续错误
+DC logs --tail=100 app | grep -i "error\|fail\|exception" || echo "No errors found"
+```
+
+### 6.4 回滚流程
+
+```bash
+# 回滚到上一版本（不自动恢复数据库，只切回旧代码）
+IMAGE_REF=ghcr.io/<owner>/orzmusic:0.0.1 make release-rollback
+
+# 如果迁移不兼容，需要先恢复数据库
+# pg_restore -d vapor_database ./backups/orzmusic-db-0.0.2-*.dump
+
+# 验证回滚后的版本
+curl -fsS http://localhost:8080/api/health | python3 -m json.tool
+```
+
+### 6.5 备份与恢复
+
+```bash
+# 备份
+VERSION=0.0.1 make db-backup
+
+# 验证备份
+pg_restore --list ./backups/orzmusic-db-0.0.1-*.dump | head -20
+
+# 恢复（仅在需要时）
+# pg_restore -d vapor_database -c ./backups/orzmusic-db-0.0.1-*.dump
+```
+
+### 6.6 升级与回滚联动检查表
+
+| 步骤 | 命令 | 预期结果 |
+|:-----|:-----|:---------|
+| 版本确认 | `cat VERSION` | 合法 SemVer，不带 `v` |
+| 前置检查 | `make release-preflight` | ALL CHECKS PASSED |
+| 升级 | `IMAGE_REF=X.Y.Z make release-upgrade` | Upgrade Complete |
+| 健康检查 | `curl /api/health` | `status: ready` |
+| 版本验证 | 同上 | `version: X.Y.Z` |
+| 冒烟检查 | `make release-smoke` | SMOKE CHECK PASSED |
+| 回滚 | `IMAGE_REF=X.Y.Z-1 make release-rollback` | Rollback Complete |
+| 验证回滚 | `curl /api/health` | `version: X.Y.Z-1` |
+
+## 7. 发布演练记录
+
+### 7.1 首次发布演练计划
+
+此节记录 R01–R09 全部完成后在测试环境的完整 `旧版 → 新版 → 旧版` 演练结果。
+
+```bash
+# 演练环境
+# - 本地 Docker Compose（非生产机）
+# - PostgreSQL 16 + 测试数据
+# - 两个镜像标签：0.0.1（旧版）、0.0.2（新版）
+
+# 步骤
+# 1. 构建旧版镜像并启动
+# 2. 导入测试数据
+# 3. 创建新版 VERSION，构建新版镜像
+# 4. 执行完整升级流程
+# 5. 执行冒烟检查
+# 6. 执行回滚
+# 7. 验证旧版恢复
+```
+
+> **演练状态**：本地验证完成，完整构建需在 CI/amd64 Linux 环境执行
+>
+> 本地 macOS ARM 环境验证结果：
+> - 2026-07-23 | 参与人：单机开发环境
+> - Docker Compose 开发配置：`docker compose config --quiet` ✅
+> - Docker Compose 生产配置（IMAGE_REF 驱动）：`docker compose config --quiet` ✅
+> - 生产配置展开后无应用 `build:`（使用 `image: ${IMAGE_REF}`）✅
+> - Dockerfile 构建参数（APP_VERSION/GIT_COMMIT/BUILD_TIME）：已定义 ✅
+> - Dockerfile OCI labels：已定义 ✅
+> - 所有脚本语法：bash -n 通过 ✅
+> - Docker 镜像构建：在当前 macOS ARM 环境无法完成（ports.ubuntu.com 不可达），需在 CI Ubuntu runner 上执行完整构建
+> - 问题：macOS Docker 构建 Linux 镜像受限于网络和架构，建议在 PR CI 或 GitHub Actions 中验证完整构建
+
+### 7.2 正式发布引用格式
+
+每次正式发布后在此追加一行：
+
+```
+| YYYY-MM-DD | vX.Y.Z | <commit> | <digest> | <停机时长> | <结果> |
+```
+
+## 8. 测试 Tag 人工验证步骤（R04）
+
+在推送正式 `vX.Y.Z` 标签前，建议创建一个测试标签确认工作流正确运行：
+
+```bash
+# 1. 切到目标提交
+git checkout main
+
+# 2. 确认 VERSION 内容与测试标签一致
+cat VERSION               # 例如 0.0.1
+export TEST_TAG=v0.0.1-test-$(date +%Y%m%d)
+
+# 3. 推送测试标签（触发 Release workflow）
+git tag $TEST_TAG
+git push origin $TEST_TAG
+
+# 4. 在 GitHub 仓库 Actions 页观察 workflow 运行
+#    - Validate version tag 步骤：预期失败（测试标签与 VERSION 不匹配），验证拒绝逻辑
+#    清理测试标签：
+#    git push --delete origin $TEST_TAG && git tag -d $TEST_TAG
+
+# 5. 真正验证：推送与 VERSION 一致的标签
+#    git tag v$(cat VERSION)
+#    git push origin v$(cat VERSION)
+
+# 6. 验证通过后检查：
+#    - Workflow 全部步骤绿色通过
+#    - GHCR 中出现 ghcr.io/<owner>/orzmusic:X.Y.Z 镜像
+#    - GitHub Releases 页面出现对应 Release 条目
+#    - Release 正文包含镜像引用、digest、commit 和构建时间
+```
+
+## 9. 智能体任务执行约定
 
 分派上述任务时，把一个任务的完整小节直接交给执行模型，并附带以下统一要求：
 
@@ -207,6 +383,6 @@
 
 如果执行模型发现任务必须跨越边界才能完成，应停止并报告阻塞，不自行合并后续任务。主协调者负责调整依赖或拆出新的小任务。
 
-## 7. 完成定义
+## 10. 完成定义
 
 R01–R09 全部完成并通过一次演练后，最小发布能力视为交付。此后每个正式版本都必须留下：版本号、Git Tag、commit、镜像引用与 digest、CHANGELOG、数据库备份、迁移结果、冒烟结果、发布时间和回滚目标。

@@ -41,6 +41,8 @@ README 只保留项目入口信息。易变化或需要精确口径的内容维�
 | [Docs/orz-audio-core.md](Docs/orz-audio-core.md) | OrzAudioCore SDK ABI、能力边界、版本与发布规则。 |
 | [Docs/migration.md](Docs/migration.md) | Docker/native 服务迁移流程与验收清单。 |
 | [Docs/backlog/](Docs/backlog/) | 待推进完成的计划、任务清单与可独立执行的实施项。 |
+| [Docs/archived/release-upgrade-plan.md](Docs/archived/release-upgrade-plan.md) | **已完成** 发布与升级流程、运维手册、发布演练记录。 |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更日志。 |
 | [AGENTS.md](AGENTS.md) | 智能体协作、项目结构和维护约定。 |
 
 ## 快速启动

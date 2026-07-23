@@ -1,0 +1,153 @@
+#!/bin/bash
+# release-smoke 聚焦测试
+#
+# 在本地启动物 mock HTTP 服务，验证 smoke 脚本的成功和失败路径。
+# 不需要 Docker 或运行中的服务。
+#
+# 用法: bash Tests/AppTests/release-smoke-test.sh
+
+set -uo pipefail
+
+SCRIPT="$PWD/script/release-smoke.sh"
+PASS=0
+FAIL=0
+MOCK_PID=""
+
+green() { printf '\033[32m%s\033[0m\n' "$1"; }
+red()   { printf '\033[31m%s\033[0m\n' "$1"; }
+
+cleanup() {
+    if [ -n "$MOCK_PID" ] && kill -0 "$MOCK_PID" 2>/dev/null; then
+        kill "$MOCK_PID" 2>/dev/null || true
+        wait "$MOCK_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+start_mock() {
+    local port="$1"
+    # 启动 Python mock HTTP 服务器
+    python3 -c "
+import json, http.server, socket
+
+class MockHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/api/health':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'status': 'ready',
+                'version': '1.0.0',
+                'commit': 'abc123',
+                'database': 'healthy',
+                'cas': 'healthy'
+            }).encode())
+        elif self.path == '/api/songs/formats':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'total': 42, 'formats': [{'format': 'mp3', 'count': 10}]}).encode())
+        elif self.path.startswith('/api/songs/search'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps([{'id': 'mock-id', 'title': 'Mock Song'}]).encode())
+        elif self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'<html><head><title>OrzMusic</title></head><body>OrzMusic Player</body></html>')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # suppress logs
+
+server = http.server.HTTPServer(('127.0.0.1', $port), MockHandler)
+server.serve_forever()
+" &
+    MOCK_PID=$!
+    # 等待服务器就绪
+    for i in $(seq 1 20); do
+        if curl -fsS "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    return 1
+}
+
+# 查找可用端口
+find_port() {
+    python3 -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(('127.0.0.1', 0))
+print(s.getsockname()[1])
+s.close()
+"
+}
+
+# Test 1: 模拟完全正常 — 冒烟通过
+echo "=== Test 1: All endpoints healthy ==="
+PORT=$(find_port)
+if ! start_mock "$PORT"; then
+    red "FAIL: Could not start mock server"
+    FAIL=$((FAIL + 1))
+else
+    OUTPUT=$(SERVICE_URL="http://127.0.0.1:$PORT" bash "$SCRIPT" 2>&1) || true
+    if echo "$OUTPUT" | grep -qi "SMOKE CHECK PASSED"; then
+        green "PASS: Smoke check passed"
+        PASS=$((PASS + 1))
+    else
+        red "FAIL: $(echo "$OUTPUT" | tail -5)"
+        FAIL=$((FAIL + 1))
+    fi
+    kill "$MOCK_PID" 2>/dev/null || true
+    wait "$MOCK_PID" 2>/dev/null || true
+    MOCK_PID=""
+fi
+
+# Test 2: 版本不匹配 — 冒烟失败
+echo "=== Test 2: Version mismatch ==="
+PORT=$(find_port)
+if ! start_mock "$PORT"; then
+    red "FAIL: Could not start mock server"
+    FAIL=$((FAIL + 1))
+else
+    OUTPUT=$(SERVICE_URL="http://127.0.0.1:$PORT" EXPECTED_VERSION="9.9.9" bash "$SCRIPT" 2>&1) || true
+    if echo "$OUTPUT" | grep -qi "SMOKE CHECK FAILED" && echo "$OUTPUT" | grep -qi "version mismatch"; then
+        green "PASS: Version mismatch detected"
+        PASS=$((PASS + 1))
+    else
+        red "FAIL: Did not reject version mismatch"
+        FAIL=$((FAIL + 1))
+    fi
+    kill "$MOCK_PID" 2>/dev/null || true
+    wait "$MOCK_PID" 2>/dev/null || true
+    MOCK_PID=""
+fi
+
+# Test 3: 服务不可达 — 超时/失败
+echo "=== Test 3: Service unreachable ==="
+OUTPUT=$(SERVICE_URL="http://127.0.0.1:1" SMOKE_TIMEOUT=2 bash "$SCRIPT" 2>&1) || true
+if echo "$OUTPUT" | grep -qi "SMOKE CHECK FAILED"; then
+    green "PASS: Unreachable service detected"
+    PASS=$((PASS + 1))
+else
+    red "FAIL: Did not fail on unreachable service"
+    FAIL=$((FAIL + 1))
+fi
+
+# 汇总
+echo ""
+echo "========= Results ========="
+echo "Passed: $PASS"
+echo "Failed: $FAIL"
+echo "========================="
+
+if [ "$FAIL" -gt 0 ]; then
+    exit 1
+fi

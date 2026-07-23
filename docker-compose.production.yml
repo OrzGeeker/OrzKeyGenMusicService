@@ -1,0 +1,81 @@
+# Production Docker Compose override
+#
+# 生产环境专用配置 — 只拉取指定镜像，不从源码构建。
+# 需要设置 IMAGE_REF 环境变量（必须包含版本或 digest）：
+#
+#   export IMAGE_REF=ghcr.io/<owner>/orzmusic:0.0.1
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d app
+#
+# 数据库与 CAS volume 名称与开发配置一致，数据可共用。
+# 使用前需确保 db 服务正常运行。
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+
+x-shared_environment: &shared_environment
+  LOG_LEVEL: ${LOG_LEVEL:-debug}
+  DATABASE_HOST: db
+  DATABASE_NAME: vapor_database
+  DATABASE_USERNAME: vapor_username
+  DATABASE_PASSWORD: vapor_password
+  CAS_ROOT: /data/music
+
+volumes:
+  db_data:
+  cas_data:
+
+services:
+  cas-init:
+    image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
+    build: null
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 999:999 /data/music"]
+    volumes:
+      - cas_data:/data/music
+    restart: "no"
+
+  app:
+    image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
+    build: null
+    environment:
+      <<: *shared_environment
+    depends_on:
+      db:
+        condition: service_healthy
+      cas-init:
+        condition: service_completed_successfully
+    ports:
+      - '8080:8080'
+    volumes:
+      - cas_data:/data/music
+    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]
+
+  migrate:
+    image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
+    build: null
+    environment:
+      <<: *shared_environment
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["migrate", "--yes"]
+    deploy:
+      replicas: 0
+
+  scan:
+    image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
+    build: null
+    environment:
+      <<: *shared_environment
+    depends_on:
+      db:
+        condition: service_healthy
+      cas-init:
+        condition: service_completed_successfully
+    volumes:
+      - cas_data:/data/music
+    ports:
+      - '8081:8081'
+    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8081"]
+    deploy:
+      replicas: 0

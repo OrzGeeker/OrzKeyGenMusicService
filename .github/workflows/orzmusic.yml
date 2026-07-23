@@ -15,7 +15,12 @@ on:
       - "audio-core-sdk.lock.json"
       - "script/update-audio-core-server.sh"
       - "script/update-audio-core-web.sh"
-      - ".github/workflows/orzmusic.yml"
+      - "script/db-backup.sh"
+      - "script/release-*.sh"
+      - "VERSION"
+      - "CHANGELOG.md"
+      - "docker-compose.production.yml"
+      - ".github/workflows/**.yml"
   pull_request:
     paths:
       - "Sources/App/**"
@@ -27,10 +32,15 @@ on:
       - "Package.resolved"
       - "Dockerfile"
       - "docker-compose.yml"
+      - "docker-compose.production.yml"
       - "audio-core-sdk.lock.json"
       - "script/update-audio-core-server.sh"
       - "script/update-audio-core-web.sh"
-      - ".github/workflows/orzmusic.yml"
+      - "script/db-backup.sh"
+      - "script/release-*.sh"
+      - "VERSION"
+      - "CHANGELOG.md"
+      - ".github/workflows/**.yml"
 
 jobs:
   application-tests:

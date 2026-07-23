@@ -503,6 +503,49 @@ final class AppTests: XCTestCase {
         }
     }
 
+    // MARK: - Health Endpoint
+
+    func testHealthEndpointReturnsReady() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        // 创建 CAS 目录以保证健康检查通过
+        try FileManager.default.createDirectory(atPath: app.casStorage.root, withIntermediateDirectories: true)
+
+        try app.test(.GET, "/api/health") { res in
+            XCTAssertEqual(res.status, .ok)
+            let health = try res.content.decode(HealthResponse.self)
+            XCTAssertEqual(health.status, "ready")
+            XCTAssertEqual(health.version, AppVersion.current)
+            XCTAssertEqual(health.commit, "unknown")
+            XCTAssertEqual(health.database, "healthy")
+            XCTAssertEqual(health.cas, "healthy")
+        }
+    }
+
+    func testHealthEndpointReturnsDegradedWhenCasUnavailable() throws {
+        let app = Application(.testing)
+        defer { app.shutdown() }
+        app.databases.use(.sqlite(.memory), as: .sqlite)
+        app.migrations.add(CreateArtist())
+        app.migrations.add(CreateAlbum())
+        app.migrations.add(CreateSong())
+        app.migrations.add(CreatePlaylist())
+        app.migrations.add(CreatePlaylistSongPivot())
+        try routes(app)
+        // CAS 指向不存在的目录
+        app.casStorage = CasStorageService(root: NSTemporaryDirectory() + "cas-nonexistent-\(UUID().uuidString)")
+        try app.autoMigrate().wait()
+
+        try app.test(.GET, "/api/health") { res in
+            XCTAssertEqual(res.status, .serviceUnavailable)
+            let health = try res.content.decode(HealthResponse.self)
+            XCTAssertEqual(health.status, "degraded")
+            XCTAssertEqual(health.database, "healthy")
+            XCTAssertEqual(health.cas, "unhealthy")
+        }
+    }
+
     func testOpenAPIEndpoint() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
@@ -513,6 +556,13 @@ final class AppTests: XCTestCase {
             let body = try JSONSerialization.jsonObject(with: res.body) as? [String: Any]
             XCTAssertEqual(body?["openapi"] as? String, "3.0.3")
             XCTAssertNotNil(body?["paths"])
+
+            // R01: info.version 来自 AppVersion，不应是旧硬编码值
+            let info = body?["info"] as? [String: Any]
+            let version = info?["version"] as? String
+            XCTAssertNotNil(version, "info.version should be present")
+            XCTAssertNotEqual(version, "1.1.0", "version should no longer be the old hardcoded value")
+            XCTAssertEqual(version, AppVersion.current, "OpenAPI version should match AppVersion.current")
         }
     }
 

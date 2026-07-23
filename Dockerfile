@@ -4,6 +4,11 @@
 # Release Linux SDKs are built on Ubuntu 24.04 and require glibc 2.38.
 FROM swift:6.1-noble AS build-base
 
+# Build identity arguments (pass via --build-arg or CI)
+ARG APP_VERSION
+ARG GIT_COMMIT
+ARG BUILD_TIME
+
 # Set up a build area
 WORKDIR /build
 
@@ -55,10 +60,30 @@ RUN find -L "$(swift build --package-path /build -c release --show-bin-path)/" -
 # Copy any resources from the public directory and views directory if the directories exist
 RUN [ -d /build/Resources ] && { cp -Ra /build/Resources ./Resources && chmod -R a-w ./Resources; } || true
 
+# Copy VERSION file for diagnostic fallback
+RUN [ -f /build/VERSION ] && cp /build/VERSION ./VERSION || true
+
 # ================================
 # Run image
 # ================================
 FROM swift:6.1-noble-slim
+
+# Re-declare build args for this stage
+ARG APP_VERSION
+ARG GIT_COMMIT
+ARG BUILD_TIME
+
+# Build identity environment variables
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_TIME=${BUILD_TIME}
+
+# OCI image labels
+LABEL org.opencontainers.image.created=${BUILD_TIME}
+LABEL org.opencontainers.image.version=${APP_VERSION}
+LABEL org.opencontainers.image.revision=${GIT_COMMIT}
+LABEL org.opencontainers.image.title="OrzMusic Service"
+LABEL org.opencontainers.image.description="Music management and streaming API for OrzPlayer"
 
 # Make sure all system packages are up to date, and install runtime deps.
 RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \

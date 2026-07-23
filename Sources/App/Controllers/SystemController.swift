@@ -4,8 +4,46 @@ struct SystemController: RouteCollection {
 
     func boot(routes: any RoutesBuilder) throws {
         let api = routes.grouped("api")
+        api.get("health", use: health)
         api.get("stats", use: stats)
         api.get("openapi.json", use: openAPI)
+    }
+
+    /// GET /api/health — 健康与版本检查
+    ///
+    /// 所有依赖可用时返回 HTTP 200 + `status: "ready"`；
+    /// 任一依赖不可用时返回 HTTP 503 + `status: "degraded"`。
+    /// 响应不暴露路径、凭证或内部错误堆栈。
+    @Sendable
+    func health(req: Request) async throws -> Response {
+        let version = AppVersion.current
+        let commit = ProcessInfo.processInfo.environment["GIT_COMMIT"] ?? "unknown"
+
+        // 数据库健康：轻量查询
+        let dbHealthy: Bool
+        do {
+            _ = try await Song.query(on: req.db).limit(1).all()
+            dbHealthy = true
+        } catch {
+            dbHealthy = false
+        }
+
+        // CAS 健康：只检查根目录可读性，不做写入
+        let casRoot = req.application.casStorage.root
+        let casHealthy = FileManager.default.isReadableFile(atPath: casRoot)
+
+        let allHealthy = dbHealthy && casHealthy
+        let healthResponse = HealthResponse(
+            status: allHealthy ? "ready" : "degraded",
+            version: version,
+            commit: commit,
+            database: dbHealthy ? "healthy" : "unhealthy",
+            cas: casHealthy ? "healthy" : "unhealthy"
+        )
+
+        let response = Response(status: allHealthy ? .ok : .serviceUnavailable)
+        try response.content.encode(healthResponse)
+        return response
     }
 
     /// GET /api/stats — 库统计
@@ -38,7 +76,7 @@ struct SystemController: RouteCollection {
             "openapi": "3.0.3",
             "info": [
                 "title": "OrzPlayer Music API",
-                "version": "1.1.0",
+                "version": AppVersion.current,
                 "description": "Music management and streaming API for OrzPlayer\n\nSupports 25+ audio formats with automatic playback strategy selection (directFile / wasmDecode / serverDecode)."
             ] as [String: Any],
             "servers": [
@@ -371,4 +409,12 @@ struct StatsResponse: Content {
     let totalAlbums: Int
     let totalPlaylists: Int
     let totalFileSize: Int?
+}
+
+struct HealthResponse: Content {
+    let status: String
+    let version: String
+    let commit: String
+    let database: String
+    let cas: String
 }
