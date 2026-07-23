@@ -3,6 +3,12 @@ DOCKER_DESKTOP_BIN := /Applications/Docker.app/Contents/Resources/bin
 export PATH := $(DOCKER_DESKTOP_BIN):$(PATH)
 DOCKER := $(shell command -v docker 2>/dev/null || test ! -x $(DOCKER_DESKTOP_BIN)/docker || printf '%s\n' $(DOCKER_DESKTOP_BIN)/docker)
 DOCKER_COMPOSE := $(DOCKER) compose
+HOST_ARCH := $(shell uname -m)
+ifeq ($(HOST_ARCH),arm64)
+export DOCKER_DEFAULT_PLATFORM ?= linux/arm64
+else ifeq ($(HOST_ARCH),aarch64)
+export DOCKER_DEFAULT_PLATFORM ?= linux/arm64
+endif
 APP_PORT ?= 8080
 SCAN_PORT ?= 8081
 SOURCE ?= $(CURDIR)/keygenmusic
