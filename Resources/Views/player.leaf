@@ -104,16 +104,16 @@
             <button class="viz-mode-btn" @click="toggleVisualizerMode"
                     :aria-label="`切换可视化模式：${visualizerMode==='holographic'?'全息声场':'频谱'}`"
                     x-text="visualizerMode==='holographic'?'全息':'频谱'"></button>
-            <button class="viz-toggle" @click="visualizerOpen=false;_syncVisualizer()"
-                    aria-label="折叠可视化面板" title="折叠">▼</button>
+            <button class="viz-toggle" @click="toggleVisualizer"
+                    aria-label="折叠可视化面板" aria-keyshortcuts="V" title="折叠 (V)">▼</button>
         </div>
         <canvas class="viz-canvas" role="presentation" aria-hidden="true"
                 id="visualizerCanvas"></canvas>
     </div>
 
     <button class="viz-expand-btn" x-cloak x-show="currentSong && !visualizerOpen"
-            @click="visualizerOpen=true;_syncVisualizer()"
-            aria-label="展开可视化面板" title="全息声场">▸ 声场</button>
+            @click="toggleVisualizer"
+            aria-label="展开可视化面板" aria-keyshortcuts="V" title="全息声场 (V)">▸ 声场</button>
 
     <div class="scrim" x-cloak x-show="sidebarOpen || playlistOpen" x-transition.opacity @click="sidebarOpen=false;playlistOpen=false"></div>
 
@@ -142,11 +142,17 @@
         </div>
         <div class="dock-grid">
             <div class="now-playing">
-                <div class="track-art"><img src="/brand/orz-logo.svg" alt="" :class="{'pulse':isLoadingTrack}"></div>
-                <div><strong x-text="currentSong?.title || '选择一首曲目开始播放'"></strong><span x-text="nowPlayingMeta"></span></div>
-                <button class="locate-btn" @click="locateCurrentSong"
-                        :disabled="!currentSong || locating" title="定位当前曲目"
-                        aria-label="定位当前曲目" x-text="locating?'定位中…':'定位'"></button>
+                <button class="track-art" @click="locateCurrentSong"
+                        :disabled="!currentSong || locating" title="定位当前曲目 (L)"
+                        aria-label="定位当前曲目" aria-keyshortcuts="L">
+                    <img src="/brand/orz-logo.svg" alt="" :class="{'pulse':isLoadingTrack || locating}">
+                </button>
+                <div class="now-playing-body">
+                    <div class="now-playing-copy">
+                        <strong x-text="currentSong?.title || '选择一首曲目开始播放'"></strong>
+                        <span x-text="nowPlayingMeta"></span>
+                    </div>
+                </div>
             </div>
             <div class="transport">
                 <button @click="prev" :disabled="!canPrev" title="上一首 (P)" aria-label="上一首" aria-keyshortcuts="P">

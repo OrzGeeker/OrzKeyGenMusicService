@@ -19,6 +19,8 @@ test('keyboard shortcuts map playback and navigation actions', () => {
     assert.equal(shortcutAction(event('ArrowRight', { shiftKey: true })), 'forward15');
     assert.equal(shortcutAction(event('n')), 'next');
     assert.equal(shortcutAction(event('p')), 'prev');
+    assert.equal(shortcutAction(event('l')), 'locate');
+    assert.equal(shortcutAction(event('v')), 'visualizer');
     assert.equal(shortcutAction(event('?')), 'help');
     assert.equal(shortcutAction(event('h')), 'help');
     assert.equal(shortcutAction(event('k', { metaKey: true })), 'search');
