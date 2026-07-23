@@ -136,7 +136,7 @@
                     <svg x-show="!isPlaying" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
                         <path d="M8 5.85a1.18 1.18 0 0 1 1.84-.98l9.05 6.15a1.18 1.18 0 0 1 0 1.96l-9.05 6.15A1.18 1.18 0 0 1 8 18.15V5.85Z"></path>
                     </svg>
-                    <svg x-show="isPlaying" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
+                    <svg x-cloak x-show="isPlaying" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
                         <path d="M7 5.5A1.5 1.5 0 0 1 8.5 4h1A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-1A1.5 1.5 0 0 1 7 18.5v-13Zm6 0A1.5 1.5 0 0 1 14.5 4h1A1.5 1.5 0 0 1 17 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-1a1.5 1.5 0 0 1-1.5-1.5v-13Z"></path>
                     </svg>
                 </button>
