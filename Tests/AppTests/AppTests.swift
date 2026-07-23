@@ -782,4 +782,196 @@ final class AppTests: XCTestCase {
             XCTAssertEqual(pl.songs?[2].title, "S2")
         }
     }
+
+    // MARK: - Song Location
+
+    func testSongLocationFirstSong() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let songs = (1...5).map { i in
+            let s = Song(title: "L\(i)", sha256: "loc-hash-\(String(format: "%049d", i))", fileFormat: "mp3", fileSize: i * 100)
+            try! s.create(on: app.db).wait()
+            // Stagger created dates to ensure DESC order
+            Thread.sleep(forTimeInterval: 0.002)
+            return s
+        }
+
+        // The last-created song should be first (index 0) in createdAt DESC order
+        let lastId = songs.last!.id!
+        try app.test(.GET, "/api/songs/\(lastId)/location") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.songId, lastId)
+            XCTAssertEqual(loc.index, 0)
+            XCTAssertEqual(loc.page, 1)
+            XCTAssertEqual(loc.per, 50)
+        }
+    }
+
+    func testSongLocationPerPageBoundary() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        // Create 15 songs
+        let songs = (1...15).map { i in
+            let s = Song(title: "B\(i)", sha256: "loc-b-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            try! s.create(on: app.db).wait()
+            Thread.sleep(forTimeInterval: 0.001)
+            return s
+        }
+
+        // per=5, 5th from newest = index 4 → page 1, 6th from newest = index 5 → page 2
+        let songIdx4 = songs[songs.count - 5].id!
+        let songIdx5 = songs[songs.count - 6].id!
+
+        try app.test(.GET, "/api/songs/\(songIdx4)/location?per=5") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 4)
+            XCTAssertEqual(loc.page, 1)
+            XCTAssertEqual(loc.per, 5)
+        }
+
+        try app.test(.GET, "/api/songs/\(songIdx5)/location?per=5") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 5)
+            XCTAssertEqual(loc.page, 2)
+            XCTAssertEqual(loc.per, 5)
+        }
+    }
+
+    func testSongLocationLastPage() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        // Create 12 songs
+        let songs = (1...12).map { i in
+            let s = Song(title: "LP\(i)", sha256: "loc-lp-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            try! s.create(on: app.db).wait()
+            Thread.sleep(forTimeInterval: 0.001)
+            return s
+        }
+
+        // per=5: indexes 0-4 → page 1, 5-9 → page 2, 10-11 → page 3
+        // First-created song → last in sort (index 11) → page 3
+        let firstSong = songs.first!.id!
+        try app.test(.GET, "/api/songs/\(firstSong)/location?per=5") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 11)
+            XCTAssertEqual(loc.page, 3)
+            XCTAssertEqual(loc.per, 5)
+        }
+    }
+
+    func testSongLocationStableOrder() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        // Create 3 songs with no time gap (same createdAt timestamp)
+        // Fluent's @Timestamp uses second precision for .create,
+        // so songs created within the same second get the same createdAt.
+        // The id DESC tiebreaker ensures stable ordering.
+        let songs = (1...3).map { i in
+            let s = Song(title: "Stable\(i)", sha256: "loc-stable-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            try! s.create(on: app.db).wait()
+            return s
+        }
+
+        // In createdAt DESC, id DESC order, the last-created song is first
+        let lastCreated = songs.last!.id!
+        try app.test(.GET, "/api/songs/\(lastCreated)/location") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 0)
+        }
+    }
+
+    func testSongLocationUnknownId() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let fakeId = "00000000-0000-0000-0000-000000000000"
+        try app.test(.GET, "/api/songs/\(fakeId)/location") { res in
+            XCTAssertEqual(res.status, .notFound)
+        }
+    }
+
+    func testSongLocationInvalidPerParams() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let song = Song(title: "PerTest", sha256: "loc-per-test-\(String(format: "%048d", 1))", fileFormat: "mp3", fileSize: 100)
+        try song.create(on: app.db).wait()
+        guard let songId = song.id else { XCTFail("no id"); return }
+
+        // per=0
+        try app.test(.GET, "/api/songs/\(songId)/location?per=0") { res in
+            XCTAssertEqual(res.status, .badRequest)
+        }
+
+        // per=101
+        try app.test(.GET, "/api/songs/\(songId)/location?per=101") { res in
+            XCTAssertEqual(res.status, .badRequest)
+        }
+
+        // non-numeric per
+        try app.test(.GET, "/api/songs/\(songId)/location?per=abc") { res in
+            XCTAssertEqual(res.status, .badRequest)
+        }
+
+        // negative per
+        try app.test(.GET, "/api/songs/\(songId)/location?per=-1") { res in
+            XCTAssertEqual(res.status, .badRequest)
+        }
+    }
+
+    func testSongLocationResponseMatchesIndexApi() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        // Create 7 songs
+        let songs = (1...7).map { i in
+            let s = Song(title: "Match\(i)", sha256: "loc-match-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            try! s.create(on: app.db).wait()
+            Thread.sleep(forTimeInterval: 0.001)
+            return s
+        }
+
+        // per=3: 4th-from-newest → index 3, page 2
+        let midIdx = songs[songs.count - 4].id!
+        try app.test(.GET, "/api/songs/\(midIdx)/location?per=3") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 3)
+            XCTAssertEqual(loc.page, 2)
+            XCTAssertEqual(loc.per, 3)
+
+            // Verify that page 2 of /api/songs contains this song
+            try app.test(.GET, "/api/songs?page=2&per=3") { pageRes in
+                XCTAssertEqual(pageRes.status, .ok)
+                let page = try pageRes.content.decode(Page<SongResponse>.self)
+                let found = page.items.contains(where: { $0.id == midIdx })
+                XCTAssertTrue(found, "Song should appear on page 2 of /api/songs")
+            }
+        }
+
+        // First song in sort (newest) = index 0, page 1
+        let firstId = songs.last!.id!
+        try app.test(.GET, "/api/songs/\(firstId)/location?per=3") { res in
+            XCTAssertEqual(res.status, .ok)
+            let loc = try res.content.decode(SongLocationResponse.self)
+            XCTAssertEqual(loc.index, 0)
+            XCTAssertEqual(loc.page, 1)
+
+            try app.test(.GET, "/api/songs?page=1&per=3") { pageRes in
+                XCTAssertEqual(pageRes.status, .ok)
+                let page = try pageRes.content.decode(Page<SongResponse>.self)
+                let found = page.items.contains(where: { $0.id == firstId })
+                XCTAssertTrue(found, "First song should appear on page 1 of /api/songs")
+            }
+        }
+    }
 }

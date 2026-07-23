@@ -18,8 +18,11 @@ class OrzAudioPlayer {
         this.decoderHandle = 0;     // 当前播放独占的 C decoder handle
         this.wasmReady = false;     // WASM 是否已初始化
         this.currentSource = null;  // AudioBufferSourceNode (WASM 渲染路径)
-        this.analyser = null;
+        this.analyser = null;       // shared AnalyserNode for all Web Audio paths
         this.masterGain = null;     // shared volume control for every Web Audio path
+        this.mediaElementSource = null; // MediaElementAudioSourceNode (directFile path)
+        this._usesWebAudio = false; // directFile path using Web Audio graph (vs native audioEl.volume)
+        this._mediaElementConnected = false;
 
         // 状态
         this.isPlaying = false;
@@ -282,7 +285,9 @@ class OrzAudioPlayer {
     setVolume(vol) {
         const value = Number(vol);
         this.volume = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : this.volume;
-        this.audioEl.volume = this.volume;
+        // 当 directFile 通过 Web Audio 路由时，音量由 masterGain 控制
+        // 避免同时衰减 audioEl.volume 造成双重衰减
+        this.audioEl.volume = this._usesWebAudio ? 1 : this.volume;
         const gain = this._ensureMasterGain();
         if (gain) {
             gain.gain.cancelScheduledValues?.(this.audioCtx.currentTime);
@@ -295,26 +300,111 @@ class OrzAudioPlayer {
     _ensureMasterGain() {
         if (!this.audioCtx || typeof this.audioCtx.createGain !== 'function') return null;
         if (!this.masterGain) {
-            this.masterGain = this.audioCtx.createGain();
-            this.masterGain.gain.value = this.volume;
-            this.masterGain.connect(this.audioCtx.destination);
+            const gain = this.audioCtx.createGain();
+            gain.gain.value = this.volume;
+            gain.connect(this.audioCtx.destination);
+            this.masterGain = gain;
         }
         return this.masterGain;
     }
 
+    /**
+     * 创建共享 AnalyserNode（幂等）
+     * 返回 analyser 或 null（浏览器不支持时）
+     * 链路：source → analyser → masterGain → destination
+     */
+    _ensureAnalyser() {
+        if (!this.audioCtx || typeof this.audioCtx.createAnalyser !== 'function') return null;
+        if (this.analyser) return this.analyser;
+        const gain = this._ensureMasterGain();
+        if (!gain) return null;
+        const analyser = this.audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        analyser.connect(gain);
+        this.analyser = analyser;
+        return analyser;
+    }
+
+    /**
+     * 返回用于连接音频源的输出节点
+     * 优先 analyser，回退 masterGain，最后 destination
+     */
     _outputNode() {
-        return this._ensureMasterGain() || this.audioCtx.destination;
+        return this._ensureAnalyser() || this._ensureMasterGain() || this.audioCtx?.destination;
+    }
+
+    /**
+     * 获取共享分析器（只读）
+     * @returns {AnalyserNode|null}
+     */
+    getAnalyser() {
+        return this.analyser || null;
+    }
+
+    /**
+     * 将 <audio> 元素幂等接入共享分析链路。
+     * 任一步失败都保留原生 audioEl 输出和音量控制。
+     */
+    _ensureDirectAudioGraph() {
+        try {
+            if (!this.audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return false;
+                this.audioCtx = new AudioContextClass();
+            }
+            if (this.audioCtx.state === 'suspended') {
+                this.audioCtx.resume().catch(() => {});
+            }
+            const analyser = this._ensureAnalyser();
+            if (!analyser || typeof this.audioCtx.createMediaElementSource !== 'function') return false;
+            if (!this.mediaElementSource) {
+                this.mediaElementSource = this.audioCtx.createMediaElementSource(this.audioEl);
+            }
+            if (!this._mediaElementConnected) {
+                this.mediaElementSource.connect(analyser);
+                this._mediaElementConnected = true;
+            }
+            this._usesWebAudio = true;
+            this.audioEl.volume = 1;
+            return true;
+        } catch (_) {
+            // createMediaElementSource 成功后，媒体输出已归 Web Audio 管理；
+            // 若 analyser 连接失败，至少接到 gain/destination，避免静音。
+            if (this.mediaElementSource && !this._mediaElementConnected) {
+                try {
+                    const fallbackOutput = this._ensureMasterGain() || this.audioCtx?.destination;
+                    if (fallbackOutput) {
+                        this.mediaElementSource.connect(fallbackOutput);
+                        this._mediaElementConnected = true;
+                        this._usesWebAudio = true;
+                        this.audioEl.volume = 1;
+                        return true;
+                    }
+                } catch (_) {}
+            }
+            this._usesWebAudio = false;
+            this.audioEl.volume = this.volume;
+            return false;
+        }
     }
 
     // ── 内部方法 ──
 
     /**
      * 直接文件播放 (directFile / serverDecode)
+     * 尝试将 audio 元素接入 Web Audio 分析链路；失败时回退原生播放
      */
     async _playDirect(url, playGen = this._playGen) {
         this._assertCurrentPlayback(playGen);
         this._usingWasm = false;
         this.audioEl.src = url;
+
+        // 尝试创建/恢复 AudioContext 并将 audio 元素接入分析器
+        if (!this._ensureDirectAudioGraph()) {
+            this.audioEl.volume = this.volume;
+        }
+
         await this.audioEl.play();
         this._assertCurrentPlayback(playGen);
         this._setPlaying(true);
@@ -809,5 +899,10 @@ class OrzAudioPlayer {
             this.audioCtx.close();
             this.audioCtx = null;
         }
+        this.analyser = null;
+        this.masterGain = null;
+        this.mediaElementSource = null;
+        this._mediaElementConnected = false;
+        this._usesWebAudio = false;
     }
 }

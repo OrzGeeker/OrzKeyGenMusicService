@@ -27,6 +27,7 @@ const context = vm.createContext({
     AbortController,
     clearTimeout,
     setTimeout,
+    window: {},
 });
 vm.runInContext(`${source}\nglobalThis.TestPlayer = OrzAudioPlayer;`, context);
 const Player = context.TestPlayer;
@@ -187,4 +188,130 @@ test('volume remains clamped and works before Web Audio is initialized', () => {
     assert.equal(player.audioEl.volume, 0);
     player.setVolume(2);
     assert.equal(player.audioEl.volume, 1);
+});
+
+function installAudioContext({ analyser = true, mediaSource = true, mediaSourceThrows = false } = {}) {
+    const counters = {
+        contexts: 0,
+        gains: 0,
+        analysers: 0,
+        mediaSources: 0,
+        gainConnections: 0,
+        analyserConnections: 0,
+        mediaConnections: 0,
+    };
+    const destination = { id: 'speakers' };
+    const gainParam = {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime(value) { this.value = value; },
+    };
+    const gainNode = {
+        gain: gainParam,
+        connect(node) { counters.gainConnections++; this.connectedTo = node; },
+    };
+    const analyserNode = {
+        connect(node) { counters.analyserConnections++; this.connectedTo = node; },
+    };
+    const mediaNode = {
+        connect(node) { counters.mediaConnections++; this.connectedTo = node; },
+    };
+    class FakeAudioContext {
+        constructor() {
+            counters.contexts++;
+            this.state = 'running';
+            this.currentTime = 0;
+            this.destination = destination;
+        }
+        createGain() { counters.gains++; return gainNode; }
+        createAnalyser() {
+            if (!analyser) throw new Error('analyser unavailable');
+            counters.analysers++;
+            return analyserNode;
+        }
+        createMediaElementSource() {
+            counters.mediaSources++;
+            if (!mediaSource || mediaSourceThrows) throw new Error('media source unavailable');
+            return mediaNode;
+        }
+        resume() { this.state = 'running'; return Promise.resolve(); }
+    }
+    context.window.AudioContext = FakeAudioContext;
+    context.window.webkitAudioContext = undefined;
+    return { counters, destination, gainNode, analyserNode, mediaNode };
+}
+
+test('direct playback creates and connects the shared analysis graph only once', async () => {
+    const graph = installAudioContext();
+    const player = new Player();
+    player.setVolume(0.25);
+
+    await player._playDirect('/one.mp3', player._playGen);
+    await player._playDirect('/two.mp3', player._playGen);
+
+    assert.equal(graph.counters.contexts, 1);
+    assert.equal(graph.counters.gains, 1);
+    assert.equal(graph.counters.analysers, 1);
+    assert.equal(graph.counters.mediaSources, 1);
+    assert.equal(graph.counters.gainConnections, 1);
+    assert.equal(graph.counters.analyserConnections, 1);
+    assert.equal(graph.counters.mediaConnections, 1);
+    assert.equal(graph.mediaNode.connectedTo, graph.analyserNode);
+    assert.equal(graph.analyserNode.connectedTo, graph.gainNode);
+    assert.equal(graph.gainNode.connectedTo, graph.destination);
+    assert.equal(player.getAnalyser(), graph.analyserNode);
+});
+
+test('Web Audio direct playback applies volume only through master gain', async () => {
+    const graph = installAudioContext();
+    const player = new Player();
+    player.setVolume(0.4);
+    assert.equal(player.audioEl.volume, 0.4);
+
+    await player._playDirect('/direct.ogg', player._playGen);
+
+    assert.equal(player.audioEl.volume, 1);
+    assert.equal(graph.gainNode.gain.value, 0.4);
+    player.setVolume(0.2);
+    assert.equal(player.audioEl.volume, 1);
+    assert.equal(graph.gainNode.gain.value, 0.2);
+});
+
+test('missing analyser keeps native direct playback and volume control', async () => {
+    installAudioContext({ analyser: false });
+    const player = new Player();
+    player.setVolume(0.35);
+
+    await player._playDirect('/native.mp3', player._playGen);
+
+    assert.equal(player._usesWebAudio, false);
+    assert.equal(player.audioEl.volume, 0.35);
+    assert.equal(player.getAnalyser(), null);
+    assert.equal(player.audioEl.paused, false);
+});
+
+test('media element source creation failure keeps native direct playback', async () => {
+    const graph = installAudioContext({ mediaSourceThrows: true });
+    const player = new Player();
+    player.setVolume(0.6);
+
+    await player._playDirect('/fallback.mp3', player._playGen);
+
+    assert.equal(graph.counters.mediaSources, 1);
+    assert.equal(player.mediaElementSource, null);
+    assert.equal(player._usesWebAudio, false);
+    assert.equal(player.audioEl.volume, 0.6);
+    assert.equal(player.audioEl.paused, false);
+});
+
+test('WASM-style sources receive the same analyser returned to the UI', () => {
+    const graph = installAudioContext();
+    const player = new Player();
+    player.audioCtx = new context.window.AudioContext();
+    const sourceNode = { connectedTo: null, connect(node) { this.connectedTo = node; } };
+
+    sourceNode.connect(player._outputNode());
+
+    assert.equal(sourceNode.connectedTo, graph.analyserNode);
+    assert.equal(player.getAnalyser(), graph.analyserNode);
 });

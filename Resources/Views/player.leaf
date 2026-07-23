@@ -11,10 +11,12 @@
     <link rel="stylesheet" href="/audio/app.css?v=20260722-transport-v1">
     <script defer src="/audio/player.js?v=20260718-master-volume-v1"></script>
     <script defer src="/audio/decoder-manifest.generated.js?v=20260718-sdk-v1"></script>
+    <script defer src="/audio/visualizer.js?v=20260723"></script>
     <script defer src="/audio/app.js?v=20260718-focus-ring-v1"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body x-data="playerApp()" @keydown.window="handleShortcut($event)" :class="{'drawer-open': sidebarOpen}">
+<body x-data="playerApp()" @keydown.window="handleShortcut($event)"
+      :class="{'drawer-open': sidebarOpen,'visualizer-visible':currentSong && visualizerOpen}">
     <div class="app-shell">
         <aside class="sidebar" :class="{'open': sidebarOpen}" aria-label="音频格式分类">
             <div class="brand-row">
@@ -72,7 +74,8 @@
                     </div>
                     <template x-for="(song,index) in songs" :key="song.id">
                         <div class="song-row" role="row" tabindex="0"
-                             :class="{'active':currentSong?.id===song.id,'selected':selectedSong?.id===song.id}"
+                             :data-song-id="song.id"
+                             :class="{'active':currentSong?.id===song.id,'selected':selectedSong?.id===song.id,'locate-pulse':locatedSongId===song.id}"
                              @click="selectedSong=song" @dblclick="playSong(song)" @keydown.enter="playSong(song)">
                             <button class="row-play" @click.stop="playSong(song)" :aria-label="`播放 ${song.title}`">
                                 <span x-show="currentSong?.id!==song.id || !isPlaying">▶</span>
@@ -95,6 +98,22 @@
             </section>
         </main>
     </div>
+
+    <div class="viz-panel" x-cloak x-show="currentSong && visualizerOpen">
+        <div class="viz-toolbar">
+            <button class="viz-mode-btn" @click="toggleVisualizerMode"
+                    :aria-label="`切换可视化模式：${visualizerMode==='holographic'?'全息声场':'频谱'}`"
+                    x-text="visualizerMode==='holographic'?'全息':'频谱'"></button>
+            <button class="viz-toggle" @click="visualizerOpen=false;_syncVisualizer()"
+                    aria-label="折叠可视化面板" title="折叠">▼</button>
+        </div>
+        <canvas class="viz-canvas" role="presentation" aria-hidden="true"
+                id="visualizerCanvas"></canvas>
+    </div>
+
+    <button class="viz-expand-btn" x-cloak x-show="currentSong && !visualizerOpen"
+            @click="visualizerOpen=true;_syncVisualizer()"
+            aria-label="展开可视化面板" title="全息声场">▸ 声场</button>
 
     <div class="scrim" x-cloak x-show="sidebarOpen || playlistOpen" x-transition.opacity @click="sidebarOpen=false;playlistOpen=false"></div>
 
@@ -125,6 +144,9 @@
             <div class="now-playing">
                 <div class="track-art"><img src="/brand/orz-logo.svg" alt="" :class="{'pulse':isLoadingTrack}"></div>
                 <div><strong x-text="currentSong?.title || '选择一首曲目开始播放'"></strong><span x-text="nowPlayingMeta"></span></div>
+                <button class="locate-btn" @click="locateCurrentSong"
+                        :disabled="!currentSong || locating" title="定位当前曲目"
+                        aria-label="定位当前曲目" x-text="locating?'定位中…':'定位'"></button>
             </div>
             <div class="transport">
                 <button @click="prev" :disabled="!canPrev" title="上一首 (P)" aria-label="上一首" aria-keyshortcuts="P">

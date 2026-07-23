@@ -14,6 +14,7 @@ struct SongController: RouteCollection {
             song.get(use: show)
             song.get("stream", use: stream)
             song.get("raw", use: raw)
+            song.get("location", use: location)
         }
     }
 
@@ -39,13 +40,19 @@ struct SongController: RouteCollection {
         )
     }
 
+    /// 统一默认排序：createdAt DESC, id DESC（index 与 location 共用）
+    private func defaultSort(_ query: QueryBuilder<Song>) -> QueryBuilder<Song> {
+        query.sort(\.$createdAt, .descending).sort(\.$id, .descending)
+    }
+
     /// GET /api/songs — 歌曲列表（分页，支持 &format= 过滤）
     @Sendable
     func index(req: Request) async throws -> Page<SongResponse> {
         var query = Song.query(on: req.db)
             .with(\.$artist)
             .with(\.$album)
-            .sort(\.$createdAt, .descending)
+
+        query = defaultSort(query)
 
         if let format = req.query[String.self, at: "format"], !format.isEmpty {
             query = query.filter(\.$fileFormat == format.lowercased())
@@ -202,6 +209,47 @@ struct SongController: RouteCollection {
         }
 
         return try await req.fileio.asyncStreamFile(at: fullPath)
+    }
+
+    /// GET /api/songs/:id/location?per=50 — 曲目在默认排序（createdAt DESC, id DESC）中的位置
+    @Sendable
+    func location(req: Request) async throws -> SongLocationResponse {
+        guard let songId = req.parameters.get("id", as: UUID.self) else {
+            throw Abort(.notFound)
+        }
+        guard let _ = try await Song.find(songId, on: req.db) else {
+            throw Abort(.notFound)
+        }
+
+        // 验证 per 参数：1…100，缺省 50
+        let per: Int
+        if let rawPer = req.query[String.self, at: "per"], !rawPer.isEmpty {
+            guard let parsed = Int(rawPer), parsed >= 1, parsed <= 100 else {
+                throw Abort(.badRequest, reason: "per must be an integer between 1 and 100")
+            }
+            per = parsed
+        } else {
+            per = 50
+        }
+
+        // 按默认排序取出所有 ID，找到目标曲目位置（首版优先正确性）
+        let allIds = try await Song.query(on: req.db)
+            .sort(\.$createdAt, .descending)
+            .sort(\.$id, .descending)
+            .all(\.$id)
+
+        guard let position = allIds.firstIndex(of: songId) else {
+            throw Abort(.notFound)
+        }
+
+        let page = (position / per) + 1
+
+        return SongLocationResponse(
+            songId: songId,
+            index: position,
+            page: page,
+            per: per
+        )
     }
 
     // MARK: - Helpers

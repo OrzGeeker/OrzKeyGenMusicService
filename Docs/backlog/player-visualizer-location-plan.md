@@ -99,15 +99,15 @@ GET /api/songs/:id/location?per=50
 
 | ID | 状态 | 任务 | 依赖 | 建议模型 |
 |:---|:-----|:-----|:-----|:---------|
-| PVL01 | 待办 | 增加稳定排序和曲目位置接口 | 无 | GPT-5.4 / DeepSeek V4 Flash |
-| PVL02 | 待办 | 实现前端当前曲目定位流程 | PVL01 | GPT-5.4 / GPT-5.5 |
-| PVL03 | 待办 | 统一浏览器音频分析链路 | 无 | GPT-5.5 |
-| PVL04 | 待办 | 建立可视化纯函数与 Canvas 基础组件 | PVL03 | GPT-5.4 / GPT-5.5 |
-| PVL05 | 待办 | 接入镜像频谱和连续光带 | PVL04 | GPT-5.4 / DeepSeek V4 Flash |
-| PVL06 | 待办 | 增加峰值粒子、余辉和模式切换 | PVL05 | GPT-5.4 / DeepSeek V4 Flash |
-| PVL07 | 待办 | 完成页面面板与桌面视觉样式 | PVL04 | GPT-5.4 / DeepSeek V4 Flash |
-| PVL08 | 待办 | 完成移动端、无障碍和生命周期降级 | PVL05、PVL06、PVL07 | GPT-5.4 / GPT-5.5 |
-| PVL09 | 待办 | 完整回归、验收和文档收口 | PVL02、PVL03、PVL08 | GPT-5.5 |
+| PVL01 | 完成 | 增加稳定排序和曲目位置接口 | 无 | GPT-5.4 / DeepSeek V4 Flash |
+| PVL02 | 完成 | 实现前端当前曲目定位流程 | PVL01 | GPT-5.4 / GPT-5.5 |
+| PVL03 | 完成 | 统一浏览器音频分析链路 | 无 | GPT-5.5 |
+| PVL04 | 完成 | 建立可视化纯函数与 Canvas 基础组件 | PVL03 | GPT-5.4 / GPT-5.5 |
+| PVL05 | 完成 | 接入镜像频谱和连续光带 | PVL04 | GPT-5.4 / DeepSeek V4 Flash |
+| PVL06 | 完成 | 增加峰值粒子、余辉和模式切换 | PVL05 | GPT-5.4 / DeepSeek V4 Flash |
+| PVL07 | 完成 | 完成页面面板与桌面视觉样式 | PVL04 | GPT-5.4 / DeepSeek V4 Flash |
+| PVL08 | 完成 | 完成移动端、无障碍和生命周期降级 | PVL05、PVL06、PVL07 | GPT-5.4 / GPT-5.5 |
+| PVL09 | 完成 | 完整回归、验收和文档收口 | PVL02、PVL03、PVL08 | GPT-5.5 |
 
 ### PVL01：增加稳定排序和曲目位置接口
 
@@ -315,8 +315,7 @@ node --test Tests/Browser/*.test.mjs
 
 ## 7. 验收记录
 
-尚未开始。每次完成一个任务后追加一行，不覆盖历史记录。
-
 | 日期 | 任务 | Commit | 自动验证 | 人工验证 | 备注 |
 |:-----|:-----|:-------|:---------|:---------|:-----|
 | — | — | — | — | — | — |
+| 2026-07-23 | PVL01–PVL09 | 本提交 | `swift test`：53/53；`node --test Tests/Browser/*.test.mjs`：57/57；`git diff --check` | 桌面 1280px、移动 390px；MP3 `directFile`、YM `wasmDecode`、SC68 `serverDecode`；筛选后定位、暂停衰减、折叠与移动端避让 | Swift 首次构建需为 Clang/SwiftPM 指定可写临时模块缓存；SC68 真实样本持续播放至 3:00 时长，进度与音波正常 |

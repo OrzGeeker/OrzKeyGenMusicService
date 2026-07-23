@@ -22,6 +22,7 @@ function playerApp(){return{
     songs:[],page:1,perPage:50,hasMore:false,isLoading:false,totalResults:0,searchQuery:'',formatFilter:'',formatCounts:{},libraryTotal:0,
     currentSong:null,selectedSong:null,queue:[],queueIndex:-1,isPlaying:false,isLoadingTrack:false,volume:.7,lastVolume:.7,progressPercent:0,currentTime:0,duration:0,seekPreview:null,
     sidebarOpen:false,playlistOpen:false,shortcutOpen:false,playlists:[],newPlaylistName:'',toasts:[],toastId:0,
+    locating:false,locatedSongId:null,visualizerOpen:false,visualizerMode:'holographic',_visualizer:null,_visualizerInited:false,
     shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
     async init(){
         player=new OrzAudioPlayer(); player.volume=this.volume; this.attachPlayerCallbacks(); player.initWasm();
@@ -30,8 +31,20 @@ function playerApp(){return{
     },
     attachPlayerCallbacks(){
         player.onTimeUpdate=(ct,dur)=>{this.currentTime=ct;this.duration=dur;this.isPlaying=player.isPlaying;this.progressPercent=dur>0?clamp(ct/dur)*100:0;if(dur>0&&this.currentSong&&!this.currentSong.duration)this.currentSong.duration=dur};
-        player.onEnded=()=>this.next(); player.onPlaybackStateChange=value=>{this.isPlaying=value;this.isLoadingTrack=false};
+        player.onEnded=()=>this.next(); player.onPlaybackStateChange=value=>{this.isPlaying=value;this.isLoadingTrack=false;this._syncVisualizer()};
         player.onError=error=>{this.isLoadingTrack=false;this.notify(`无法播放：${error?.message||'未知错误'}`,'error')};
+    },
+    _initVisualizer(){
+        if(!globalThis.OrzAudioVisualizer)return;const canvas=document.getElementById('visualizerCanvas');if(!canvas||this._visualizer)return;try{const rm=window.matchMedia('(prefers-reduced-motion:reduce)').matches;this._visualizer=new OrzAudioVisualizer({canvas,analyser:player?.getAnalyser()||null,reducedMotion:rm});this._visualizerInited=true}catch(e){console.warn('Visualizer init failed:',e);this._visualizer=null}},
+    _syncVisualizer(){
+        if(!this._visualizer){if(this._visualizerInited)return;if(this.isPlaying&&!this._visualizerInited){this._initVisualizer();if(!this._visualizer)return;this.visualizerOpen=true}else return}
+        this._visualizer.setAnalyser(player?.getAnalyser()||null);
+        if(this.isPlaying&&this.visualizerOpen)this._visualizer.start();
+        else if(this.currentSong&&this.visualizerOpen)this._visualizer.pause();
+        else this._visualizer.stop()
+    },
+    toggleVisualizerMode(){
+        const next=this.visualizerMode==='holographic'?'spectrum':'holographic';this.visualizerMode=next;if(this._visualizer)this._visualizer.setMode(next)
     },
     get formatGroups(){
         const known=new Set(ORZ_FORMATS.map(x=>x.id)); const extras=Object.keys(this.formatCounts).filter(x=>!known.has(x)).map(id=>({id,label:id.toUpperCase(),group:'other',color:'#9ca3af'}));
@@ -54,6 +67,9 @@ function playerApp(){return{
     songURL(page=this.page){const query=new URLSearchParams({page:String(page),per:String(this.perPage)});if(this.formatFilter)query.set('format',this.formatFilter);return `/api/songs?${query}`},
     async loadSongs(){this.isLoading=true;this.page=1;try{const res=await fetch(this.songURL());if(!res.ok)throw new Error(`HTTP ${res.status}`);const data=await res.json();this.songs=data.items||[];this.totalResults=data.metadata?.total||0;this.hasMore=(data.metadata?.page*data.metadata?.per)<this.totalResults;this.mergeVisibleFormatCounts()}catch(error){this.songs=[];this.notify('曲目列表加载失败','error')}finally{this.isLoading=false}},
     async loadMore(){if(this.isLoading||!this.hasMore||this.searchQuery)return;this.isLoading=true;try{const res=await fetch(this.songURL(++this.page));if(!res.ok)throw new Error(`HTTP ${res.status}`);const data=await res.json();this.songs=[...this.songs,...(data.items||[])];this.hasMore=(data.metadata?.page*data.metadata?.per)<(data.metadata?.total||0)}catch(error){this.page--;this.notify('加载更多曲目失败','error')}finally{this.isLoading=false}},
+    async loadSongPage(page){this.isLoading=true;this.page=page;this.songs=[];try{const res=await fetch(this.songURL(page));if(!res.ok)throw new Error(`HTTP ${res.status}`);const data=await res.json();this.songs=data.items||[];this.totalResults=data.metadata?.total||0;this.hasMore=(data.metadata?.page*data.metadata?.per)<this.totalResults}catch(error){throw error}finally{this.isLoading=false}},
+    scrollToSong(songId){const row=document.querySelector(`[data-song-id="${songId}"]`);if(!row)return false;row.scrollIntoView({behavior:'smooth',block:'center'});row.focus?.({preventScroll:true});this.locatedSongId=songId;setTimeout(()=>{if(this.locatedSongId===songId)this.locatedSongId=null},1200);return true},
+    async locateCurrentSong(){if(!this.currentSong||this.locating)return false;this.locating=true;this.locatedSongId=null;const songId=this.currentSong.id;let snapshot=null;try{if(this.scrollToSong(songId))return true;snapshot={searchQuery:this.searchQuery,formatFilter:this.formatFilter,page:this.page,songs:[...this.songs],totalResults:this.totalResults,hasMore:this.hasMore};this.searchQuery='';this.formatFilter='';const res=await fetch(`/api/songs/${songId}/location?per=${this.perPage}`);if(!res.ok)throw new Error(`HTTP ${res.status}`);const loc=await res.json();await this.loadSongPage(loc.page);await this.$nextTick();if(!this.scrollToSong(songId))throw new Error('Song row missing from located page');return true}catch(error){if(snapshot){this.searchQuery=snapshot.searchQuery;this.formatFilter=snapshot.formatFilter;this.page=snapshot.page;this.songs=snapshot.songs;this.totalResults=snapshot.totalResults;this.hasMore=snapshot.hasMore}this.notify('无法定位当前曲目','error');return false}finally{this.locating=false}},
     onScroll(){if(document.documentElement.scrollHeight-window.scrollY-window.innerHeight<240)this.loadMore()},
     async search(){const query=this.searchQuery.trim();if(!query)return this.loadSongs();this.isLoading=true;try{const params=new URLSearchParams({q:query});if(this.formatFilter)params.set('format',this.formatFilter);const res=await fetch(`/api/songs/search?${params}`);if(!res.ok)throw new Error(`HTTP ${res.status}`);this.songs=await res.json();this.totalResults=this.songs.length;this.hasMore=false}catch(error){this.notify('搜索失败','error')}finally{this.isLoading=false}},
     async selectFormat(format){this.formatFilter=format;this.sidebarOpen=false;this.selectedSong=null;if(this.searchQuery.trim())await this.search();else await this.loadSongs()},
