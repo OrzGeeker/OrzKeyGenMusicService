@@ -49,11 +49,14 @@ if [ -f "$FILEPATH" ]; then
     exit 1
 fi
 
-# ---- 构建 Compose 参数 ----
-COMPOSE_FLAGS=""
-if [ -n "$COMPOSE_PROJECT" ]; then
-    COMPOSE_FLAGS="--project-name $COMPOSE_PROJECT"
-fi
+# ---- Docker Compose 包装 ----
+compose() {
+    if [ -n "$COMPOSE_PROJECT" ]; then
+        docker compose --project-name "$COMPOSE_PROJECT" "$@"
+    else
+        docker compose "$@"
+    fi
+}
 
 # ---- 执行备份 ----
 echo "Creating database backup: $FILEPATH"
@@ -62,7 +65,7 @@ echo "Creating database backup: $FILEPATH"
 # 避免暴露数据库端口或密码在命令行参数中。
 # 密码通过 PGPASSWORD 环境变量传递，不打印日志。
 PGPASSWORD="${DATABASE_PASSWORD:-vapor_password}" \
-    docker compose "$COMPOSE_FLAGS" exec -T db \
+    compose exec -T db \
     pg_dump \
     -U "${DATABASE_USERNAME:-vapor_username}" \
     -d "${DATABASE_NAME:-vapor_database}" \
@@ -72,13 +75,13 @@ PGPASSWORD="${DATABASE_PASSWORD:-vapor_password}" \
     2>&1
 
 # 从容器中复制备份到宿主机
-docker compose "$COMPOSE_FLAGS" cp \
+compose cp \
     "db:/tmp/${FILENAME}" \
     "$FILEPATH" \
     2>&1
 
 # 清理容器内临时文件（忽略失败）
-docker compose "$COMPOSE_FLAGS" exec -T db \
+compose exec -T db \
     rm -f "/tmp/${FILENAME}" \
     2>/dev/null || true
 

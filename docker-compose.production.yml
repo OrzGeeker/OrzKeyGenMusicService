@@ -26,7 +26,7 @@ volumes:
 services:
   cas-init:
     image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
-    build: null
+    build: !reset null
     user: root
     entrypoint: ["/bin/sh", "-c"]
     command: ["chown -R 999:999 /data/music"]
@@ -36,7 +36,7 @@ services:
 
   app:
     image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
-    build: null
+    build: !reset null
     environment:
       <<: *shared_environment
     depends_on:
@@ -52,7 +52,7 @@ services:
 
   migrate:
     image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
-    build: null
+    build: !reset null
     environment:
       <<: *shared_environment
     depends_on:
@@ -64,7 +64,7 @@ services:
 
   scan:
     image: ${IMAGE_REF:?IMAGE_REF is required — use ghcr.io/<owner>/orzmusic:<version>}
-    build: null
+    build: !reset null
     environment:
       <<: *shared_environment
     depends_on:
@@ -72,7 +72,7 @@ services:
         condition: service_healthy
       cas-init:
         condition: service_completed_successfully
-    volumes:
+    volumes: !override
       - cas_data:/data/music
     ports:
       - '8081:8081'

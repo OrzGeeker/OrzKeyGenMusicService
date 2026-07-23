@@ -338,6 +338,21 @@ pg_restore --list ./backups/orzmusic-db-0.0.1-*.dump | head -20
 | YYYY-MM-DD | vX.Y.Z | <commit> | <digest> | <停机时长> | <结果> |
 ```
 
+### 7.3 查漏补缺记录
+
+2026-07-23 复核当前实现后补齐以下发布阻塞点：
+
+- 生产 Compose override 使用 `!reset` 清除开发配置中的应用 `build:`，并使用 `!override` 避免 `scan` 继承开发机源目录挂载。验证命令：`IMAGE_REF=ghcr.io/test/orzmusic:0.0.1 docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet`。
+- Dockerfile healthcheck 改为 `/api/health`，与发布 readiness 口径一致。
+- Release workflow 使用 `docker/build-push-action` 的 `steps.build.outputs.digest` 记录镜像 digest，避免 push-only 构建后本地 `docker inspect` 返回 `unknown`。
+- `db-backup.sh` 改用 Compose 包装函数传递可选 `COMPOSE_PROJECT`，避免空参数破坏真实 `docker compose` 调用。
+- Makefile 补齐 `release-smoke` 入口，保证运维手册中的 `make release-smoke` 可执行。
+- `Docs/backlog/README.md` 移除已归档发布计划的旧链接。
+
+仍需在真正发布时完成：
+
+- 正式 Git Tag 必须使用 `vX.Y.Z`。如果历史上存在不带 `v` 的本地标签，例如 `0.0.1`，不得作为正式发布标签使用；应在确认目标提交后创建并推送 `v0.0.1` 或后续版本标签。
+
 ## 8. 测试 Tag 人工验证步骤（R04）
 
 在推送正式 `vX.Y.Z` 标签前，建议创建一个测试标签确认工作流正确运行：

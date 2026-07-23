@@ -180,6 +180,10 @@ db-backup:
 release-preflight:
 	./script/release-preflight.sh
 
+.PHONY: release-smoke
+release-smoke:
+	./script/release-smoke.sh
+
 .PHONY: release-upgrade
 release-upgrade:
 	./script/release-upgrade.sh

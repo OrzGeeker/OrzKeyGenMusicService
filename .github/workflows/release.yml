@@ -73,6 +73,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -94,9 +95,10 @@ jobs:
       # --- 镜像 Digest ---
       - name: Save image digest
         run: |
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }} 2>/dev/null || echo "unknown")
-          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
-          echo "Pushed digest: $DIGEST"
+          DIGEST="${{ steps.build.outputs.digest }}"
+          IMAGE_DIGEST="${{ env.IMAGE_NAME }}@${DIGEST}"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "Pushed digest: $IMAGE_DIGEST"
 
       # --- GitHub Release ---
       - name: Create Release
