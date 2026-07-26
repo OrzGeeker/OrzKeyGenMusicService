@@ -1,6 +1,7 @@
 import Foundation
 import Vapor
 import Fluent
+import FluentSQL
 import OrzAudioKit
 
 struct SongController: RouteCollection {
@@ -31,12 +32,22 @@ struct SongController: RouteCollection {
     /// GET /api/songs/formats — total and per-format counts for library navigation.
     @Sendable
     func formats(req: Request) async throws -> FormatSummary {
-        let values = try await Song.query(on: req.db).field(\.$fileFormat).all().map { $0.fileFormat.lowercased() }
-        let counts = Dictionary(values.map { ($0, 1) }, uniquingKeysWith: +)
+        struct AggregateRow: Decodable {
+            let format: String
+            let count: Int
+        }
+
+        guard let sql = req.db as? any SQLDatabase else {
+            throw Abort(.internalServerError, reason: "Configured database does not support SQL aggregation")
+        }
+        let rows = try await sql.raw(
+            "SELECT LOWER(file_format) AS format, COUNT(*) AS count " +
+            "FROM songs GROUP BY LOWER(file_format) ORDER BY format"
+        ).all(decoding: AggregateRow.self)
+
         return FormatSummary(
-            total: values.count,
-            formats: counts.map { FormatCount(format: $0.key, count: $0.value) }
-                .sorted { $0.format < $1.format }
+            total: rows.reduce(0) { $0 + $1.count },
+            formats: rows.map { FormatCount(format: $0.format, count: $0.count) }
         )
     }
 
@@ -59,7 +70,6 @@ struct SongController: RouteCollection {
         }
 
         let page = try await query.paginate(for: req)
-        try await backfillDurations(for: page.items, req: req)
 
         return .init(
             items: page.items.map { SongResponse(song: $0) },
@@ -74,68 +84,29 @@ struct SongController: RouteCollection {
             return []
         }
 
-        let safeQuery = rawQuery.replacingOccurrences(of: "'", with: "''")
-            .trimmingCharacters(in: .whitespaces)
-
-        guard !safeQuery.isEmpty else { return [] }
+        let normalizedQuery = rawQuery.trimmingCharacters(in: .whitespaces)
+        guard !normalizedQuery.isEmpty else { return [] }
+        let pattern = "%\(normalizedQuery.lowercased())%"
+        let searchFilter: SQLQueryString = """
+            id IN (
+                SELECT id FROM songs WHERE LOWER(title) LIKE \(bind: pattern)
+                UNION
+                SELECT songs.id FROM songs
+                 JOIN artists ON artists.id = songs.artist_id
+                 WHERE LOWER(artists.name) LIKE \(bind: pattern)
+            )
+            """
 
         var query = Song.query(on: req.db)
+            .with(\.$artist)
+            .with(\.$album)
         if let format = req.query[String.self, at: "format"]?.trimmingCharacters(in: .whitespacesAndNewlines), !format.isEmpty {
             query = query.filter(\.$fileFormat == format.lowercased())
         }
         query = query
-            .join(Artist.self, on: \Artist.$id == \Song.$artist.$id, method: .left)
-            .filter(.sql(unsafeRaw: "LOWER(title) LIKE '%\(safeQuery.lowercased())%' OR LOWER(\"artists\".\"name\") LIKE '%\(safeQuery.lowercased())%'"))
+            .filter(.sql(embed: searchFilter))
         let songs = try await query.limit(50).all()
-
-        for song in songs {
-            try await song.$artist.load(on: req.db)
-            try await song.$album.load(on: req.db)
-        }
-        try await backfillDurations(for: songs, req: req)
         return songs.map { SongResponse(song: $0) }
-    }
-
-    /// Lazily repairs historical rows scanned before native decoder metadata
-    /// was used. Work is bounded to four files at a time and persisted, so
-    /// subsequent list requests do not repeat decoder initialization.
-    private func backfillDurations(for songs: [Song], req: Request) async throws {
-        let missing = songs.compactMap { song -> (Song, String)? in
-            guard song.duration == nil,
-                  AudioFormat(rawValue: song.fileFormat) != nil else { return nil }
-            let path = req.application.casStorage.resolve(sha256: song.sha256, format: song.fileFormat)
-            guard FileManager.default.fileExists(atPath: path) else { return nil }
-            return (song, path)
-        }
-
-        for batchStart in stride(from: 0, to: missing.count, by: 4) {
-            let batch = missing[batchStart..<min(batchStart + 4, missing.count)]
-            let resolved = await withTaskGroup(of: (Song, Double?).self) { group in
-                for (song, path) in batch {
-                    group.addTask {
-                        let duration: Double?
-                        if CDecoderBridge.canDecode(format: song.fileFormat) {
-                            duration = try? CDecoderBridge.duration(filePath: path, format: song.fileFormat)
-                        } else {
-                            let output = try? await ProcessRunner.execute(arguments: [
-                                "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                                "-of", "default=noprint_wrappers=1:nokey=1", path,
-                            ])
-                            duration = output.flatMap(Double.init).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-                        }
-                        return (song, duration)
-                    }
-                }
-                var values: [(Song, Double?)] = []
-                for await value in group { values.append(value) }
-                return values
-            }
-            for (song, duration) in resolved {
-                guard let duration else { continue }
-                song.duration = duration
-                try await song.update(on: req.db)
-            }
-        }
     }
 
     /// GET /api/songs/:id — 歌曲详情
@@ -187,8 +158,19 @@ struct SongController: RouteCollection {
 
         case .serverDecode(let path, let fmt):
             // 尝试从转码缓存读取（避免重复 ffmpeg）
-            let cachePath = try await cachedDecode(originalPath: path, sha256: song.sha256, format: fmt, subsong: subsong, cas: req.application.casStorage)
-            let res = try await req.fileio.asyncStreamFile(at: cachePath)
+            let cachePath = try await cachedDecode(
+                originalPath: path,
+                sha256: song.sha256,
+                format: fmt,
+                subsong: subsong,
+                cas: req.application.casStorage,
+                coordinator: req.application.decodeCacheCoordinator,
+                logger: req.logger
+            )
+            let lease = try DecodedCacheFileLease.acquireShared(for: cachePath)
+            let res = try await req.fileio.asyncStreamFile(at: cachePath, onCompleted: { _ in
+                lease.release()
+            })
             res.headers.replaceOrAdd(name: .contentType, value: "audio/wav")
             return res
         }
@@ -217,7 +199,7 @@ struct SongController: RouteCollection {
         guard let songId = req.parameters.get("id", as: UUID.self) else {
             throw Abort(.notFound)
         }
-        guard let _ = try await Song.find(songId, on: req.db) else {
+        guard let song = try await Song.find(songId, on: req.db) else {
             throw Abort(.notFound)
         }
 
@@ -232,14 +214,37 @@ struct SongController: RouteCollection {
             per = 50
         }
 
-        // 按默认排序取出所有 ID，找到目标曲目位置（首版优先正确性）
-        let allIds = try await Song.query(on: req.db)
-            .sort(\.$createdAt, .descending)
-            .sort(\.$id, .descending)
-            .all(\.$id)
+        struct PositionRow: Decodable {
+            let position: Int
+        }
+        guard let sql = req.db as? any SQLDatabase else {
+            throw Abort(.internalServerError, reason: "Configured database does not support SQL position queries")
+        }
 
-        guard let position = allIds.firstIndex(of: songId) else {
-            throw Abort(.notFound)
+        let position: Int
+        if let createdAt = song.createdAt {
+            let query: SQLQueryString = """
+                SELECT COUNT(*) AS position FROM songs
+                WHERE created_at > \(bind: createdAt)
+                   OR (created_at = \(bind: createdAt) AND id > \(bind: songId))
+                """
+            position = try await sql.raw(query).first(decoding: PositionRow.self)?.position ?? 0
+        } else {
+            // Historical rows should have created_at, but retain exact database
+            // ordering semantics if an old nullable row is encountered.
+            let query: SQLQueryString = """
+                SELECT position FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        ORDER BY created_at DESC, id DESC
+                    ) - 1 AS position
+                    FROM songs
+                ) ranked
+                WHERE id = \(bind: songId)
+                """
+            guard let row = try await sql.raw(query).first(decoding: PositionRow.self) else {
+                throw Abort(.notFound)
+            }
+            position = row.position
         }
 
         let page = (position / per) + 1
@@ -256,27 +261,49 @@ struct SongController: RouteCollection {
 
     /// 服务端解码，并将结果缓存到 CAS 缓存目录
     /// 首次请求转码（AudioEngine → C 解码器 / ffmpeg），后续直接读缓存
-    private func cachedDecode(originalPath: String, sha256: String, format: AudioFormat, subsong: Int, cas: CasStorageService) async throws -> String {
-        let cacheDir = "\(cas.root)/.cache/wav/"
-        // Version output semantics so SDK/decoder upgrades never reuse stale PCM.
-        let cachePath = "\(cacheDir)\(sha256)-\(AudioDecoder.cacheFingerprint)-\(format.rawValue)-rate-native-ch-native-sub-\(subsong).wav"
+    private func cachedDecode(
+        originalPath: String,
+        sha256: String,
+        format: AudioFormat,
+        subsong: Int,
+        cas: CasStorageService,
+        coordinator: DecodeCacheCoordinator,
+        logger: Logger
+    ) async throws -> String {
+        let outcome = try await DecodedAudioCacheService(cas: cas, coordinator: coordinator)
+            .prepare(
+                originalPath: originalPath,
+                sha256: sha256,
+                format: format,
+                subsong: subsong,
+                onFailure: { queueMilliseconds, decodeMilliseconds, error in
+                    logger.error("server_decode_failed", metadata: [
+                        "cache_hit": "false",
+                        "format": "\(format.rawValue)",
+                        "queue_ms": "\(queueMilliseconds)",
+                        "decode_ms": "\(decodeMilliseconds)",
+                        "reason": "\(Self.safeFailureReason(error))",
+                    ])
+                }
+            )
+        logger.info("server_decode", metadata: [
+            "cache_hit": "\(outcome.cacheHit)",
+            "format": "\(format.rawValue)",
+            "output_bytes": "\(outcome.outputBytes)",
+            "queue_ms": "\(outcome.queueMilliseconds)",
+            "decode_ms": "\(outcome.decodeMilliseconds)",
+        ])
+        return outcome.path
+    }
 
-        let fm = FileManager.default
-        if fm.fileExists(atPath: cachePath) {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath), options: .mappedIfSafe),
-               (try? WAVFile.parse(data, includeSamples: false).encoding) == .pcm {
-                return cachePath
-            }
-            try? fm.removeItem(atPath: cachePath)
+    private static func safeFailureReason(_ error: any Error) -> String {
+        switch error {
+        case AudioError.decoderNotImplemented: return "decoder_not_implemented"
+        case AudioError.decodeFailed: return "decode_failed"
+        case AudioError.unsupportedFormat: return "unsupported_format"
+        case AudioError.fileNotFound: return "file_not_found"
+        case AudioError.invalidPCMData: return "invalid_pcm_data"
+        default: return String(reflecting: type(of: error))
         }
-
-        try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
-        try await AudioEngine().decodeToWAVFile(
-            filePath: originalPath,
-            format: format,
-            destinationPath: cachePath,
-            subsong: subsong
-        )
-        return cachePath
     }
 }

@@ -21,18 +21,19 @@ let player=null;
 function playerApp(){return{
     songs:[],page:1,perPage:50,hasMore:false,isLoading:false,totalResults:0,searchQuery:'',formatFilter:'',formatCounts:{},libraryTotal:0,
     currentSong:null,selectedSong:null,queue:[],queueIndex:-1,isPlaying:false,isLoadingTrack:false,volume:.7,lastVolume:.7,progressPercent:0,currentTime:0,duration:0,seekPreview:null,
-    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,playlists:[],newPlaylistName:'',toasts:[],toastId:0,
+    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
     locating:false,locatedSongId:null,visualizerOpen:true,visualizerMode:'holographic',_visualizer:null,_visualizerInited:false,
     shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
     async init(){
         player=new OrzAudioPlayer(); player.volume=this.volume; this.attachPlayerCallbacks(); player.initWasm();
-        await Promise.all([this.loadFormatCounts(),this.loadSongs(),this.loadPlaylists()]);
+        await Promise.all([this.loadFormatCounts(),this.loadSongs()]);
         window.addEventListener('scroll',()=>this.onScroll(),{passive:true});
     },
     attachPlayerCallbacks(){
         player.onTimeUpdate=(ct,dur)=>{this.currentTime=ct;this.duration=dur;this.isPlaying=player.isPlaying;this.progressPercent=dur>0?clamp(ct/dur)*100:0;if(dur>0&&this.currentSong&&!this.currentSong.duration)this.currentSong.duration=dur};
         player.onEnded=()=>this.next(); player.onPlaybackStateChange=value=>{this.isPlaying=value;this.isLoadingTrack=false;this._syncVisualizer()};
         player.onError=error=>{this.isLoadingTrack=false;this.notify(`无法播放：${error?.message||'未知错误'}`,'error')};
+        if(globalThis.ORZ_PLAYBACK_DIAGNOSTICS_ENABLED===true)player.onDiagnostic=payload=>{void fetch('/api/diagnostics/playback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true}).catch(()=>{})};
     },
     _initVisualizer(){
         if(!globalThis.OrzAudioVisualizer)return;const canvas=document.getElementById('visualizerCanvas');if(!canvas||this._visualizer)return;try{const rm=window.matchMedia('(prefers-reduced-motion:reduce)').matches;this._visualizer=new OrzAudioVisualizer({canvas,analyser:player?.getAnalyser()||null,reducedMotion:rm});this._visualizerInited=true}catch(e){console.warn('Visualizer init failed:',e);this._visualizer=null}},
@@ -76,6 +77,7 @@ function playerApp(){return{
     async selectFormat(format){this.formatFilter=format;this.sidebarOpen=false;this.selectedSong=null;if(this.searchQuery.trim())await this.search();else await this.loadSongs()},
     clearSearch(){if(this.searchQuery){this.searchQuery='';this.loadSongs()}else document.querySelector('#songSearch')?.blur()},resetFilters(){this.searchQuery='';this.selectFormat('')},
     async playSong(song){if(!player)return;const request=(this.playRequestGen=(this.playRequestGen||0)+1);this.currentSong=song;this.selectedSong=song;this.isPlaying=false;this.isLoadingTrack=true;this.currentTime=0;this.duration=song.duration||0;this.progressPercent=0;await this.$nextTick();this._syncVisualizer();await player.play(song);if(request!==this.playRequestGen||player.currentSong?.id!==song.id)return;this.isLoadingTrack=false;this.isPlaying=player.isPlaying;this._syncVisualizer();if(!this.queue.some(s=>s.id===song.id))this.queue.push(song);this.queueIndex=this.queue.findIndex(s=>s.id===song.id)},
+    prewarmSong(song){if(!player||song?.playStrategy!=='wasmDecode')return;const run=()=>{void player.prewarmWasm(song.fileFormat)};if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:750});else setTimeout(run,0)},
     async togglePlay(){if(player&&this.currentSong)this.isPlaying=await player.togglePlay()},
     prev(){if(this.canPrev)this.playSong(this.activeList[this.currentIndex-1])},next(){if(this.canNext)this.playSong(this.activeList[this.currentIndex+1])},
     seek(event){if(!this.currentSong)return;const rect=event.currentTarget.getBoundingClientRect(),pct=clamp((event.clientX-rect.left)/rect.width);this.seekToPercent(pct)},
@@ -84,12 +86,18 @@ function playerApp(){return{
     setVolume(){this.volume=clamp(this.volume);if(this.volume>0)this.lastVolume=this.volume;player?.setVolume(this.volume)},
     adjustVolume(delta){this.volume=clamp(this.volume+delta);this.setVolume()},toggleMute(){if(this.volume>0){this.lastVolume=this.volume;this.volume=0}else this.volume=this.lastVolume||.7;this.setVolume()},
     seekRelative(seconds){if(!this.duration)return;this.seekToPercent((this.currentTime+seconds)/this.duration)},
-    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen=!this.playlistOpen,help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else this.clearSearch()}})[action]?.()},
+    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen?this.playlistOpen=false:this.openPlaylistPanel(),help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else this.clearSearch()}})[action]?.()},
     removeFromQueue(index){this.queue.splice(index,1);if(index<=this.queueIndex)this.queueIndex--},
-    async loadPlaylists(){try{const res=await fetch('/api/playlists');this.playlists=await res.json()}catch(error){this.notify('播放列表加载失败','error')}},
-    async saveAsPlaylist(){const name=this.newPlaylistName.trim();if(!name||!this.queue.length)return;try{const res=await fetch('/api/playlists',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description:'',songIds:this.queue.map(song=>song.id)})});if(!res.ok){const payload=await res.json().catch(()=>null);throw new Error(payload?.reason||`HTTP ${res.status}`)}const list=await res.json();this.newPlaylistName='';await this.loadPlaylists();this.notify(`播放列表已保存 · ${list.songCount??this.queue.length} 首`)}catch(error){this.notify(`保存播放列表失败：${error?.message||'未知错误'}`,'error')}},
+    openPlaylistPanel(){this.playlistOpen=true;void this.loadPlaylists()},
+    async loadPlaylists(force=false){
+        if(this._playlistsLoaded&&!force)return true;
+        if(this._playlistsRequest)return this._playlistsRequest;
+        this._playlistsRequest=(async()=>{try{const res=await fetch('/api/playlists');if(!res.ok)throw new Error(`HTTP ${res.status}`);this.playlists=await res.json();this._playlistsLoaded=true;return true}catch(error){this._playlistsLoaded=false;this.notify('播放列表加载失败','error');return false}finally{this._playlistsRequest=null}})();
+        return this._playlistsRequest
+    },
+    async saveAsPlaylist(){const name=this.newPlaylistName.trim();if(!name||!this.queue.length)return;try{const res=await fetch('/api/playlists',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description:'',songIds:this.queue.map(song=>song.id)})});if(!res.ok){const payload=await res.json().catch(()=>null);throw new Error(payload?.reason||`HTTP ${res.status}`)}const list=await res.json();this.newPlaylistName='';await this.loadPlaylists(true);this.notify(`播放列表已保存 · ${list.songCount??this.queue.length} 首`)}catch(error){this.notify(`保存播放列表失败：${error?.message||'未知错误'}`,'error')}},
     async loadPlaylist(id){try{const res=await fetch(`/api/playlists/${id}`),list=await res.json();if(list.songs?.length){this.queue=list.songs;this.playSong(list.songs[0]);this.playlistOpen=false}}catch(error){this.notify('播放列表加载失败','error')}},
-    async deletePlaylist(id){try{await fetch(`/api/playlists/${id}`,{method:'DELETE'});this.playlists=this.playlists.filter(x=>x.id!==id)}catch(error){this.notify('删除播放列表失败','error')}},
+    async deletePlaylist(id){try{const res=await fetch(`/api/playlists/${id}`,{method:'DELETE'});if(!res.ok)throw new Error(`HTTP ${res.status}`);await this.loadPlaylists(true)}catch(error){this.notify('删除播放列表失败','error')}},
     notify(message,type='success'){const id=++this.toastId;this.toasts.push({id,message,type});setTimeout(()=>this.dismissToast(id),3600)},dismissToast(id){this.toasts=this.toasts.filter(x=>x.id!==id)}
 }}
 

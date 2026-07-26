@@ -5,6 +5,9 @@ import Vapor
 
 // configures your application
 public func configure(_ app: Application) throws {
+    // Compress text, JSON and other known-compressible responses. Vapor's
+    // media-type policy excludes audio/video and already-compressed assets.
+    app.http.server.configuration.responseCompression = .enabledForCompressibleTypes
 
     // CORS — 允许前端跨域访问
     let corsConfig = CORSMiddleware.Configuration(
@@ -20,11 +23,13 @@ public func configure(_ app: Application) throws {
 
     // 静态文件 — Public 目录（用于前端 JS/CSS，不再用于音乐文件）
     app.directory.publicDirectory = "\(app.directory.resourcesDirectory)Public/"
+    app.middleware.use(CachePolicyMiddleware())
     app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
 
     // CAS（Content-Addressed Storage）初始化
     let casRoot = Environment.get("CAS_ROOT") ?? "./data/music"
     app.casStorage = CasStorageService(root: casRoot)
+    app.initializeDecodeCacheCoordinator()
 
     app.databases.use(
         .postgres(
@@ -43,6 +48,8 @@ public func configure(_ app: Application) throws {
     app.migrations.add(CreateArtist())
     app.migrations.add(CreateAlbum())
     app.migrations.add(CreateSong())
+    app.migrations.add(CreateSongListIndexes())
+    app.migrations.add(CreateSearchTrigramIndexes())
     app.migrations.add(CreatePlaylist())
     app.migrations.add(CreatePlaylistSongPivot())
     // 注意：MigrateSongToCas 仅用于从旧 schema 升级，新 DB 由 CreateSong 直接创建正确 schema

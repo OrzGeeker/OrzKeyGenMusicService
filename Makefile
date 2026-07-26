@@ -33,6 +33,9 @@ help:
 	@echo "  make restart        Stop then run the local Vapor service"
 	@echo "  make scan-local     Trigger scan on the local service (SOURCE=/path/to/music)"
 	@echo "  make audit-fingerprints Validate production fingerprint policy (ALL=1 for eligible full scan)"
+	@echo "  make backfill-durations Repair missing song durations (DRY_RUN=1 for preview)"
+	@echo "  make warm-decode-cache Pre-generate selected server-decode WAV caches"
+	@echo "  make maintain-decode-cache Report or safely prune decoded WAV caches"
 	@echo "  make test           Run Swift and browser tests"
 	@echo "  make swift-test     Run Swift tests"
 	@echo "  make browser-test   Run browser/WASM tests"
@@ -140,6 +143,35 @@ audit-fingerprints:
 	if [ -n "$(FORMATS)" ]; then args="$$args --formats \"$(FORMATS)\""; fi; \
 	echo "swift run OrzFingerprintAudit $$args"; \
 	eval swift run OrzFingerprintAudit "$$args"
+
+.PHONY: backfill-durations
+backfill-durations:
+	@args='--batch-size "$${BATCH_SIZE:-50}" --concurrency "$${CONCURRENCY:-2}"'; \
+	if [ -n "$${LIMIT:-}" ]; then args="$$args --limit \"$$LIMIT\""; fi; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	echo "swift run OrzDurationBackfill $$args"; \
+	eval swift run OrzDurationBackfill "$$args"
+
+.PHONY: warm-decode-cache
+warm-decode-cache:
+	@args='--concurrency "$${CONCURRENCY:-1}"'; \
+	if [ -n "$${SONG_ID:-}" ]; then args="$$args --id \"$$SONG_ID\""; fi; \
+	if [ -n "$${SONG_IDS:-}" ]; then args="$$args --ids \"$$SONG_IDS\""; fi; \
+	if [ -n "$${FORMAT:-}" ]; then args="$$args --format \"$$FORMAT\""; fi; \
+	if [ -n "$${RECENT:-}" ]; then args="$$args --recent \"$$RECENT\""; fi; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	echo "swift run OrzDecodeCacheWarmup $$args"; \
+	eval swift run OrzDecodeCacheWarmup "$$args"
+
+.PHONY: maintain-decode-cache
+maintain-decode-cache:
+	@args=''; \
+	if [ -n "$${MAX_BYTES:-}" ]; then args="$$args --max-bytes \"$$MAX_BYTES\""; fi; \
+	if [ "$(REMOVE_OLD_FINGERPRINTS)" = "1" ]; then args="$$args --remove-old-fingerprints"; fi; \
+	if [ -n "$${MINIMUM_AGE_SECONDS:-}" ]; then args="$$args --minimum-age-seconds \"$$MINIMUM_AGE_SECONDS\""; fi; \
+	if [ "$(APPLY)" = "1" ]; then args="$$args --apply"; else args="$$args --dry-run"; fi; \
+	echo "swift run OrzDecodeCacheMaintenance $$args"; \
+	eval swift run OrzDecodeCacheMaintenance "$$args"
 
 .PHONY: test
 test: swift-test browser-test docker-config

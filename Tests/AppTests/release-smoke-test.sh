@@ -31,6 +31,14 @@ start_mock() {
 import json, http.server, socket
 
 class MockHandler(http.server.BaseHTTPRequestHandler):
+    def send_body(self, status, content_type, body, headers=None):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == '/api/health':
             self.send_response(200)
@@ -54,10 +62,16 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps([{'id': 'mock-id', 'title': 'Mock Song'}]).encode())
         elif self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'<html><head><title>OrzMusic</title></head><body>OrzMusic Player</body></html>')
+            self.send_body(200, 'text/html',
+                b'<html><head><title>OrzMusic</title></head><body>OrzMusic Player</body></html>',
+                {'Cache-Control': 'no-cache'})
+        elif self.path == '/vendor/alpinejs/alpine-3.15.12.min.js':
+            self.send_body(200, 'application/javascript', b'compressed-mock',
+                {'Cache-Control': 'public, max-age=31536000, immutable',
+                 'Content-Encoding': 'gzip'})
+        elif self.path == '/audio/orz_audio_builtin.wasm?v=20260717-controls-seek-v1':
+            self.send_body(200, 'application/wasm', b'wasm-mock',
+                {'Cache-Control': 'public, max-age=31536000, immutable'})
         else:
             self.send_response(404)
             self.end_headers()

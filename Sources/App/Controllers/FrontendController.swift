@@ -9,6 +9,11 @@ struct FrontendController: RouteCollection {
     /// GET / — 前端播放页面
     @Sendable
     func index(req: Request) async throws -> View {
-        return try await req.view.render("player")
+        struct Context: Encodable {
+            let playbackDiagnosticsEnabled: Bool
+        }
+        return try await req.view.render("player", Context(
+            playbackDiagnosticsEnabled: Environment.get("PLAYBACK_DIAGNOSTICS_ENABLED") == "true"
+        ))
     }
 }

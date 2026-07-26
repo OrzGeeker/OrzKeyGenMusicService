@@ -1,4 +1,5 @@
 import Vapor
+import FluentSQL
 
 struct PlaylistController: RouteCollection {
 
@@ -20,8 +21,18 @@ struct PlaylistController: RouteCollection {
     @Sendable
     func index(req: Request) async throws -> [PlaylistResponse] {
         let playlists = try await Playlist.query(on: req.db).all()
-        let pivots = try await PlaylistSongPivot.query(on: req.db).all()
-        let counts = Dictionary(grouping: pivots, by: { $0.$playlist.id }).mapValues(\.count)
+        struct CountRow: Decodable {
+            let playlistId: UUID
+            let count: Int
+        }
+        guard let sql = req.db as? any SQLDatabase else {
+            throw Abort(.internalServerError, reason: "Configured database does not support SQL aggregation")
+        }
+        let rows = try await sql.raw(
+            "SELECT playlist_id AS \"playlistId\", COUNT(*) AS count " +
+            "FROM playlist_songs GROUP BY playlist_id"
+        ).all(decoding: CountRow.self)
+        let counts = Dictionary(uniqueKeysWithValues: rows.map { ($0.playlistId, $0.count) })
         return playlists.map { playlist in
             PlaylistResponse(playlist: playlist, songCount: playlist.id.flatMap { counts[$0] } ?? 0)
         }

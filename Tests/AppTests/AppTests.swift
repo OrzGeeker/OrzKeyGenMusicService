@@ -2,6 +2,7 @@
 @testable import OrzAudioKit
 import XCTVapor
 import Fluent
+import FluentSQL
 import FluentSQLiteDriver
 
 final class AppTests: XCTestCase {
@@ -16,6 +17,8 @@ final class AppTests: XCTestCase {
         app.migrations.add(CreateArtist())
         app.migrations.add(CreateAlbum())
         app.migrations.add(CreateSong())
+        app.migrations.add(CreateSongListIndexes())
+        app.migrations.add(CreateSearchTrigramIndexes())
         app.migrations.add(CreatePlaylist())
         app.migrations.add(CreatePlaylistSongPivot())
 
@@ -28,6 +31,22 @@ final class AppTests: XCTestCase {
         // Run migrations
         try app.autoMigrate().wait()
 
+        return app
+    }
+
+    private func createAsyncTestApp() async throws -> Application {
+        let app = try await Application.make(.testing)
+        app.databases.use(.sqlite(.memory), as: .sqlite)
+        app.migrations.add(CreateArtist())
+        app.migrations.add(CreateAlbum())
+        app.migrations.add(CreateSong())
+        app.migrations.add(CreateSongListIndexes())
+        app.migrations.add(CreateSearchTrigramIndexes())
+        app.migrations.add(CreatePlaylist())
+        app.migrations.add(CreatePlaylistSongPivot())
+        try routes(app)
+        app.casStorage = CasStorageService(root: NSTemporaryDirectory() + "cas-test-\(UUID().uuidString)")
+        try await app.autoMigrate()
         return app
     }
 
@@ -227,10 +246,15 @@ final class AppTests: XCTestCase {
             XCTAssertEqual(try response.content.decode(PlaylistResponse.self).songCount, 2)
         }
 
+        try Playlist(name: "Empty").create(on: app.db).wait()
+
         try app.test(.GET, "/api/playlists") { response in
             let playlists = try response.content.decode([PlaylistResponse].self)
-            XCTAssertEqual(playlists.count, 1)
-            XCTAssertEqual(playlists[0].songCount, 2)
+            XCTAssertEqual(playlists.count, 2)
+            XCTAssertEqual(
+                Dictionary(uniqueKeysWithValues: playlists.map { ($0.name, $0.songCount) }),
+                ["Atomic": 2, "Empty": 0]
+            )
         }
     }
 
@@ -631,7 +655,7 @@ final class AppTests: XCTestCase {
             XCTAssertTrue(summary.formats.isEmpty)
         }
 
-        for (index, format) in ["ym", "ym", "mp3", "custom"].enumerated() {
+        for (index, format) in ["ym", "YM", "mp3", "custom"].enumerated() {
             let song = Song(
                 title: "Format \(index)",
                 sha256: "format-summary-\(String(format: "%049d", index))",
@@ -664,6 +688,197 @@ final class AppTests: XCTestCase {
             XCTAssertEqual(response.status, .ok)
             let songs = try response.content.decode([SongResponse].self)
             XCTAssertEqual(songs.map(\.fileFormat), ["ym"])
+        }
+    }
+
+    func testSongSearchEagerLoadsOptionalArtistAndAlbum() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let artist = Artist(name: "Bounded Artist")
+        try artist.create(on: app.db).wait()
+        let album = Album(artistId: artist.id!, title: "Bounded Album")
+        try album.create(on: app.db).wait()
+
+        let related = Song(
+            title: "Bounded related",
+            sha256: "search-eager-related-00000000000000000000000000000",
+            fileFormat: "mp3",
+            fileSize: 100
+        )
+        related.$artist.id = artist.id!
+        related.$album.id = album.id!
+        try related.create(on: app.db).wait()
+
+        let standalone = Song(
+            title: "Bounded standalone",
+            sha256: "search-eager-standalone-0000000000000000000000000",
+            fileFormat: "mp3",
+            fileSize: 100
+        )
+        try standalone.create(on: app.db).wait()
+
+        try app.test(.GET, "/api/songs/search?q=bounded") { response in
+            XCTAssertEqual(response.status, .ok)
+            let songs = try response.content.decode([SongResponse].self)
+            XCTAssertEqual(songs.count, 2)
+            let byTitle = Dictionary(uniqueKeysWithValues: songs.map { ($0.title, $0) })
+            XCTAssertEqual(byTitle["Bounded related"]?.artist?.name, "Bounded Artist")
+            XCTAssertEqual(byTitle["Bounded related"]?.album?.title, "Bounded Album")
+            XCTAssertNil(byTitle["Bounded standalone"]?.artist)
+            XCTAssertNil(byTitle["Bounded standalone"]?.album)
+        }
+
+        try app.test(.GET, "/api/songs/search?q=artist") { response in
+            let songs = try response.content.decode([SongResponse].self)
+            XCTAssertEqual(songs.map(\.title), ["Bounded related"])
+            XCTAssertEqual(songs[0].artist?.name, "Bounded Artist")
+        }
+
+        let quoted = Song(
+            title: "Coder's Theme",
+            sha256: "search-bound-quote-0000000000000000000000000000000",
+            fileFormat: "mp3",
+            fileSize: 100
+        )
+        try quoted.create(on: app.db).wait()
+        try app.test(.GET, "/api/songs/search?q=coder%27s") { response in
+            XCTAssertEqual(response.status, .ok)
+            XCTAssertEqual(try response.content.decode([SongResponse].self).map(\.title), ["Coder's Theme"])
+        }
+        try app.test(.GET, "/api/songs/search?q=%27%20OR%201%3D1%20--") { response in
+            XCTAssertEqual(response.status, .ok)
+            XCTAssertTrue(try response.content.decode([SongResponse].self).isEmpty)
+        }
+    }
+
+    func testSongListAndSearchDoNotBackfillMissingDuration() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        let song = Song(
+            title: "Duration remains missing",
+            sha256: "duration-not-backfilled-0000000000000000000000000000",
+            fileFormat: "wav",
+            fileSize: 48,
+            duration: nil
+        )
+        try song.create(on: app.db).wait()
+
+        let path = app.casStorage.resolve(sha256: song.sha256, format: song.fileFormat)
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try PCMData(samples: Data([0x00, 0x00, 0x00, 0x00])).encodeWAV()
+            .write(to: URL(fileURLWithPath: path))
+        defer { try? FileManager.default.removeItem(atPath: app.casStorage.root) }
+
+        try app.test(.GET, "/api/songs") { response in
+            XCTAssertEqual(response.status, .ok)
+            let page = try response.content.decode(Page<SongResponse>.self)
+            XCTAssertEqual(page.items.count, 1)
+            XCTAssertNil(page.items[0].duration)
+        }
+
+        try app.test(.GET, "/api/songs/search?q=duration") { response in
+            XCTAssertEqual(response.status, .ok)
+            let songs = try response.content.decode([SongResponse].self)
+            XCTAssertEqual(songs.count, 1)
+            XCTAssertNil(songs[0].duration)
+        }
+
+        let persisted = try Song.find(song.id!, on: app.db).wait()
+        XCTAssertNil(persisted?.duration)
+    }
+
+    func testDurationBackfillIsDryRunSafeAndToleratesMissingCASFiles() async throws {
+        let app = try await createAsyncTestApp()
+        let casRoot = app.casStorage.root
+        defer { try? FileManager.default.removeItem(atPath: casRoot) }
+
+        do {
+            let validSong = Song(
+                title: "Backfill duration",
+                sha256: "duration-backfill-valid-00000000000000000000000000",
+                fileFormat: "wav",
+                fileSize: 176_444
+            )
+            let missingSong = Song(
+                title: "Missing CAS file",
+                sha256: "duration-backfill-missing-000000000000000000000000",
+                fileFormat: "wav",
+                fileSize: 176_444
+            )
+            try await validSong.create(on: app.db)
+            try await missingSong.create(on: app.db)
+
+            let path = app.casStorage.resolve(sha256: validSong.sha256, format: validSong.fileFormat)
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent,
+                withIntermediateDirectories: true
+            )
+            try PCMData(samples: Data(repeating: 0, count: 176_400))
+                .encodeWAV()
+                .write(to: URL(fileURLWithPath: path))
+
+            let service = DurationBackfillService(database: app.db, cas: app.casStorage)
+            let dryRun = try await service.run(options: .init(batchSize: 1, concurrency: 1, dryRun: true))
+            XCTAssertEqual(dryRun.selected, 2)
+            XCTAssertEqual(dryRun.updated, 0)
+            let durationAfterDryRun = try await Song.find(validSong.id!, on: app.db)?.duration
+            XCTAssertNil(durationAfterDryRun)
+
+            let firstRun = try await service.run(options: .init(batchSize: 2, concurrency: 2))
+            XCTAssertEqual(firstRun.selected, 2)
+            XCTAssertEqual(firstRun.updated, 1)
+            XCTAssertEqual(firstRun.missingFiles, 1)
+            XCTAssertEqual(firstRun.probeFailures, 0)
+            let validDuration = try await Song.find(validSong.id!, on: app.db)?.duration
+            XCTAssertNotNil(validDuration)
+            XCTAssertEqual(validDuration!, 1, accuracy: 0.01)
+            let missingDuration = try await Song.find(missingSong.id!, on: app.db)?.duration
+            XCTAssertNil(missingDuration)
+
+            let rerun = try await service.run(options: .init(batchSize: 2, concurrency: 1))
+            XCTAssertEqual(rerun.selected, 1)
+            XCTAssertEqual(rerun.updated, 0)
+            XCTAssertEqual(rerun.missingFiles, 1)
+            try await app.asyncShutdown()
+        } catch {
+            try? await app.asyncShutdown()
+            throw error
+        }
+    }
+
+    func testSongListIndexMigrationCreatesAndRevertsStableIndexes() async throws {
+        let app = try await createAsyncTestApp()
+        struct IndexRow: Decodable {
+            let name: String
+        }
+
+        do {
+            let sql = try XCTUnwrap(app.db as? any SQLDatabase)
+            func indexNames() async throws -> Set<String> {
+                let rows = try await sql.raw(
+                    "SELECT name FROM sqlite_master " +
+                    "WHERE type = 'index' AND name LIKE 'idx_songs_%'"
+                ).all(decoding: IndexRow.self)
+                return Set(rows.map(\.name))
+            }
+
+            let createdNames = try await indexNames()
+            XCTAssertEqual(createdNames, [
+                CreateSongListIndexes.createdIndex,
+                CreateSongListIndexes.formatIndex,
+            ])
+            try await CreateSongListIndexes().revert(on: app.db)
+            let revertedNames = try await indexNames()
+            XCTAssertTrue(revertedNames.isEmpty)
+            try await app.asyncShutdown()
+        } catch {
+            try? await app.asyncShutdown()
+            throw error
         }
     }
 

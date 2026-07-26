@@ -36,6 +36,9 @@ class OrzAudioPlayer {
         this._streamGen = 0;
         this._playGen = 0;
         this._decoderWorker = null;
+        this._workerPool = new Map();
+        this._workerWarmups = new Map();
+        this._disposed = false;
         this._workerReject = null;
         this._workerRejectOwner = null;
         this._fetchController = null;
@@ -51,6 +54,8 @@ class OrzAudioPlayer {
         this.onTimeUpdate = null;
         this.onError = null;
         this.onPlaybackStateChange = null;
+        this.onDiagnostic = null;
+        this._diagnostic = null;
         this._pendingDirectSeek = null;
         this._audioBuffer = null;
         this._audioBufferClockStart = 0;
@@ -118,6 +123,40 @@ class OrzAudioPlayer {
         return this.wasmReady && this.wasmKit !== null;
     }
 
+    prewarmWasm(format) {
+        if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined' ||
+            typeof Worker === 'undefined') return Promise.resolve(false);
+        const bundle = this._workerBundle(format);
+        if (this._workerPool.has(bundle)) return Promise.resolve(true);
+        if (this._workerWarmups.has(bundle)) return this._workerWarmups.get(bundle);
+        const promise = new Promise(resolve => {
+            const worker = new Worker('/audio/orz-decoder-worker.js?v=20260726-worker-reuse-v1');
+            worker._orzBundle = bundle;
+            const timeout = setTimeout(() => {
+                worker.terminate();
+                resolve(false);
+            }, 30000);
+            const finish = success => {
+                clearTimeout(timeout);
+                worker.onmessage = null;
+                worker.onerror = null;
+                if (success) this._storeWorker(worker);
+                else worker.terminate();
+                resolve(success);
+            };
+            worker.onmessage = event => {
+                if (event.data?.type === 'warmed' && event.data.bundle === bundle) finish(true);
+                else if (event.data?.type === 'warmup-error' && event.data.bundle === bundle) finish(false);
+            };
+            worker.onerror = () => finish(false);
+            worker.postMessage({ type: 'warmup', bundle, moduleJs: this._workerModuleJs(bundle) });
+        }).finally(() => {
+            if (this._workerWarmups.get(bundle) === promise) this._workerWarmups.delete(bundle);
+        });
+        this._workerWarmups.set(bundle, promise);
+        return promise;
+    }
+
     // ── 播放接口 ──
 
     /**
@@ -134,6 +173,20 @@ class OrzAudioPlayer {
         this.duration = 0;
 
         const strategy = song.playStrategy || 'directFile';
+        this._diagnostic = {
+            generation: playGen,
+            strategy,
+            format: String(song.fileFormat || '').toLowerCase(),
+            startedAt: this._now(),
+            resourceFetchMs: null,
+            wasmReadyMs: null,
+            workerReadyMs: null,
+            firstFrameMs: null,
+            clickToPlayingMs: null,
+            underruns: 0,
+            fallbackUsed: false,
+            emitted: false,
+        };
 
         try {
             switch (strategy) {
@@ -155,6 +208,7 @@ class OrzAudioPlayer {
             // 最后尝试: server decode 降级
             if (strategy !== 'serverDecode') {
                 try {
+                    if (this._diagnostic?.generation === playGen) this._diagnostic.fallbackUsed = true;
                     await this._playDirect(song.streamUrl || song.rawUrl, playGen);
                 } catch (fallbackErr) {
                     if (this.onError) this.onError(fallbackErr);
@@ -200,6 +254,7 @@ class OrzAudioPlayer {
      * 停止播放
      */
     stop() {
+        this._diagnostic = null;
         this._playGen++;
         this._fetchController?.abort();
         this._fetchController = null;
@@ -407,6 +462,7 @@ class OrzAudioPlayer {
 
         await this.audioEl.play();
         this._assertCurrentPlayback(playGen);
+        this._markFirstFrame(playGen);
         this._setPlaying(true);
         this.duration = this.audioEl.duration || 0;
     }
@@ -417,6 +473,8 @@ class OrzAudioPlayer {
     async _playWasm(url, format, subsong = 0, playGen = this._playGen) {
         this._assertCurrentPlayback(playGen);
         this._usingWasm = true;
+        if (!this.wasmReady) await this.initWasm();
+        this._markDiagnostic(playGen, 'wasmReadyMs');
 
         // 初始化 AudioContext（需用户交互后创建）
         if (!this.audioCtx) {
@@ -447,7 +505,8 @@ class OrzAudioPlayer {
                     throw new Error(`WASM: format "${format}" not supported by WASM module`);
                 }
 
-                await this._playWithWasm(url, format, subsong);
+                await this._playWithWasm(url, format, subsong, playGen);
+                this._markFirstFrame(playGen);
                 return;
             } catch (e) {
                 console.warn('WASM decode failed, falling back:', e.message);
@@ -455,22 +514,25 @@ class OrzAudioPlayer {
         }
 
         // Fallback: AudioContext.decodeAudioData
-        await this._playWithAudioContext(url);
+        await this._playWithAudioContext(url, playGen);
+        this._markFirstFrame(playGen);
     }
 
     /**
      * 使用 WASM 模块解码并播放（统一 API）
      */
-    async _playWithWasm(url, format, subsong = 0) {
+    async _playWithWasm(url, format, subsong = 0, playGen = this._playGen) {
         let step = 'fetch';
         try {
             step = 'fetch';
+            const fetchStartedAt = this._now();
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
             step = 'arrayBuffer';
             const buf = await resp.arrayBuffer();
             step = 'Uint8Array';
             const data = new Uint8Array(buf);
+            this._markDiagnostic(playGen, 'resourceFetchMs', this._now() - fetchStartedAt);
             console.log(`WASM: fetched ${data.length} bytes for ${format}`);
 
             step = 'malloc_fmt';
@@ -542,9 +604,11 @@ class OrzAudioPlayer {
         this._fetchController = fetchController;
         let data;
         try {
+            const fetchStartedAt = this._now();
             const response = await fetch(url, { signal: fetchController.signal });
             if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
             data = await response.arrayBuffer();
+            this._markDiagnostic(playGen, 'resourceFetchMs', this._now() - fetchStartedAt);
         } finally {
             if (this._fetchController === fetchController) this._fetchController = null;
         }
@@ -560,7 +624,9 @@ class OrzAudioPlayer {
         const control = new Int32Array(controlBuffer);
         Atomics.store(control, 3, generation);
         this._workerControl = control;
-        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260717-controls-seek-v1');
+        const bundle = this._workerBundle(format);
+        const worker = await this._takeWorker(bundle);
+        this._assertCurrentPlayback(playGen);
         this._decoderWorker = worker;
         let workletNode = null;
 
@@ -573,6 +639,7 @@ class OrzAudioPlayer {
                 if (message.type === 'ready') {
                     if (playGen !== this._playGen) return reject(this._cancelledPlayback());
                     this.duration = message.duration;
+                    this._markDiagnostic(playGen, 'workerReadyMs');
                     await this._ensureWorkletModule();
                     if (playGen !== this._playGen) return reject(this._cancelledPlayback());
                     workletNode = new AudioWorkletNode(this.audioCtx, 'orz-ring-buffer', {
@@ -585,7 +652,9 @@ class OrzAudioPlayer {
                     workletNode.connect(this._outputNode());
                     resolve();
                 } else if (message.type === 'started') {
+                    if (playGen !== this._playGen) return;
                     this.diagnostics.firstFrameMs = performance.now() - startedAt;
+                    this._markFirstFrame(playGen);
                     this._setPlaying(this.audioCtx.state === 'running');
                 } else if (message.type === 'seeked') {
                     this.currentTime = message.positionMs / 1000;
@@ -594,13 +663,13 @@ class OrzAudioPlayer {
                     if (this.onTimeUpdate) this.onTimeUpdate(this.currentTime, this.duration);
                 } else if (message.type === 'ended') {
                     this.diagnostics.decodeRate = message.decodeRate;
+                    if (this._decoderWorker === worker) this._decoderWorker = null;
+                    this._storeWorker(worker);
                 } else if (message.type === 'error') reject(new Error(message.message));
             };
             worker.onerror = event => reject(new Error(event.message));
         });
-        const moduleJs = ['bp', 'mid', 'ym'].includes(format)
-            ? '/audio/orz_audio_builtin.js?v=20260717-controls-seek-v1'
-            : '/audio/orz_audio.js?v=20260717-controls-seek-v1';
+        const moduleJs = this._workerModuleJs(bundle);
         worker.postMessage({ type: 'decode', generation, format, subsong, moduleJs, data, control: controlBuffer,
             samples: sampleBuffer, capacityFrames, channels, startFrames }, [data]);
         try {
@@ -637,6 +706,39 @@ class OrzAudioPlayer {
         this._washProgressRAF = requestAnimationFrame(tick);
     }
 
+    _workerBundle(format) {
+        return ['bp', 'mid', 'ym'].includes(String(format).toLowerCase()) ? 'builtin' : 'full';
+    }
+
+    _workerModuleJs(bundle) {
+        return bundle === 'builtin'
+            ? '/audio/orz_audio_builtin.js?v=20260717-controls-seek-v1'
+            : '/audio/orz_audio.js?v=20260717-controls-seek-v1';
+    }
+
+    async _takeWorker(bundle) {
+        if (this._workerWarmups.has(bundle)) await this._workerWarmups.get(bundle);
+        const pooled = this._workerPool.get(bundle);
+        if (pooled) {
+            this._workerPool.delete(bundle);
+            return pooled;
+        }
+        const worker = new Worker('/audio/orz-decoder-worker.js?v=20260726-worker-reuse-v1');
+        worker._orzBundle = bundle;
+        return worker;
+    }
+
+    _storeWorker(worker) {
+        const bundle = worker?._orzBundle;
+        if (this._disposed) return worker?.terminate();
+        if (!bundle) return worker?.terminate();
+        worker.onmessage = null;
+        worker.onerror = null;
+        const previous = this._workerPool.get(bundle);
+        if (previous && previous !== worker) previous.terminate();
+        this._workerPool.set(bundle, worker);
+    }
+
     _shutdownWorker(worker, stopGeneration) {
         let terminated = false;
         const terminate = () => {
@@ -647,7 +749,11 @@ class OrzAudioPlayer {
         };
         const timeout = setTimeout(terminate, 250);
         worker.onmessage = event => {
-            if (event.data?.type === 'stopped' && event.data.generation === stopGeneration) terminate();
+            if (event.data?.type === 'stopped' && event.data.generation === stopGeneration) {
+                terminated = true;
+                clearTimeout(timeout);
+                this._storeWorker(worker);
+            }
         };
         try { worker.postMessage({ type: 'stop', generation: stopGeneration }); }
         catch (_) { terminate(); }
@@ -676,11 +782,46 @@ class OrzAudioPlayer {
     /**
      * 使用 AudioContext.decodeAudioData 播放
      */
-    async _playWithAudioContext(url) {
+    async _playWithAudioContext(url, playGen = this._playGen) {
+        const fetchStartedAt = this._now();
         const resp = await fetch(url);
         const buf = await resp.arrayBuffer();
+        this._markDiagnostic(playGen, 'resourceFetchMs', this._now() - fetchStartedAt);
         const audioBuffer = await this.audioCtx.decodeAudioData(buf);
         this._playAudioBuffer(audioBuffer);
+    }
+
+    _now() {
+        return globalThis.performance?.now?.() ?? Date.now();
+    }
+
+    _markDiagnostic(playGen, field, value = null) {
+        const diagnostic = this._diagnostic;
+        if (!diagnostic || diagnostic.generation !== playGen || diagnostic.emitted) return;
+        diagnostic[field] = value === null ? this._now() - diagnostic.startedAt : Math.max(0, value);
+    }
+
+    _markFirstFrame(playGen) {
+        const diagnostic = this._diagnostic;
+        if (!diagnostic || diagnostic.generation !== playGen || diagnostic.emitted) return;
+        const elapsed = this._now() - diagnostic.startedAt;
+        diagnostic.firstFrameMs = elapsed;
+        diagnostic.clickToPlayingMs = elapsed;
+        diagnostic.underruns = Number(this.diagnostics.underruns) || 0;
+        diagnostic.emitted = true;
+        if (this.onDiagnostic) {
+            this.onDiagnostic({
+                strategy: diagnostic.strategy,
+                format: diagnostic.format,
+                resourceFetchMs: diagnostic.resourceFetchMs,
+                wasmReadyMs: diagnostic.wasmReadyMs,
+                workerReadyMs: diagnostic.workerReadyMs,
+                firstFrameMs: diagnostic.firstFrameMs,
+                clickToPlayingMs: diagnostic.clickToPlayingMs,
+                underruns: diagnostic.underruns,
+                fallbackUsed: diagnostic.fallbackUsed,
+            });
+        }
     }
 
     /**
@@ -894,7 +1035,10 @@ class OrzAudioPlayer {
      * 释放资源
      */
     dispose() {
+        this._disposed = true;
         this.stop();
+        for (const worker of this._workerPool.values()) worker.terminate();
+        this._workerPool.clear();
         if (this.audioCtx) {
             this.audioCtx.close();
             this.audioCtx = null;

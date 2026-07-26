@@ -12,12 +12,13 @@ volumes:
   cas_data:
 
 x-shared_environment: &shared_environment
-  LOG_LEVEL: ${LOG_LEVEL:-debug}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
   DATABASE_HOST: db
   DATABASE_NAME: vapor_database
   DATABASE_USERNAME: vapor_username
   DATABASE_PASSWORD: vapor_password
   CAS_ROOT: /data/music
+  SERVER_DECODE_CONCURRENCY: ${SERVER_DECODE_CONCURRENCY:-1}
 
 services:
   cas-init:

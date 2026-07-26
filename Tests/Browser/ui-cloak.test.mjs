@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const view = await readFile(new URL('../../Resources/Views/player.leaf', import.meta.url), 'utf8');
 const css = await readFile(new URL('../../Resources/Public/audio/app.css', import.meta.url), 'utf8');
 const app = await readFile(new URL('../../Resources/Public/audio/app.js', import.meta.url), 'utf8');
+const alpine = await readFile(new URL('../../Resources/Public/vendor/alpinejs/alpine-3.15.12.min.js', import.meta.url));
+
+test('Alpine is pinned and loaded from the same origin', () => {
+    assert.match(view, /<script defer src="\/vendor\/alpinejs\/alpine-3\.15\.12\.min\.js"><\/script>/);
+    assert.doesNotMatch(view, /cdn\.jsdelivr\.net|https?:\/\/[^"]*alpine/i);
+    assert.equal(
+        createHash('sha256').update(alpine).digest('hex'),
+        '57b37d7cae9a27d965fdae4adcc844245dfdc407e655aee85dcfff3a08036a3f',
+    );
+});
 
 test('shortcut modal stays cloaked until Alpine initializes', () => {
     assert.match(css, /\[x-cloak\]\s*\{\s*display:none!important\s*\}/);

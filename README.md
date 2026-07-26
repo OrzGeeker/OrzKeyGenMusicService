@@ -41,6 +41,7 @@ README 只保留项目入口信息。易变化或需要精确口径的内容维�
 | [Docs/orz-audio-core.md](Docs/orz-audio-core.md) | OrzAudioCore SDK ABI、能力边界、版本与发布规则。 |
 | [Docs/deployment.md](Docs/deployment.md) | GitHub Release 镜像 + 轻量部署包的生产部署流程。 |
 | [Docs/migration.md](Docs/migration.md) | Docker/native 服务迁移流程与验收清单。 |
+| [Docs/performance.md](Docs/performance.md) | 首屏、API 与三类播放链路的测量口径、生产基线和运维参数。 |
 | [Docs/backlog/](Docs/backlog/) | 待推进完成的计划、任务清单与可独立执行的实施项。 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更日志。 |
 | [AGENTS.md](AGENTS.md) | 智能体协作、项目结构和维护约定。 |
@@ -97,8 +98,14 @@ make test
 | `DATABASE_USERNAME` | `vapor_username` | 数据库用户。 |
 | `DATABASE_PASSWORD` | `vapor_password` | 数据库密码。 |
 | `CAS_ROOT` | `./data/music` / Docker 中为 `/data/music` | CAS 原始音频存储根目录。 |
+| `SERVER_DECODE_CONCURRENCY` | `1` | 同时执行的冷缓存服务端解码数；限制为 1～32，低并发单机建议保持 1。 |
+| `PLAYBACK_DIAGNOSTICS_ENABLED` | `false` | 是否接收匿名浏览器首帧指标；默认关闭。 |
 
 CAS 保存导入时的原始音频文件；服务端解码产生的 WAV 缓存在 `CAS_ROOT/.cache/wav/` 下，可删除后自动重建。
+
+低峰期可用 `make warm-decode-cache FORMAT=sc68 DRY_RUN=1` 预览服务端解码缓存预热范围；去掉 `DRY_RUN=1` 执行。也可使用 `SONG_ID`、逗号分隔的 `SONG_IDS` 或 `RECENT` 限定范围，命令不会隐式预热全库。
+
+`make maintain-decode-cache` 只读报告 WAV 缓存占用；通过 `MAX_BYTES` 或 `REMOVE_OLD_FINGERPRINTS=1` 选择清理范围时仍默认为 dry-run，只有再设置 `APPLY=1` 才会删除。
 
 ## API 入口
 

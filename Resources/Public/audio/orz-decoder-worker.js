@@ -24,6 +24,17 @@ function usedFrames(write, read, capacity) {
 
 self.onmessage = async event => {
     const message = event.data;
+    if (message.type === 'warmup') {
+        try {
+            await wasmModule(message.moduleJs);
+            self.postMessage({ type: 'warmed', bundle: message.bundle });
+        } catch (error) {
+            modulePromise = null;
+            wasmInstance = null;
+            self.postMessage({ type: 'warmup-error', bundle: message.bundle, message: error.message });
+        }
+        return;
+    }
     if (message.type === 'stop') {
         generation = message.generation;
         stopGeneration = message.generation;
@@ -151,7 +162,7 @@ self.onmessage = async event => {
         decoder = 0;
         if (stopGeneration !== null) {
             self.postMessage({ type: 'stopped', generation: stopGeneration });
-            self.close();
+            stopGeneration = null;
         }
     } catch (error) {
         if (decoder && wasmInstance) wasmInstance._orz_decoder_destroy_v1(decoder);
@@ -160,7 +171,7 @@ self.onmessage = async event => {
         self.postMessage({ type: 'error', generation: myGeneration, message: error.message });
         if (stopGeneration !== null) {
             self.postMessage({ type: 'stopped', generation: stopGeneration });
-            self.close();
+            stopGeneration = null;
         }
     }
 };

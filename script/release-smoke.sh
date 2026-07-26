@@ -93,8 +93,53 @@ if [ "$PASS" = true ]; then
 fi
 echo ""
 
-# ---- 3. 格式统计 ----
-echo "--- 3. Format Summary ---"
+# ---- 3. 静态交付策略 ----
+echo "--- 3. Static Delivery ---"
+HOME_HEADERS=$($CURL -D - -o /dev/null "$SERVICE_URL/" 2>&1) || {
+    red "  [FAIL] cannot read frontend headers"
+    PASS=false
+}
+if ! echo "$HOME_HEADERS" | grep -qi '^cache-control:.*no-cache'; then
+    red "  [FAIL] frontend Cache-Control is not no-cache"
+    PASS=false
+else
+    green "  [PASS] frontend uses no-cache"
+fi
+
+ALPINE_PATH="/vendor/alpinejs/alpine-3.15.12.min.js"
+ALPINE_HEADERS=$($CURL -H "Accept-Encoding: gzip" -D - -o /dev/null "$SERVICE_URL$ALPINE_PATH" 2>&1) || {
+    red "  [FAIL] cannot read vendored Alpine"
+    PASS=false
+}
+if echo "$ALPINE_HEADERS" | grep -qi '^cache-control:.*max-age=31536000.*immutable'; then
+    green "  [PASS] versioned JS uses immutable cache"
+else
+    red "  [FAIL] versioned JS is not immutable"
+    PASS=false
+fi
+if echo "$ALPINE_HEADERS" | grep -Eqi '^content-encoding: *(gzip|br)'; then
+    green "  [PASS] versioned JS is compressed"
+else
+    red "  [FAIL] versioned JS is not gzip/br compressed"
+    PASS=false
+fi
+
+WASM_HEADERS=$($CURL -D - -o /dev/null \
+    "$SERVICE_URL/audio/orz_audio_builtin.wasm?v=20260717-controls-seek-v1" 2>&1) || {
+    red "  [FAIL] cannot read builtin WASM"
+    PASS=false
+}
+if echo "$WASM_HEADERS" | grep -qi '^content-type: *application/wasm' &&
+   echo "$WASM_HEADERS" | grep -qi '^cache-control:.*immutable'; then
+    green "  [PASS] WASM MIME and immutable cache are correct"
+else
+    red "  [FAIL] WASM MIME or cache policy is incorrect"
+    PASS=false
+fi
+echo ""
+
+# ---- 4. 格式统计 ----
+echo "--- 4. Format Summary ---"
 FORMATS=$($CURL "$SERVICE_URL/api/songs/formats" 2>&1) || {
     red "FAIL: Cannot reach /api/songs/formats"
     PASS=false
@@ -111,8 +156,8 @@ if [ "$PASS" = true ]; then
 fi
 echo ""
 
-# ---- 4. 搜索接口 ----
-echo "--- 4. Search API ---"
+# ---- 5. 搜索接口 ----
+echo "--- 5. Search API ---"
 SEARCH=$($CURL "$SERVICE_URL/api/songs/search?q=test" 2>&1) || {
     red "FAIL: Cannot reach /api/songs/search"
     PASS=false

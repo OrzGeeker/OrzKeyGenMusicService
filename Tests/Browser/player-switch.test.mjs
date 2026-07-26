@@ -58,6 +58,76 @@ test('a newer song cancels an in-flight YM play without falling back', async () 
     assert.equal(player.isPlaying, true);
 });
 
+test('direct playback emits a privacy-safe first-frame diagnostic', async () => {
+    const player = new Player();
+    const diagnostics = [];
+    player.onDiagnostic = value => diagnostics.push(value);
+
+    await player.play({
+        id: 'must-not-upload',
+        title: 'Private title',
+        rawUrl: '/private/path/song.ogg',
+        playStrategy: 'directFile',
+        fileFormat: 'ogg',
+    });
+
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].strategy, 'directFile');
+    assert.equal(diagnostics[0].format, 'ogg');
+    assert.equal(diagnostics[0].firstFrameMs, diagnostics[0].clickToPlayingMs);
+    assert.equal(diagnostics[0].underruns, 0);
+    assert.equal('id' in diagnostics[0], false);
+    assert.equal('title' in diagnostics[0], false);
+    assert.equal('url' in diagnostics[0], false);
+});
+
+test('superseded playback cannot emit diagnostics under the newer generation', async () => {
+    const player = new Player();
+    const diagnostics = [];
+    let releaseFirst;
+    const firstReady = new Promise(resolve => { releaseFirst = resolve; });
+    player.onDiagnostic = value => diagnostics.push(value);
+    player._playWasm = async (_url, _format, _subsong, playGen) => {
+        await firstReady;
+        player._markFirstFrame(playGen);
+        player._assertCurrentPlayback(playGen);
+    };
+
+    const oldPlay = player.play({ playStrategy: 'wasmDecode', fileFormat: 'ym', rawUrl: '/old.ym' });
+    const newPlay = player.play({ playStrategy: 'directFile', fileFormat: 'ogg', rawUrl: '/new.ogg' });
+    releaseFirst();
+    await Promise.all([oldPlay, newPlay]);
+
+    assert.deepEqual(diagnostics.map(item => [item.strategy, item.format]), [['directFile', 'ogg']]);
+});
+
+test('all playback strategies expose the same diagnostic field set', () => {
+    const player = new Player();
+    const values = [];
+    player.onDiagnostic = value => values.push(value);
+    for (const [index, strategy] of ['directFile', 'wasmDecode', 'serverDecode'].entries()) {
+        player._playGen = index + 1;
+        player._diagnostic = {
+            generation: player._playGen,
+            strategy,
+            format: strategy === 'wasmDecode' ? 'xm' : 'wav',
+            startedAt: player._now(),
+            resourceFetchMs: strategy === 'wasmDecode' ? 12 : null,
+            wasmReadyMs: strategy === 'wasmDecode' ? 3 : null,
+            workerReadyMs: strategy === 'wasmDecode' ? 9 : null,
+            firstFrameMs: null,
+            clickToPlayingMs: null,
+            underruns: 0,
+            fallbackUsed: false,
+            emitted: false,
+        };
+        player._markFirstFrame(player._playGen);
+    }
+    const keys = Object.keys(values[0]).sort();
+    assert.equal(values.length, 3);
+    assert.ok(values.every(value => assert.deepEqual(Object.keys(value).sort(), keys) === undefined));
+});
+
 test('stop rejects a pending worker-ready promise', async () => {
     const player = new Player();
     let rejected;
@@ -109,6 +179,73 @@ test('AudioWorklet module is registered only once across many songs', async () =
     await Promise.all(Array.from({ length: 20 }, () => player._ensureWorkletModule()));
 
     assert.equal(registrations, 1);
+});
+
+test('interaction warmup distinguishes builtin and full bundles and reuses workers', async () => {
+    class WarmWorker {
+        static instances = [];
+        constructor() { this.messages = []; this.terminated = false; WarmWorker.instances.push(this); }
+        postMessage(message) {
+            this.messages.push(message);
+            if (message.type === 'warmup') {
+                queueMicrotask(() => this.onmessage?.({ data: { type: 'warmed', bundle: message.bundle } }));
+            }
+        }
+        terminate() { this.terminated = true; }
+    }
+    context.Worker = WarmWorker;
+    context.crossOriginIsolated = true;
+    context.SharedArrayBuffer = SharedArrayBuffer;
+    const player = new Player();
+
+    assert.equal(await player.prewarmWasm('ym'), true);
+    assert.equal(await player.prewarmWasm('xm'), true);
+    assert.equal(WarmWorker.instances.length, 2);
+    assert.equal(WarmWorker.instances[0].messages[0].bundle, 'builtin');
+    assert.equal(WarmWorker.instances[1].messages[0].bundle, 'full');
+
+    const builtin = await player._takeWorker('builtin');
+    player._storeWorker(builtin);
+    assert.equal(await player._takeWorker('builtin'), builtin);
+    assert.equal(WarmWorker.instances.length, 2);
+});
+
+test('failed worker warmup is discarded and can be retried', async () => {
+    class RetryWorker {
+        static instances = [];
+        constructor() { this.index = RetryWorker.instances.length; this.terminated = false; RetryWorker.instances.push(this); }
+        postMessage(message) {
+            if (message.type !== 'warmup') return;
+            const type = this.index === 0 ? 'warmup-error' : 'warmed';
+            queueMicrotask(() => this.onmessage?.({ data: { type, bundle: message.bundle } }));
+        }
+        terminate() { this.terminated = true; }
+    }
+    context.Worker = RetryWorker;
+    const player = new Player();
+
+    assert.equal(await player.prewarmWasm('ym'), false);
+    assert.equal(RetryWorker.instances[0].terminated, true);
+    assert.equal(await player.prewarmWasm('ym'), true);
+    assert.equal(RetryWorker.instances.length, 2);
+});
+
+test('stopped active worker returns to its matching idle pool', () => {
+    const player = new Player();
+    const worker = {
+        _orzBundle: 'full',
+        terminated: false,
+        postMessage() {},
+        terminate() { this.terminated = true; },
+        onmessage: null,
+        onerror: null,
+    };
+
+    player._shutdownWorker(worker, 42);
+    worker.onmessage({ data: { type: 'stopped', generation: 42 } });
+
+    assert.equal(worker.terminated, false);
+    assert.equal(player._workerPool.get('full'), worker);
 });
 
 test('direct playback state follows completed play, pause, and ended events', async () => {

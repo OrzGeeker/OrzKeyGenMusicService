@@ -219,22 +219,7 @@ public struct MusicScannerService {
     }
 
     func extractDuration(filePath: String, format: String) async -> Double? {
-        if CDecoderBridge.canDecode(format: format),
-           let duration = try? CDecoderBridge.duration(filePath: filePath, format: format) {
-            return duration
-        }
-        do {
-            let result = try await ProcessRunner.execute(arguments: [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                filePath
-            ], timeout: 5)
-            guard let duration = Double(result), duration > 0 else { return nil }
-            return duration
-        } catch {
-            return nil
-        }
+        await AudioDurationProbe.duration(filePath: filePath, format: format)
     }
 
     func shouldGenerateAudioFingerprint(format: String) -> Bool {
