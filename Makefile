@@ -1,8 +1,6 @@
 SHELL := /bin/bash
-DOCKER_DESKTOP_BIN := /Applications/Docker.app/Contents/Resources/bin
-export PATH := $(DOCKER_DESKTOP_BIN):$(PATH)
-DOCKER := $(shell command -v docker 2>/dev/null || test ! -x $(DOCKER_DESKTOP_BIN)/docker || printf '%s\n' $(DOCKER_DESKTOP_BIN)/docker)
-DOCKER_COMPOSE := $(DOCKER) compose
+DOCKER ?= docker
+DOCKER_COMPOSE ?= $(DOCKER) compose
 HOST_ARCH := $(shell uname -m)
 ifeq ($(HOST_ARCH),arm64)
 export DOCKER_DEFAULT_PLATFORM ?= linux/arm64
@@ -88,10 +86,10 @@ status:
 	done
 	@echo ""
 	@echo "Docker:"
-	@if [ -n "$(DOCKER)" ]; then \
+	@if command -v "$(firstword $(DOCKER))" >/dev/null 2>&1; then \
 		$(DOCKER_COMPOSE) ps; \
 	else \
-		echo "  docker CLI not found"; \
+		echo "  docker CLI not found in PATH"; \
 	fi
 
 .PHONY: stop-local
