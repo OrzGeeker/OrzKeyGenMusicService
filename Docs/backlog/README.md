@@ -6,6 +6,7 @@
 |:-----|:-----|
 | [orz-audio-core-backlog.md](orz-audio-core-backlog.md) | 不阻塞当前功能的 OrzAudioCore SDK 后续任务清单。 |
 | [player-visualizer-location-plan.md](player-visualizer-location-plan.md) | 播放页全息声场、当前曲目定位的实施方案与低成本模型任务拆分。 |
+| [performance-optimization-plan.md](performance-optimization-plan.md) | 前后端首屏、数据库查询、三种播放策略和缓存治理的性能优化计划。 |
 
 推进约定：
 
