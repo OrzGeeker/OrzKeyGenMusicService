@@ -49,6 +49,7 @@ help:
 	@echo "  make release-preflight  Preflight checks for production release"
 	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
+	@echo "  make package-deploy     Build lightweight deployment package"
 	@echo "  make scan-docker    Start the scanner service in Docker"
 	@echo "  make scan-docker-run Trigger Docker scanner (DOCKER_SOURCE=/sources/keygen)"
 	@echo ""
@@ -197,6 +198,10 @@ release-upgrade:
 .PHONY: release-rollback
 release-rollback:
 	./script/release-rollback.sh
+
+.PHONY: package-deploy
+package-deploy:
+	./script/package-deploy.sh
 
 .PHONY: scan-docker
 scan-docker:

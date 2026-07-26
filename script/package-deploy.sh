@@ -1,0 +1,114 @@
+#!/bin/bash
+# package-deploy — 生成生产部署轻量包
+#
+# 用法:
+#   ./script/package-deploy.sh
+#   VERSION=0.0.2 IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:... ./script/package-deploy.sh
+#
+# 输出:
+#   dist/orzmusic-deploy-<version>.tar.gz
+
+set -euo pipefail
+
+VERSION_VALUE="${VERSION:-$(tr -d '[:space:]' < VERSION)}"
+IMAGE_REF_VALUE="${IMAGE_REF:-}"
+OUTPUT_DIR="${OUTPUT_DIR:-dist}"
+PACKAGE_ROOT="orzmusic-deploy-${VERSION_VALUE}"
+PACKAGE_NAME="${PACKAGE_ROOT}.tar.gz"
+
+if [ -z "$VERSION_VALUE" ]; then
+    echo "ERROR: VERSION is empty"
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+STAGING_DIR="$(mktemp -d)"
+cleanup() {
+    rm -rf "$STAGING_DIR"
+}
+trap cleanup EXIT
+
+mkdir -p "$STAGING_DIR/$PACKAGE_ROOT/script" "$STAGING_DIR/$PACKAGE_ROOT/Docs"
+
+copy_file() {
+    local source="$1"
+    local target="$2"
+    if [ ! -f "$source" ]; then
+        echo "ERROR: required file missing: $source"
+        exit 1
+    fi
+    cp "$source" "$STAGING_DIR/$PACKAGE_ROOT/$target"
+}
+
+copy_file docker-compose.yml docker-compose.yml
+copy_file docker-compose.production.yml docker-compose.production.yml
+copy_file VERSION VERSION
+copy_file CHANGELOG.md CHANGELOG.md
+copy_file README.md README.md
+copy_file Docs/deployment.md Docs/deployment.md
+copy_file Docs/migration.md Docs/migration.md
+copy_file script/db-backup.sh script/db-backup.sh
+copy_file script/release-preflight.sh script/release-preflight.sh
+copy_file script/release-upgrade.sh script/release-upgrade.sh
+copy_file script/release-rollback.sh script/release-rollback.sh
+copy_file script/release-smoke.sh script/release-smoke.sh
+
+chmod +x "$STAGING_DIR/$PACKAGE_ROOT"/script/*.sh
+
+cat > "$STAGING_DIR/$PACKAGE_ROOT/Makefile" <<'EOF'
+SHELL := /bin/bash
+
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help:
+	@echo "OrzMusic production deployment commands"
+	@echo ""
+	@echo "  make release-preflight  Preflight checks for production release"
+	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
+	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
+	@echo "  make release-smoke      Run smoke check after upgrade (SERVICE_URL=http://...)"
+	@echo "  make db-backup          Database backup (VERSION=X.Y.Z)"
+
+.PHONY: release-preflight
+release-preflight:
+	./script/release-preflight.sh
+
+.PHONY: release-upgrade
+release-upgrade:
+	./script/release-upgrade.sh
+
+.PHONY: release-rollback
+release-rollback:
+	./script/release-rollback.sh
+
+.PHONY: release-smoke
+release-smoke:
+	./script/release-smoke.sh
+
+.PHONY: db-backup
+db-backup:
+	./script/db-backup.sh
+EOF
+
+cat > "$STAGING_DIR/$PACKAGE_ROOT/DEPLOYMENT.txt" <<EOF
+OrzMusic deployment package
+
+Version: ${VERSION_VALUE}
+Image: ${IMAGE_REF_VALUE:-Set IMAGE_REF before upgrade}
+
+Typical production upgrade:
+
+  tar -xzf ${PACKAGE_NAME}
+  cd ${PACKAGE_ROOT}
+  export IMAGE_REF=${IMAGE_REF_VALUE:-ghcr.io/orzgeeker/orzmusic:${VERSION_VALUE}}
+  make release-preflight
+  make release-upgrade
+  EXPECTED_VERSION=${VERSION_VALUE} make release-smoke
+
+See Docs/deployment.md for details.
+EOF
+
+tar -C "$STAGING_DIR" -czf "$OUTPUT_DIR/$PACKAGE_NAME" "$PACKAGE_ROOT"
+
+echo "$OUTPUT_DIR/$PACKAGE_NAME"

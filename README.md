@@ -39,6 +39,7 @@ README 只保留项目入口信息。易变化或需要精确口径的内容维�
 |:-----|:-----|
 | [Docs/format-support.md](Docs/format-support.md) | 当前支持格式、格式数量、播放策略和存储/缓存口径。 |
 | [Docs/orz-audio-core.md](Docs/orz-audio-core.md) | OrzAudioCore SDK ABI、能力边界、版本与发布规则。 |
+| [Docs/deployment.md](Docs/deployment.md) | GitHub Release 镜像 + 轻量部署包的生产部署流程。 |
 | [Docs/migration.md](Docs/migration.md) | Docker/native 服务迁移流程与验收清单。 |
 | [Docs/backlog/](Docs/backlog/) | 待推进完成的计划、任务清单与可独立执行的实施项。 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更日志。 |
@@ -56,6 +57,9 @@ make run
 
 # Docker 部署：包含 PostgreSQL 与服务
 make docker-up
+
+# 生成生产轻量部署包（Release workflow 会自动执行）
+make package-deploy
 
 # 查看所有维护命令
 make help

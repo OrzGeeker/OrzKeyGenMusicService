@@ -12,6 +12,7 @@ node_modules/
 .vscode/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+dist/
 
 # SDK install (checksum-verified, downloaded from release)
 .audio-core-sdk/

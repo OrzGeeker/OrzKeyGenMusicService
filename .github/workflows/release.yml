@@ -1,6 +1,7 @@
 # Release workflow
 #
-# 推送 vX.Y.Z 标签后自动验证、构建、推送镜像到 GHCR 并创建 GitHub Release。
+# 推送 vX.Y.Z 标签后自动验证、构建、推送镜像到 GHCR，
+# 生成轻量部署包，并创建 GitHub Release。
 # 非匹配版本标签（不与 VERSION 文件一致）会失败。
 # 不推送或覆盖 latest 标签。
 #
@@ -100,6 +101,11 @@ jobs:
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "Pushed digest: $IMAGE_DIGEST"
 
+      # --- 轻量部署包 ---
+      - name: Package deployment bundle
+        run: |
+          IMAGE_REF="${IMAGE_DIGEST}" ./script/package-deploy.sh
+
       # --- GitHub Release ---
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -112,9 +118,12 @@ jobs:
             ### 发布制品
             - Docker 镜像: `${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}`
             - 镜像 Digest: `${{ env.IMAGE_DIGEST }}`
+            - 部署包: `orzmusic-deploy-${{ env.VERSION_TAG }}.tar.gz`
             - Git Tag: `${{ github.ref_name }}`
             - Git Commit: `${{ env.COMMIT_SHA }}`
             - 构建时间: `${{ env.BUILD_TIME }}`
+          files: |
+            dist/orzmusic-deploy-${{ env.VERSION_TAG }}.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true

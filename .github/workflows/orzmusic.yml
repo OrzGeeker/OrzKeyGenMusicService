@@ -17,9 +17,12 @@ on:
       - "script/update-audio-core-web.sh"
       - "script/db-backup.sh"
       - "script/release-*.sh"
+      - "script/package-deploy.sh"
       - "VERSION"
       - "CHANGELOG.md"
       - "docker-compose.production.yml"
+      - "Docs/deployment.md"
+      - "Docs/migration.md"
       - ".github/workflows/**.yml"
   pull_request:
     paths:
@@ -38,8 +41,11 @@ on:
       - "script/update-audio-core-web.sh"
       - "script/db-backup.sh"
       - "script/release-*.sh"
+      - "script/package-deploy.sh"
       - "VERSION"
       - "CHANGELOG.md"
+      - "Docs/deployment.md"
+      - "Docs/migration.md"
       - ".github/workflows/**.yml"
 
 jobs:
@@ -59,6 +65,7 @@ jobs:
       - run: swift test
       - run: node --test Tests/Browser/*.test.mjs
       - run: docker compose config --quiet
+      - run: ./script/package-deploy.sh
 
   macos-audio-core-smoke:
     runs-on: macos-15
