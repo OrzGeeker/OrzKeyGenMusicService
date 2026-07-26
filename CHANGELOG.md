@@ -1,5 +1,11 @@
 # Changelog
 
+## [未发布]
+
+### 修复
+- 修正歌曲位置排序测试依赖随机 UUID 的问题，使用确定性 UUID 覆盖
+  `createdAt DESC, id DESC` 次级排序，避免 Linux CI 偶发失败。
+
 ## [0.0.2] — 2026-07-23
 
 ### 修复

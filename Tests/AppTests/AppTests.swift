@@ -56,6 +56,12 @@ final class AppTests: XCTestCase {
         return ByteBuffer(data: data)
     }
 
+    /// Stable UUIDs keep `id DESC` test ordering deterministic when SQLite
+    /// timestamps multiple inserts within the same second.
+    private func orderedUUID(_ value: Int) -> UUID {
+        UUID(uuidString: "00000000-0000-0000-0000-\(String(format: "%012d", value))")!
+    }
+
     // MARK: - OrzAudioKit Unit Tests
 
     func testAudioFormatDetection() {
@@ -1005,10 +1011,8 @@ final class AppTests: XCTestCase {
         defer { app.shutdown() }
 
         let songs = (1...5).map { i in
-            let s = Song(title: "L\(i)", sha256: "loc-hash-\(String(format: "%049d", i))", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(id: orderedUUID(i), title: "L\(i)", sha256: "loc-hash-\(String(format: "%049d", i))", fileFormat: "mp3", fileSize: i * 100)
             try! s.create(on: app.db).wait()
-            // Stagger created dates to ensure DESC order
-            Thread.sleep(forTimeInterval: 0.002)
             return s
         }
 
@@ -1030,9 +1034,8 @@ final class AppTests: XCTestCase {
 
         // Create 15 songs
         let songs = (1...15).map { i in
-            let s = Song(title: "B\(i)", sha256: "loc-b-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(id: orderedUUID(i), title: "B\(i)", sha256: "loc-b-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
             try! s.create(on: app.db).wait()
-            Thread.sleep(forTimeInterval: 0.001)
             return s
         }
 
@@ -1063,9 +1066,8 @@ final class AppTests: XCTestCase {
 
         // Create 12 songs
         let songs = (1...12).map { i in
-            let s = Song(title: "LP\(i)", sha256: "loc-lp-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(id: orderedUUID(i), title: "LP\(i)", sha256: "loc-lp-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
             try! s.create(on: app.db).wait()
-            Thread.sleep(forTimeInterval: 0.001)
             return s
         }
 
@@ -1090,7 +1092,7 @@ final class AppTests: XCTestCase {
         // so songs created within the same second get the same createdAt.
         // The id DESC tiebreaker ensures stable ordering.
         let songs = (1...3).map { i in
-            let s = Song(title: "Stable\(i)", sha256: "loc-stable-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(id: orderedUUID(i), title: "Stable\(i)", sha256: "loc-stable-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
             try! s.create(on: app.db).wait()
             return s
         }
@@ -1149,9 +1151,8 @@ final class AppTests: XCTestCase {
 
         // Create 7 songs
         let songs = (1...7).map { i in
-            let s = Song(title: "Match\(i)", sha256: "loc-match-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
+            let s = Song(id: orderedUUID(i), title: "Match\(i)", sha256: "loc-match-\(String(format: "%048d", i))", fileFormat: "mp3", fileSize: i * 100)
             try! s.create(on: app.db).wait()
-            Thread.sleep(forTimeInterval: 0.001)
             return s
         }
 
