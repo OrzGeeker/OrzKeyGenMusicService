@@ -51,6 +51,7 @@ help:
 	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make package-deploy     Build lightweight deployment package"
+	@echo "  make release-scan       Scan production music dir (MUSIC_DIR=/path/to/music)"
 	@echo "  make scan-docker    Start the scanner service in Docker"
 	@echo "  make scan-docker-run Trigger Docker scanner (DOCKER_SOURCE=/sources/keygen)"
 	@echo ""
@@ -232,6 +233,10 @@ release-rollback:
 .PHONY: package-deploy
 package-deploy:
 	./script/package-deploy.sh
+
+.PHONY: release-scan
+release-scan:
+	./script/release-scan.sh
 
 .PHONY: scan-docker
 scan-docker:

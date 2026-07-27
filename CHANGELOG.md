@@ -2,6 +2,12 @@
 
 ## [未发布]
 
+### 修复
+- 修正生产 Compose 覆盖配置中 scanner 服务丢失音乐源目录挂载的问题。
+- 新增生产扫描脚本和部署包内 `make scan` 入口，支持
+  `MUSIC_DIR=/absolute/path/to/music make scan` 一键临时启动 scanner 并触发扫描。
+- 更新生产部署文档，明确扫描时宿主机路径与容器内 `/sources/keygen` 的对应关系。
+
 ## [0.0.4] — 2026-07-27
 
 ### 修复

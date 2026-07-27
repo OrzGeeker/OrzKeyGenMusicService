@@ -52,6 +52,7 @@ copy_file script/release-preflight.sh script/release-preflight.sh
 copy_file script/release-upgrade.sh script/release-upgrade.sh
 copy_file script/release-rollback.sh script/release-rollback.sh
 copy_file script/release-smoke.sh script/release-smoke.sh
+copy_file script/release-scan.sh script/release-scan.sh
 
 chmod +x "$STAGING_DIR/$PACKAGE_ROOT"/script/*.sh
 
@@ -69,6 +70,7 @@ help:
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make release-smoke      Run smoke check after upgrade (SERVICE_URL=http://...)"
 	@echo "  make db-backup          Database backup (VERSION=X.Y.Z)"
+	@echo "  make scan               Scan music directory (MUSIC_DIR=/absolute/path/to/music)"
 
 .PHONY: release-preflight
 release-preflight:
@@ -89,6 +91,10 @@ release-smoke:
 .PHONY: db-backup
 db-backup:
 	./script/db-backup.sh
+
+.PHONY: scan
+scan:
+	./script/release-scan.sh
 EOF
 
 cat > "$STAGING_DIR/$PACKAGE_ROOT/DEPLOYMENT.txt" <<EOF

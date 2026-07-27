@@ -33,7 +33,8 @@ orzmusic-deploy-<version>/
     ├── release-preflight.sh
     ├── release-upgrade.sh
     ├── release-rollback.sh
-    └── release-smoke.sh
+    ├── release-smoke.sh
+    └── release-scan.sh
 ```
 
 ## 首次部署
@@ -96,6 +97,55 @@ EXPECTED_VERSION=0.0.2 make release-smoke
 ```
 
 注意：回滚脚本不会自动恢复数据库。若失败原因是数据库迁移不兼容，应先根据备份恢复数据库，再启动上一版本镜像。
+
+## 扫描音频文件
+
+生产环境推荐使用部署包里的 `make scan`。它会临时启动 scanner 服务，把宿主机音频目录只读挂载到容器内 `/sources/keygen`，触发扫描，然后停止临时 scanner 容器。
+
+```bash
+export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:<digest>
+MUSIC_DIR=/absolute/path/to/music make scan
+```
+
+示例：
+
+```bash
+export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:32db66e1e7c0d0b0301c0ed31647a3f8d9b9d568439c9377399c2baaf9fb8c9a
+MUSIC_DIR=/mnt/music make scan
+```
+
+参数说明：
+
+| 变量 | 说明 |
+|:-----|:-----|
+| `MUSIC_DIR` | 宿主机上的真实音频目录，必须是绝对路径。 |
+| `IMAGE_REF` | 当前生产镜像引用，建议使用 Release 页面提供的 digest。 |
+| `SCAN_SOURCE` | 容器内扫描路径，默认 `/sources/keygen`，通常不需要改。 |
+| `SCAN_URL` | scanner 服务地址，默认 `http://127.0.0.1:8081`。 |
+
+扫描完成后可检查格式统计：
+
+```bash
+curl -fsS "http://127.0.0.1:8080/api/songs/formats"
+```
+
+如果需要手动启动 scanner，也可以使用 Compose：
+
+```bash
+KEYGEN_DIR=/absolute/path/to/music \
+docker compose -f docker-compose.yml -f docker-compose.production.yml \
+  run --rm --service-ports scan
+```
+
+另一个终端触发扫描：
+
+```bash
+curl -fsS -X POST "http://127.0.0.1:8081/api/scan" \
+  -H "Content-Type: application/json" \
+  -d '{"sources":["/sources/keygen"]}'
+```
+
+注意：API 里的路径是容器内路径，不是宿主机路径。比如宿主机目录 `/mnt/music` 挂载为 `/sources/keygen` 后，请求体里就写 `/sources/keygen`。
 
 ## 重要约束
 
