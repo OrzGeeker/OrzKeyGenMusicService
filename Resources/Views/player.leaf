@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0b0d0c">
     <title>OrzMusic · 芯片音乐播放器</title>
-    <link rel="icon" href="/brand/favicon.ico" sizes="any">
-    <link rel="icon" href="/brand/orz-logo.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/brand/orz-logo-192.png">
+    <link rel="icon" href="/brand/favicon.ico?v=20260727-rounded-v5" sizes="any">
+    <link rel="icon" href="/brand/orz-logo.svg?v=20260727-rounded-v5" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/brand/orz-logo-192.png?v=20260727-rounded-v5">
     <link rel="stylesheet" href="/audio/app.css?v=20260723-viz-v2">
     <script>window.ORZ_PLAYBACK_DIAGNOSTICS_ENABLED = #(playbackDiagnosticsEnabled);</script>
     <script defer src="/audio/player.js?v=20260726-worker-reuse-v1"></script>

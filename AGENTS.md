@@ -116,7 +116,8 @@ App (Vapor) → OrzAudioKit (Swift) → OrzAudioCoreSDK (C system library)
 ## Frontend
 
 - 单页应用 `Resources/Views/player.leaf`（Alpine.js + Leaf 模板）
-- 品牌为 **OrzMusic**；侧边栏显示抽象 O/波浪 Logo + 品牌标题
+- 品牌为 **OrzMusic**；统一图标是圆角近黑底、暖白 O 形圆环与薄荷绿五柱音频波形，主文件为 `Resources/Public/brand/orz-logo.svg`
+- 更新品牌图标时同步 `favicon.ico`、32/192/512 PNG、根目录 favicon fallback 与透明单色空状态版本，避免多个入口显示不同设计
 - 格式导航曲目数来自 `GET /api/songs/formats`；搜索支持可选 `format` 过滤
 - 未保存队列在页面内存中；保存的播放列表持久化在服务端数据库，当前无用户隔离
 - WASM bridge 在 `Resources/Public/audio/orz_audio_builtin.js`（由 OrzAudioCore SDK 提供）

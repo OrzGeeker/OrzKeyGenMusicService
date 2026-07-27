@@ -8,6 +8,11 @@ OrzMusic 是一个面向 KeyGen Music、芯片音乐和模块音乐资料库的 
 
 项目优先使用浏览器原生播放或 WASM 实时解码；不适合浏览器实时处理的格式由服务端解码为 PCM WAV 缓存后播放。
 
+## 品牌图标
+
+OrzMusic 使用圆角近黑底、暖白圆环与薄荷绿五柱音频波形作为统一项目图标。可编辑主文件为
+[`Resources/Public/brand/orz-logo.svg`](Resources/Public/brand/orz-logo.svg)，favicon、PNG 和单色空状态版本均由该设计派生；更新图标时应同步全部品牌制品，避免单独修改某个尺寸。
+
 ## 架构概览
 
 解码能力由外置 **OrzAudioCore SDK** 提供。OrzMusic 只消费已发布并校验锁定的 SDK，不再内嵌第三方 C/C++ decoder 源码。
