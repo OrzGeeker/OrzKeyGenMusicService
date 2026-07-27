@@ -8,7 +8,8 @@
     <link rel="icon" href="/brand/favicon.ico?v=20260727-rounded-v5" sizes="any">
     <link rel="icon" href="/brand/orz-logo.svg?v=20260727-rounded-v5" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/brand/orz-logo-192.png?v=20260727-rounded-v5">
-    <link rel="stylesheet" href="/audio/app.css?v=20260723-viz-v2">
+    <style>[x-cloak]{display:none!important}</style>
+    <link rel="stylesheet" href="/audio/app.css?v=20260727-play-state-v1">
     <script>window.ORZ_PLAYBACK_DIAGNOSTICS_ENABLED = #(playbackDiagnosticsEnabled);</script>
     <script defer src="/audio/player.js?v=20260726-worker-reuse-v1"></script>
     <script defer src="/audio/decoder-manifest.generated.js?v=20260718-sdk-v1"></script>
@@ -78,10 +79,11 @@
                              :data-song-id="song.id"
                              :class="{'active':currentSong?.id===song.id,'selected':selectedSong?.id===song.id,'locate-pulse':locatedSongId===song.id}"
                              @pointerenter="prewarmSong(song)" @focusin="prewarmSong(song)"
-                             @click="selectedSong=song;prewarmSong(song)" @dblclick="playSong(song)" @keydown.enter="playSong(song)">
+                            @click="selectedSong=song;prewarmSong(song)" @dblclick="playSong(song)" @keydown.enter="playSong(song)">
                             <button class="row-play" @click.stop="playSong(song)" :aria-label="`播放 ${song.title}`">
-                                <span x-show="currentSong?.id!==song.id || !isPlaying">▶</span>
-                                <span class="playing-bars" x-show="currentSong?.id===song.id && isPlaying"><i></i><i></i><i></i></span>
+                                <span class="row-play-state"
+                                      :class="{'is-playing':currentSong?.id===song.id && isPlaying}"
+                                      aria-hidden="true"><i></i><i></i><i></i></span>
                             </button>
                             <span class="title-cell"><strong x-text="song.title"></strong><small x-text="song.album?.title || song.artist?.name || '未知来源'"></small></span>
                             <span x-text="song.artist?.name || '未知艺术家'"></span>
@@ -164,11 +166,10 @@
                     </svg>
                 </button>
                 <button class="main-play" @click="togglePlay" :disabled="!currentSong" :title="isPlaying?'暂停 (空格)':'播放 (空格)'" :aria-label="isPlaying?'暂停':'播放'" aria-keyshortcuts="Space">
-                    <svg x-show="!isPlaying" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
-                        <path d="M8 5.85a1.18 1.18 0 0 1 1.84-.98l9.05 6.15a1.18 1.18 0 0 1 0 1.96l-9.05 6.15A1.18 1.18 0 0 1 8 18.15V5.85Z"></path>
-                    </svg>
-                    <svg x-cloak x-show="isPlaying" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
-                        <path d="M7 5.5A1.5 1.5 0 0 1 8.5 4h1A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-1A1.5 1.5 0 0 1 7 18.5v-13Zm6 0A1.5 1.5 0 0 1 14.5 4h1A1.5 1.5 0 0 1 17 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-1a1.5 1.5 0 0 1-1.5-1.5v-13Z"></path>
+                    <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
+                        <path :d="isPlaying
+                            ? 'M7 5.5A1.5 1.5 0 0 1 8.5 4h1A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-1A1.5 1.5 0 0 1 7 18.5v-13Zm6 0A1.5 1.5 0 0 1 14.5 4h1A1.5 1.5 0 0 1 17 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-1a1.5 1.5 0 0 1-1.5-1.5v-13Z'
+                            : 'M8 5.85a1.18 1.18 0 0 1 1.84-.98l9.05 6.15a1.18 1.18 0 0 1 0 1.96l-9.05 6.15A1.18 1.18 0 0 1 8 18.15V5.85Z'"></path>
                     </svg>
                 </button>
                 <button @click="next" :disabled="!canNext" title="下一首 (N)" aria-label="下一首" aria-keyshortcuts="N">

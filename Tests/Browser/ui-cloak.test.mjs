@@ -22,6 +22,22 @@ test('shortcut modal stays cloaked until Alpine initializes', () => {
     assert.match(view, /class="modal"\s+x-cloak\s+x-show="shortcutOpen"/);
 });
 
+test('cloak rule is inlined before external CSS to prevent first-paint state flashes', () => {
+    const cloakRule = view.indexOf('<style>[x-cloak]{display:none!important}</style>');
+    const stylesheet = view.indexOf('<link rel="stylesheet"');
+    assert.ok(cloakRule >= 0);
+    assert.ok(cloakRule < stylesheet);
+});
+
+test('playback icons update atomically instead of toggling sibling elements', () => {
+    assert.match(view, /class="row-play-state"[\s\S]*?:class="\{'is-playing':currentSong\?\.id===song\.id && isPlaying\}"/);
+    assert.match(view, /<button class="main-play"[\s\S]*?<svg[^>]*>[\s\S]*?<path :d="isPlaying/);
+    assert.match(css, /\.row-play-state\.is-playing::before\{content:none\}/);
+    assert.match(css, /\.row-play-state\.is-playing i\{display:block/);
+    assert.doesNotMatch(view, /x-show="!?isPlaying"/);
+    assert.doesNotMatch(view, /class="playing-bars" x-show=/);
+});
+
 test('shortcut help entry appears before the format navigation', () => {
     const shortcut = view.indexOf('class="shortcut-hint"');
     const navigation = view.indexOf('class="format-nav"');
