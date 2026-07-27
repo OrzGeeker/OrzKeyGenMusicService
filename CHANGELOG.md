@@ -2,9 +2,25 @@
 
 ## [未发布]
 
+## [0.0.3] — 2026-07-27
+
+### 新增
+- GitHub Release 除 Docker 镜像外，新增轻量部署包
+  `orzmusic-deploy-<version>.tar.gz`，生产机可不拉取完整仓库即可部署。
+- 新增生产部署说明文档，明确部署包内容、首次部署、日常升级和回滚流程。
+- 新增性能优化计划和任务拆分文档，便于后续按小粒度任务推进。
+
+### 优化
+- 优化初始加载和音频播放体验。
+- 更新 OrzMusic 项目图标。
+- 本机 ARM 主机默认使用 `linux/arm64` Docker 构建平台，避免 Apple Silicon 上
+  amd64 模拟构建触发 Swift 依赖编译崩溃。
+- Makefile 优先使用 PATH 中的 Docker CLI，提高不同本机 Docker 安装路径的兼容性。
+
 ### 修复
 - 修正歌曲位置排序测试依赖随机 UUID 的问题，使用确定性 UUID 覆盖
   `createdAt DESC, id DESC` 次级排序，避免 Linux CI 偶发失败。
+- 稳定播放状态图标显示，避免播放/暂停状态切换时图标表现不一致。
 
 ## [0.0.2] — 2026-07-23
 
