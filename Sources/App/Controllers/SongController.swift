@@ -199,7 +199,7 @@ struct SongController: RouteCollection {
         guard let songId = req.parameters.get("id", as: UUID.self) else {
             throw Abort(.notFound)
         }
-        guard let song = try await Song.find(songId, on: req.db) else {
+        guard try await Song.find(songId, on: req.db) != nil else {
             throw Abort(.notFound)
         }
 
@@ -221,31 +221,22 @@ struct SongController: RouteCollection {
             throw Abort(.internalServerError, reason: "Configured database does not support SQL position queries")
         }
 
-        let position: Int
-        if let createdAt = song.createdAt {
-            let query: SQLQueryString = """
-                SELECT COUNT(*) AS position FROM songs
-                WHERE created_at > \(bind: createdAt)
-                   OR (created_at = \(bind: createdAt) AND id > \(bind: songId))
-                """
-            position = try await sql.raw(query).first(decoding: PositionRow.self)?.position ?? 0
-        } else {
-            // Historical rows should have created_at, but retain exact database
-            // ordering semantics if an old nullable row is encountered.
-            let query: SQLQueryString = """
-                SELECT position FROM (
-                    SELECT id, ROW_NUMBER() OVER (
-                        ORDER BY created_at DESC, id DESC
-                    ) - 1 AS position
-                    FROM songs
-                ) ranked
-                WHERE id = \(bind: songId)
-                """
-            guard let row = try await sql.raw(query).first(decoding: PositionRow.self) else {
-                throw Abort(.notFound)
-            }
-            position = row.position
+        // Use the same database ordering expression as /api/songs. This avoids
+        // backend-specific timestamp bind formatting differences when comparing
+        // `created_at` directly, especially in SQLite tests.
+        let query: SQLQueryString = """
+            SELECT position FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY created_at DESC, id DESC
+                ) - 1 AS position
+                FROM songs
+            ) ranked
+            WHERE id = \(bind: songId)
+            """
+        guard let row = try await sql.raw(query).first(decoding: PositionRow.self) else {
+            throw Abort(.notFound)
         }
+        let position = row.position
 
         let page = (position / per) + 1
 
