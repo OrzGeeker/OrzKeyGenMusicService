@@ -80,12 +80,11 @@ make status
 # 停止本机/Docker 服务
 make stop
 
-# 调用本机服务扫描音乐目录
-make scan-local SOURCE=/absolute/path/to/music
+# 扫描已由 SCAN_ROOT 配置的目录（需要管理令牌）
+ADMIN_API_TOKEN=change-me make scan-local
 
-# Docker 扫描服务，默认把 ./keygenmusic 挂载为 /sources/keygen
-make scan-docker
-make scan-docker-run
+# 触发 Docker 主服务扫描其配置的 SCAN_ROOT（需要管理令牌）
+ADMIN_API_TOKEN=change-me make scan-docker-run
 
 # 测试
 make test
@@ -103,6 +102,9 @@ make test
 | `DATABASE_USERNAME` | `vapor_username` | 数据库用户。 |
 | `DATABASE_PASSWORD` | `vapor_password` | 数据库密码。 |
 | `CAS_ROOT` | `./data/music` / Docker 中为 `/data/music` | CAS 原始音频存储根目录。 |
+| `ADMIN_API_TOKEN` | 无 | 管理写操作的 Bearer Token；未配置时扫描、上传和删除接口均会关闭。 |
+| `SCAN_ROOT` | 无 | 服务端允许扫描的唯一目录。Docker 默认将 `${MUSIC_DIR}` 只读挂载为 `/sources/music` 并设置为此值。 |
+| `MUSIC_DIR` | `./keygenmusic`（Docker） | 要挂载到主服务 `/sources/music` 的宿主机音乐目录。启动或重建容器前设置。 |
 | `SERVER_DECODE_CONCURRENCY` | `1` | 同时执行的冷缓存服务端解码数；限制为 1～32，低并发单机建议保持 1。 |
 | `PLAYBACK_DIAGNOSTICS_ENABLED` | `false` | 是否接收匿名浏览器首帧指标；默认关闭。 |
 
@@ -120,7 +122,7 @@ CAS 保存导入时的原始音频文件；服务端解码产生的 WAV 缓存�
 - `GET /api/songs/:id/stream` — 播放流。
 - `GET /api/songs/:id/raw` — 原始文件下载。
 - `GET /api/playlists` — 播放列表管理。
-- `POST /api/scan` — 扫描并导入音乐文件。
+- `POST /api/scan` — 扫描 `SCAN_ROOT` 并导入音乐文件；需要 `Authorization: Bearer <ADMIN_API_TOKEN>`，不接受客户端提供的服务器路径。
 
 完整接口细节以代码和运行中的 OpenAPI/System API 返回为准。
 

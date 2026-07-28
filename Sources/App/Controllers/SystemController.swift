@@ -122,6 +122,7 @@ struct SystemController: RouteCollection {
                     ] as [String: Any],
                     "delete": [
                         "summary": "Delete a song",
+                        "security": [["AdminBearer": []]],
                         "parameters": [
                             ["name": "id", "in": "path", "required": true, "schema": ["type": "string", "format": "uuid"]]
                         ],
@@ -329,10 +330,14 @@ struct SystemController: RouteCollection {
                 ],
                 "/api/scan": [
                     "post": [
-                        "summary": "Scan music library",
-                        "description": "Scans one or more source directories, imports files into CAS (content-addressed storage), creates Song records",
+                        "summary": "Scan configured music library",
+                        "description": "Scans the server-configured SCAN_ROOT only, imports files into CAS (content-addressed storage), and creates Song records. This operation does not accept source paths from clients.",
+                        "security": [["AdminBearer": []]],
                         "responses": [
-                            "200": ["description": "Scan result with counts"]
+                            "200": ["description": "Scan result with counts"],
+                            "401": ["description": "Missing or invalid admin token"],
+                            "409": ["description": "A scan is already running"],
+                            "503": ["description": "Admin API is disabled or SCAN_ROOT is unavailable"]
                         ]
                     ]
                 ],
@@ -340,6 +345,7 @@ struct SystemController: RouteCollection {
                     "post": [
                         "summary": "Upload music file",
                         "description": "Upload a single audio file. Automatically deduplicates via SHA-256.",
+                        "security": [["AdminBearer": []]],
                         "requestBody": [
                             "content": [
                                 "multipart/form-data": [
@@ -357,12 +363,22 @@ struct SystemController: RouteCollection {
                         ],
                         "responses": [
                             "201": ["description": "Uploaded successfully"],
-                            "409": ["description": "Duplicate file"]
+                            "401": ["description": "Missing or invalid admin token"],
+                            "409": ["description": "Duplicate file"],
+                            "503": ["description": "Admin API is disabled"]
                         ]
                     ] as [String: Any]
                 ]
             ] as [String: Any],
             "components": [
+                "securitySchemes": [
+                    "AdminBearer": [
+                        "type": "http",
+                        "scheme": "bearer",
+                        "bearerFormat": "Bearer token",
+                        "description": "Set to the ADMIN_API_TOKEN configured on the server. Required for administrative write operations."
+                    ] as [String: Any]
+                ],
                 "schemas": [
                     "SongResponse": [
                         "type": "object",

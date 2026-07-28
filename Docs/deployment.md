@@ -82,7 +82,7 @@ EXPECTED_VERSION=0.0.3 make release-smoke
 1. 前置检查
 2. 拉取镜像
 3. 数据库备份
-4. 停止 `app` 和 `scan`
+4. 停止 `app`
 5. 执行数据库迁移
 6. 启动 `app`
 
@@ -100,18 +100,24 @@ EXPECTED_VERSION=0.0.2 make release-smoke
 
 ## 扫描音频文件
 
-生产环境推荐使用部署包里的 `make scan`。它会临时启动 scanner 服务，把宿主机音频目录只读挂载到容器内 `/sources/keygen`，触发扫描，然后停止临时 scanner 容器。
+扫描由主服务处理，不再启动独立 scanner 容器。部署或重建主服务前，将宿主机音乐目录通过 `MUSIC_DIR` 只读挂载到容器内 `/sources/music`；服务使用固定的 `SCAN_ROOT=/sources/music`，扫描请求不能指定其他服务器路径。
 
 ```bash
 export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:<digest>
-MUSIC_DIR=/absolute/path/to/music make scan
+export MUSIC_DIR=/absolute/path/to/music
+export ADMIN_API_TOKEN=<a-long-random-secret>
+make release-upgrade
+make release-scan
 ```
 
 示例：
 
 ```bash
 export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:32db66e1e7c0d0b0301c0ed31647a3f8d9b9d568439c9377399c2baaf9fb8c9a
-MUSIC_DIR=/mnt/music make scan
+export MUSIC_DIR=/mnt/music
+export ADMIN_API_TOKEN=<a-long-random-secret>
+make release-upgrade
+make release-scan
 ```
 
 参数说明：
@@ -120,8 +126,9 @@ MUSIC_DIR=/mnt/music make scan
 |:-----|:-----|
 | `MUSIC_DIR` | 宿主机上的真实音频目录，必须是绝对路径。 |
 | `IMAGE_REF` | 当前生产镜像引用，建议使用 Release 页面提供的 digest。 |
-| `SCAN_SOURCE` | 容器内扫描路径，默认 `/sources/keygen`，通常不需要改。 |
-| `SCAN_URL` | scanner 服务地址，默认 `http://127.0.0.1:8081`。 |
+| `ADMIN_API_TOKEN` | 管理写操作使用的高强度随机 Bearer Token。未配置时扫描、上传和删除接口会返回 `503 admin_api_disabled`。 |
+
+`MUSIC_DIR` 只在主服务容器启动时挂载。若要更换目录，更新环境变量后执行 `make release-upgrade` 重建 `app`，再触发扫描。
 
 扫描完成后可检查格式统计：
 
@@ -129,23 +136,14 @@ MUSIC_DIR=/mnt/music make scan
 curl -fsS "http://127.0.0.1:8080/api/songs/formats"
 ```
 
-如果需要手动启动 scanner，也可以使用 Compose：
+也可以直接调用主服务的扫描接口：
 
 ```bash
-KEYGEN_DIR=/absolute/path/to/music \
-docker compose -f docker-compose.yml -f docker-compose.production.yml \
-  run --rm --service-ports scan
+curl -fsS -X POST "http://127.0.0.1:8080/api/scan" \
+  -H "Authorization: Bearer ${ADMIN_API_TOKEN}"
 ```
 
-另一个终端触发扫描：
-
-```bash
-curl -fsS -X POST "http://127.0.0.1:8081/api/scan" \
-  -H "Content-Type: application/json" \
-  -d '{"sources":["/sources/keygen"]}'
-```
-
-注意：API 里的路径是容器内路径，不是宿主机路径。比如宿主机目录 `/mnt/music` 挂载为 `/sources/keygen` 后，请求体里就写 `/sources/keygen`。
+该接口没有请求体。它只会扫描启动时配置的 `SCAN_ROOT`，因此客户端无法选择或探测任意服务器目录。
 
 ## 重要约束
 
