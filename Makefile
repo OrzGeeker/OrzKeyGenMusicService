@@ -8,9 +8,8 @@ else ifeq ($(HOST_ARCH),aarch64)
 export DOCKER_DEFAULT_PLATFORM ?= linux/arm64
 endif
 APP_PORT ?= 8080
-SCAN_PORT ?= 8081
-SOURCE ?= $(CURDIR)/keygenmusic
-DOCKER_SOURCE ?= /sources/keygen
+ADMIN_API_TOKEN ?=
+MUSIC_DIR ?= $(CURDIR)/keygenmusic
 
 .DEFAULT_GOAL := help
 
@@ -29,7 +28,7 @@ help:
 	@echo "  make run            Run the Vapor service locally"
 	@echo "  make stop           Stop local OrzMusic services and Docker services"
 	@echo "  make restart        Stop then run the local Vapor service"
-	@echo "  make scan-local     Trigger scan on the local service (SOURCE=/path/to/music)"
+	@echo "  make scan-local     Trigger configured local scan root (ADMIN_API_TOKEN=...)"
 	@echo "  make audit-fingerprints Validate production fingerprint policy (ALL=1 for eligible full scan)"
 	@echo "  make backfill-durations Repair missing song durations (DRY_RUN=1 for preview)"
 	@echo "  make warm-decode-cache Pre-generate selected server-decode WAV caches"
@@ -51,9 +50,8 @@ help:
 	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make package-deploy     Build lightweight deployment package"
-	@echo "  make release-scan       Scan production music dir (MUSIC_DIR=/path/to/music)"
-	@echo "  make scan-docker    Start the scanner service in Docker"
-	@echo "  make scan-docker-run Trigger Docker scanner (DOCKER_SOURCE=/sources/keygen)"
+	@echo "  make release-scan       Scan production music dir (ADMIN_API_TOKEN=...)"
+	@echo "  make scan-docker-run Trigger configured Docker scan root (ADMIN_API_TOKEN=...)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean          Remove local Swift build artifacts"
@@ -76,7 +74,7 @@ build:
 .PHONY: status
 status:
 	@echo "Ports:"
-	@for port in $(APP_PORT) $(SCAN_PORT); do \
+	@for port in $(APP_PORT); do \
 		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
 		if [ -n "$$pids" ]; then \
 			echo "  $$port: in use by PID(s) $$pids"; \
@@ -95,7 +93,7 @@ status:
 
 .PHONY: stop-local
 stop-local:
-	@for port in $(APP_PORT) $(SCAN_PORT); do \
+	@for port in $(APP_PORT); do \
 		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
 		if [ -z "$$pids" ]; then \
 			echo "No local listener on port $$port"; \
@@ -128,15 +126,14 @@ restart: stop-local run
 
 .PHONY: scan-local
 scan-local:
-	@echo "Scanning local source through http://127.0.0.1:$(APP_PORT)/api/scan"
-	@echo "SOURCE=$(SOURCE)"
+	@test -n "$(ADMIN_API_TOKEN)" || (echo "ERROR: ADMIN_API_TOKEN is required"; exit 1)
+	@echo "Scanning configured root through http://127.0.0.1:$(APP_PORT)/api/scan"
 	curl -fsS -X POST "http://127.0.0.1:$(APP_PORT)/api/scan" \
-		-H "Content-Type: application/json" \
-		-d '{"sources":["$(SOURCE)"]}'
+		-H "Authorization: Bearer $(ADMIN_API_TOKEN)"
 
 .PHONY: audit-fingerprints
 audit-fingerprints:
-	@args='--source "$(SOURCE)"'; \
+	@args='--source "$(MUSIC_DIR)"'; \
 	if [ "$(ALL)" = "1" ]; then args="$$args --all"; else args="$$args --limit-per-format \"$${LIMIT_PER_FORMAT:-1}\""; fi; \
 	if [ "$(FORCE_ALL_FORMATS)" = "1" ]; then args="$$args --force-all-formats"; fi; \
 	if [ -n "$(FORMATS)" ]; then args="$$args --formats \"$(FORMATS)\""; fi; \
@@ -238,17 +235,12 @@ package-deploy:
 release-scan:
 	./script/release-scan.sh
 
-.PHONY: scan-docker
-scan-docker:
-	$(DOCKER_COMPOSE) run --rm --service-ports scan
-
 .PHONY: scan-docker-run
 scan-docker-run:
-	@echo "Scanning Docker source through http://127.0.0.1:$(SCAN_PORT)/api/scan"
-	@echo "DOCKER_SOURCE=$(DOCKER_SOURCE)"
-	curl -fsS -X POST "http://127.0.0.1:$(SCAN_PORT)/api/scan" \
-		-H "Content-Type: application/json" \
-		-d '{"sources":["$(DOCKER_SOURCE)"]}'
+	@test -n "$(ADMIN_API_TOKEN)" || (echo "ERROR: ADMIN_API_TOKEN is required"; exit 1)
+	@echo "Scanning configured Docker root through http://127.0.0.1:$(APP_PORT)/api/scan"
+	curl -fsS -X POST "http://127.0.0.1:$(APP_PORT)/api/scan" \
+		-H "Authorization: Bearer $(ADMIN_API_TOKEN)"
 
 .PHONY: clean
 clean:

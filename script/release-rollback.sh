@@ -66,8 +66,8 @@ log_release "rollback-pull" "OK" "image=$IMAGE_REF"
 echo ""
 
 # ---- 3. 停止当前服务 ----
-echo "[3/5] Stopping app and scan services..."
-if ! $COMPOSE $COMPOSE_BASE stop app scan; then
+echo "[3/5] Stopping app service..."
+if ! $COMPOSE $COMPOSE_BASE stop app; then
     log_release "rollback-stop" "FAILED"
     echo "ERROR: Failed to stop services."
     exit 1
@@ -76,7 +76,7 @@ log_release "rollback-stop" "OK"
 echo ""
 
 # ---- 4. 启动上一版本应用 ----
-# 通过设置 IMAGE_REF 为上一版本镜像，重新创建 app/scan 服务
+# 通过设置 IMAGE_REF 为上一版本镜像，重新创建 app 服务
 # 注意：不执行数据库回退，仅启动上一版本代码
 echo "[4/5] Starting previous version..."
 if ! IMAGE_REF="$IMAGE_REF" $COMPOSE $COMPOSE_BASE up -d app; then

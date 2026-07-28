@@ -4,7 +4,7 @@
 #      Start app: docker compose up app
 # Start database: docker compose up db
 # Run migrations: docker compose run migrate
-#  Import music: docker compose run --rm scan
+# Import music: ADMIN_API_TOKEN=... curl -X POST http://localhost:8080/api/scan
 #       Stop all: docker compose down (add -v to wipe db)
 
 volumes:
@@ -38,6 +38,8 @@ services:
       context: .
     environment:
       <<: *shared_environment
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      SCAN_ROOT: /sources/music
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +49,7 @@ services:
       - '8080:8080'
     volumes:
       - cas_data:/data/music
+      - ${MUSIC_DIR:-./keygenmusic}:/sources/music:ro
     command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]
 
   migrate:
@@ -59,33 +62,6 @@ services:
       db:
         condition: service_healthy
     command: ["migrate", "--yes"]
-    deploy:
-      replicas: 0
-
-  scan:
-    image: music-service:latest
-    build:
-      context: .
-    environment:
-      <<: *shared_environment
-      # 源目录：挂载到容器内 /sources/ 下
-      # docker compose run --rm scan \
-      #   serve --env production --hostname 0.0.0.0 --port 8081
-      # 然后用 curl 触发扫描:
-      # curl -X POST http://localhost:8081/api/scan \
-      #   -H "Content-Type: application/json" \
-      #   -d '{"sources": ["/sources/keygen"]}'
-    depends_on:
-      db:
-        condition: service_healthy
-      cas-init:
-        condition: service_completed_successfully
-    volumes:
-      - cas_data:/data/music
-      - ${KEYGEN_DIR:-./keygenmusic}:/sources/keygen:ro
-    ports:
-      - '8081:8081'
-    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8081"]
     deploy:
       replicas: 0
 

@@ -42,8 +42,38 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 3: preflight 可以运行（无 Docker 时报告失败，但不崩溃）
-echo "=== Test 3: preflight runs without crashing ==="
+# Test 3: release-scan 要求管理令牌，并只调用主服务扫描接口
+echo "=== Test 3: release scan requires token and posts to main service ==="
+OUTPUT=$(ADMIN_API_TOKEN="" bash "$SCRIPT_DIR/release-scan.sh" 2>&1) || true
+if ! echo "$OUTPUT" | grep -qi "ERROR.*ADMIN_API_TOKEN"; then
+    red "FAIL: release-scan accepted missing ADMIN_API_TOKEN"
+    FAIL=$((FAIL + 1))
+else
+    TESTDIR_SCAN=$(mktemp -d /tmp/release-scan-test-XXXXXX)
+    mkdir -p "$TESTDIR_SCAN/mock-bin"
+    SCAN_CALLS="$TESTDIR_SCAN/curl-calls.log"
+    cat > "$TESTDIR_SCAN/mock-bin/curl" <<MOCK
+#!/bin/bash
+printf '%s\\n' "\$*" >> "$SCAN_CALLS"
+exit 0
+MOCK
+    chmod +x "$TESTDIR_SCAN/mock-bin/curl"
+    OUTPUT=$(PATH="$TESTDIR_SCAN/mock-bin:$PATH" ADMIN_API_TOKEN="test-token" bash "$SCRIPT_DIR/release-scan.sh" 2>&1) || true
+    CALLS=$(cat "$SCAN_CALLS" 2>/dev/null || true)
+    rm -rf "$TESTDIR_SCAN"
+    if echo "$CALLS" | grep -q -- "http://127.0.0.1:8080/api/scan" \
+        && echo "$CALLS" | grep -q -- "Authorization: Bearer test-token" \
+        && ! echo "$CALLS" | grep -q -- "-d"; then
+        green "PASS"
+        PASS=$((PASS + 1))
+    else
+        red "FAIL: unexpected release-scan curl call: $CALLS"
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
+# Test 4: preflight 可以运行（无 Docker 时报告失败，但不崩溃）
+echo "=== Test 4: preflight runs without crashing ==="
 OUTPUT=$(bash "$SCRIPT_DIR/release-preflight.sh" 2>&1) || true
 # 即使无 Docker 环境，脚本也应该正常输出结果而不崩溃
 if echo "$OUTPUT" | grep -qi "Preflight:"; then
@@ -54,8 +84,8 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 4: upgrade 带有效 IMAGE_REF 时执行完整步骤顺序
-echo "=== Test 4: upgrade with valid IMAGE_REF executes step sequence ==="
+# Test 5: upgrade 带有效 IMAGE_REF 时执行完整步骤顺序
+echo "=== Test 5: upgrade with valid IMAGE_REF executes step sequence ==="
 # 创建隔离测试目录，mock docker compose
 TESTDIR=$(mktemp -d /tmp/release-test-XXXXXX)
 trap 'chmod -R 755 "$TESTDIR" 2>/dev/null; rm -rf "$TESTDIR"' EXIT
@@ -133,8 +163,8 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 5: 验证发布日志写入
-echo "=== Test 5: release log is written ==="
+# Test 6: 验证发布日志写入
+echo "=== Test 6: release log is written ==="
 if [ -f "$TESTDIR/release-log.txt" ]; then
     LOG_COUNT=$(grep -c '' "$TESTDIR/release-log.txt" 2>/dev/null || echo "0")
     if [ "$LOG_COUNT" -gt 0 ] 2>/dev/null; then
@@ -150,8 +180,8 @@ else
     PASS=$((PASS + 1))
 fi
 
-# Test 6: preflight 缺少参数时优雅退出
-echo "=== Test 6: preflight with mock environment ==="
+# Test 7: preflight 缺少参数时优雅退出
+echo "=== Test 7: preflight with mock environment ==="
 TESTDIR2=$(mktemp -d /tmp/release-test2-XXXXXX)
 mkdir -p "$TESTDIR2/mock-bin"
 

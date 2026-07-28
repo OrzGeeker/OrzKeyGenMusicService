@@ -83,13 +83,13 @@ log_release "backup" "OK"
 echo ""
 
 # ---- 4. 停止应用服务 ----
-echo "[4/6] Stopping app and scan services..."
-if ! $COMPOSE $COMPOSE_BASE stop app scan; then
+echo "[4/6] Stopping app service..."
+if ! $COMPOSE $COMPOSE_BASE stop app; then
     log_release "stop" "FAILED"
     echo "ERROR: Failed to stop services. Aborting."
     exit 1
 fi
-log_release "stop" "OK" "stopped: app, scan"
+log_release "stop" "OK" "stopped: app"
 echo ""
 
 # ---- 5. 执行数据库迁移 ----

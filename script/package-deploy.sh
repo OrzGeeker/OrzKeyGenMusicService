@@ -70,7 +70,7 @@ help:
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make release-smoke      Run smoke check after upgrade (SERVICE_URL=http://...)"
 	@echo "  make db-backup          Database backup (VERSION=X.Y.Z)"
-	@echo "  make scan               Scan music directory (MUSIC_DIR=/absolute/path/to/music)"
+	@echo "  make scan               Scan configured music directory (ADMIN_API_TOKEN=...)"
 
 .PHONY: release-preflight
 release-preflight:
