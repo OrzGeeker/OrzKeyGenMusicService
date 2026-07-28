@@ -9,12 +9,12 @@
     <link rel="icon" href="/brand/orz-logo.svg?v=20260727-rounded-v5" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/brand/orz-logo-192.png?v=20260727-rounded-v5">
     <style>[x-cloak]{display:none!important}</style>
-    <link rel="stylesheet" href="/audio/app.css?v=20260727-play-state-v1">
+    <link rel="stylesheet" href="/audio/app.css?v=20260728-directory-import-v1">
     <script>window.ORZ_PLAYBACK_DIAGNOSTICS_ENABLED = #(playbackDiagnosticsEnabled);</script>
     <script defer src="/audio/player.js?v=20260726-worker-reuse-v1"></script>
     <script defer src="/audio/decoder-manifest.generated.js?v=20260718-sdk-v1"></script>
     <script defer src="/audio/visualizer.js?v=20260723b"></script>
-    <script defer src="/audio/app.js?v=20260726-worker-reuse-v1"></script>
+    <script defer src="/audio/app.js?v=20260728-directory-import-v1"></script>
     <script defer src="/vendor/alpinejs/alpine-3.15.12.min.js"></script>
 </head>
 <body x-data="playerApp()" @keydown.window="handleShortcut($event)"
@@ -60,6 +60,9 @@
                            x-model="searchQuery" @input.debounce.250ms="search" @keydown.escape.stop="clearSearch">
                     <kbd>⌘K</kbd>
                 </label>
+                <button class="import-trigger" @click="openImportPanel" :aria-expanded="importOpen" aria-controls="directory-import-panel" title="导入本地目录">
+                    <span aria-hidden="true">↑</span><span>导入</span>
+                </button>
                 <button class="queue-trigger" @click="playlistOpen ? playlistOpen=false : openPlaylistPanel()" aria-keyshortcuts="Q" :aria-expanded="playlistOpen" title="播放队列 (Q)">
                     <span>队列</span><strong x-text="queue.length"></strong>
                 </button>
@@ -199,6 +202,34 @@
     </footer>
 
     <div class="toast-stack" aria-live="assertive"><template x-for="toast in toasts" :key="toast.id"><div class="toast" :class="toast.type" x-transition><span x-text="toast.message"></span><button @click="dismissToast(toast.id)">×</button></div></template></div>
+    <div class="modal" id="directory-import-panel" x-cloak x-show="importOpen" x-transition.opacity @click.self="importOpen=false" @keydown.escape.window="importOpen=false" role="dialog" aria-modal="true" aria-labelledby="directory-import-title">
+        <section class="import-panel">
+            <div class="panel-head"><div><small>管理员工具</small><h2 id="directory-import-title">导入本地目录</h2></div><button class="icon-btn" @click="importOpen=false" aria-label="关闭目录导入">✕</button></div>
+            <p class="import-intro">浏览器仅在你选择后读取文件；管理令牌仅保留到本次浏览器会话。</p>
+            <label class="token-field">管理令牌
+                <input type="password" autocomplete="off" x-model="adminToken" @input="saveAdminToken" placeholder="ADMIN_API_TOKEN" aria-label="管理令牌">
+            </label>
+            <div class="import-actions">
+                <button type="button" @click="$refs.directoryPicker.click()" :disabled="importRunning">选择目录</button>
+                <button type="button" @click="$refs.filePicker.click()" :disabled="importRunning">选择文件</button>
+                <button type="button" class="quiet" @click="clearAdminToken" :disabled="importRunning || !adminToken">清除令牌</button>
+                <input x-ref="directoryPicker" class="visually-hidden" type="file" webkitdirectory multiple @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐目录">
+                <input x-ref="filePicker" class="visually-hidden" type="file" multiple @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐文件">
+            </div>
+            <div class="import-summary" x-show="importItems.length" x-cloak aria-live="polite">
+                <strong x-text="`${importProgress}%`"></strong>
+                <span x-text="`共 ${importItems.length} 个 · 新增 ${importCreated} · 重复 ${importDuplicates} · 失败 ${importFailed}`"></span>
+                <div class="import-progress"><i :style="`width:${importProgress}%`"></i></div>
+                <p x-show="importRunning">正在处理：<span x-text="importItems.find(item=>item.status==='uploading')?.path || '准备中'" class="current-import-file"></span></p>
+            </div>
+            <div class="import-list" x-show="importItems.length" x-cloak>
+                <template x-for="item in importItems" :key="item.path">
+                    <div class="import-item" :class="item.status"><span x-text="item.path"></span><small x-text="item.status==='created'?'已新增':item.status==='duplicate'?'已存在':item.status==='uploading'?'上传中':item.status==='queued'?'等待中':item.error"></small></div>
+                </template>
+            </div>
+            <button class="retry-import" x-show="importFailed && !importRunning" x-cloak @click="retryImportFailures" :disabled="!importItems.some(item=>item.status==='failed' && item.retryable)">重试失败项</button>
+        </section>
+    </div>
     <div class="modal" x-cloak x-show="shortcutOpen" x-transition.opacity @click.self="shortcutOpen=false" @keydown.escape.window="shortcutOpen=false">
         <section><div class="panel-head"><div><small>轻松操控</small><h2>键盘快捷键</h2></div><button class="icon-btn" @click="shortcutOpen=false">✕</button></div>
             <div class="shortcut-grid"><template x-for="item in shortcuts" :key="item.key"><div><kbd x-text="item.key"></kbd><span x-text="item.label"></span></div></template></div>

@@ -4,6 +4,11 @@ const ORZ_FORMATS = [
     ...(globalThis.ORZ_DECODER_FORMATS||[]).map(item=>({...item,color:ORZ_COLORS[item.group]||ORZ_COLORS.other})),
     ...[['mp3','MP3'],['ogg','OGG'],['flac','FLAC'],['wav','WAV'],['m4a','M4A'],['aac','AAC']].map(([id,label])=>({id,label,group:'standard',color:ORZ_COLORS.standard}))
 ];
+// Keep browser preflight aligned with the server's AudioFormat cases. The
+// generated decoder manifest currently contains `thx`, which the server does
+// not accept; the server remains the authoritative validation boundary.
+const ORZ_IMPORT_EXTENSIONS=new Set(ORZ_FORMATS.map(item=>item.id).filter(id=>id!=='thx'));
+const ORZ_MAX_UPLOAD_BYTES=32*1024*1024;
 const ORZ_GROUPS=[['modules','模块音乐'],['retro','复古主机'],['synth','芯片与合成'],['standard','常规音频'],['other','其他格式']];
 const clamp=(value,min=0,max=1)=>Math.min(max,Math.max(min,Number(value)||0));
 const formatClock=seconds=>{if(!Number.isFinite(Number(seconds))||Number(seconds)<0)return '0:00';const n=Math.floor(Number(seconds)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=String(n%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`};
@@ -21,11 +26,12 @@ let player=null;
 function playerApp(){return{
     songs:[],page:1,perPage:50,hasMore:false,isLoading:false,totalResults:0,searchQuery:'',formatFilter:'',formatCounts:{},libraryTotal:0,
     currentSong:null,selectedSong:null,queue:[],queueIndex:-1,isPlaying:false,isLoadingTrack:false,volume:.7,lastVolume:.7,progressPercent:0,currentTime:0,duration:0,seekPreview:null,
-    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
+    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,importOpen:false,adminToken:'',importItems:[],importRunning:false,_importPromise:null,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
     locating:false,locatedSongId:null,visualizerOpen:true,visualizerMode:'holographic',_visualizer:null,_visualizerInited:false,
     shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
     async init(){
         player=new OrzAudioPlayer(); player.volume=this.volume; this.attachPlayerCallbacks(); player.initWasm();
+        this.adminToken=this.readAdminToken();
         await Promise.all([this.loadFormatCounts(),this.loadSongs()]);
         window.addEventListener('scroll',()=>this.onScroll(),{passive:true});
     },
@@ -60,6 +66,11 @@ function playerApp(){return{
     get activeList(){return this.songs.some(s=>s.id===this.currentSong?.id)?this.songs:this.queue},
     get currentIndex(){return this.activeList.findIndex(s=>s.id===this.currentSong?.id)},
     get canPrev(){return this.currentIndex>0},get canNext(){return this.currentIndex>=0&&this.currentIndex<this.activeList.length-1},
+    get importCompleted(){return this.importItems.filter(item=>item.status!=='queued'&&item.status!=='uploading').length},
+    get importCreated(){return this.importItems.filter(item=>item.status==='created').length},
+    get importDuplicates(){return this.importItems.filter(item=>item.status==='duplicate').length},
+    get importFailed(){return this.importItems.filter(item=>item.status==='failed').length},
+    get importProgress(){return this.importItems.length?Math.round(this.importCompleted/this.importItems.length*100):0},
     strategyLabel(value){return({directFile:'浏览器直放',wasmDecode:'WASM 实时解码',serverDecode:'服务端解码'})[value]||'自动解码'},
     formatColor(format){return ORZ_FORMATS.find(x=>x.id===format?.toLowerCase())?.color||'#9ca3af'},
     formatTime(seconds){return formatClock(seconds)},formatDuration(seconds){return formatDuration(seconds)},
@@ -76,6 +87,49 @@ function playerApp(){return{
     async search(){const query=this.searchQuery.trim();if(!query)return this.loadSongs();this.isLoading=true;try{const params=new URLSearchParams({q:query});if(this.formatFilter)params.set('format',this.formatFilter);const res=await fetch(`/api/songs/search?${params}`);if(!res.ok)throw new Error(`HTTP ${res.status}`);this.songs=await res.json();this.totalResults=this.songs.length;this.hasMore=false}catch(error){this.notify('搜索失败','error')}finally{this.isLoading=false}},
     async selectFormat(format){this.formatFilter=format;this.sidebarOpen=false;this.selectedSong=null;if(this.searchQuery.trim())await this.search();else await this.loadSongs()},
     clearSearch(){if(this.searchQuery){this.searchQuery='';this.loadSongs()}else document.querySelector('#songSearch')?.blur()},resetFilters(){this.searchQuery='';this.selectFormat('')},
+    readAdminToken(){try{return sessionStorage.getItem('orz-admin-api-token')||''}catch(error){return ''}},
+    saveAdminToken(){try{const token=this.adminToken.trim();if(token)sessionStorage.setItem('orz-admin-api-token',token);else sessionStorage.removeItem('orz-admin-api-token')}catch(error){this.notify('此浏览器无法保存本次会话令牌','error')}},
+    clearAdminToken(){this.adminToken='';this.saveAdminToken()},
+    openImportPanel(){this.importOpen=true},
+    isImportFileSupported(file){const name=String(file?.name||'');const dot=name.lastIndexOf('.');return dot>0&&ORZ_IMPORT_EXTENSIONS.has(name.slice(dot+1).toLowerCase())},
+    importPathFor(file){return file?.webkitRelativePath||file?.name||'未命名文件'},
+    async selectImportFiles(files){
+        if(this.importRunning)return false;
+        const selected=Array.from(files||[]);if(!selected.length)return false;
+        this.importItems=selected.map(file=>{
+            const problem=!this.isImportFileSupported(file)?'不支持的音频格式':file.size>ORZ_MAX_UPLOAD_BYTES?'文件超过 32 MiB 限制':null;
+            return {file,path:this.importPathFor(file),status:problem?'failed':'queued',error:problem,retryable:!problem};
+        });
+        const rejected=this.importFailed;if(rejected)this.notify(`${rejected} 个文件未通过导入预检`,'error');
+        return this.startImport();
+    },
+    async startImport(){
+        if(this.importRunning)return this._importPromise||false;
+        if(!this.adminToken.trim()){this.notify('请输入管理令牌后再导入','error');return false}
+        if(!this.importItems.some(item=>item.status==='queued'))return true;
+        this.importRunning=true;
+        this._importPromise=(async()=>{
+            const workers=Array.from({length:Math.min(2,this.importItems.filter(item=>item.status==='queued').length)},()=>this.runImportWorker());
+            await Promise.all(workers);this.importRunning=false;this._importPromise=null;
+            await Promise.all([this.loadFormatCounts(),this.loadSongs()]);
+            if(this.importFailed)this.notify(`目录导入完成：${this.importCreated} 个新增，${this.importDuplicates} 个重复，${this.importFailed} 个失败`,this.importFailed?'error':'success');
+            else this.notify(`目录导入完成：${this.importCreated} 个新增，${this.importDuplicates} 个重复`);
+            return true;
+        })();
+        return this._importPromise;
+    },
+    async runImportWorker(){while(true){const item=this.importItems.find(candidate=>candidate.status==='queued');if(!item)return;await this.uploadImportItem(item)}},
+    async uploadImportItem(item){
+        item.status='uploading';item.error='';
+        try{
+            const body=new FormData();body.append('file',item.file,item.file.name);body.append('relativePath',item.path);
+            const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:`Bearer ${this.adminToken.trim()}`},body});
+            const payload=await response.json().catch(()=>null);
+            if(!response.ok)throw new Error(payload?.reason||payload?.error||`HTTP ${response.status}`);
+            item.status=payload?.status==='duplicate'||response.status===200?'duplicate':'created';item.retryable=false;
+        }catch(error){item.status='failed';item.error=error?.message||'上传失败';item.retryable=true}
+    },
+    retryImportFailures(){if(this.importRunning)return;const failures=this.importItems.filter(item=>item.status==='failed'&&item.retryable);for(const item of failures){item.status='queued';item.error=''}if(failures.length)return this.startImport();return false},
     async playSong(song){if(!player)return;const request=(this.playRequestGen=(this.playRequestGen||0)+1);this.currentSong=song;this.selectedSong=song;this.isPlaying=false;this.isLoadingTrack=true;this.currentTime=0;this.duration=song.duration||0;this.progressPercent=0;await this.$nextTick();this._syncVisualizer();await player.play(song);if(request!==this.playRequestGen||player.currentSong?.id!==song.id)return;this.isLoadingTrack=false;this.isPlaying=player.isPlaying;this._syncVisualizer();if(!this.queue.some(s=>s.id===song.id))this.queue.push(song);this.queueIndex=this.queue.findIndex(s=>s.id===song.id)},
     prewarmSong(song){if(!player||song?.playStrategy!=='wasmDecode')return;const run=()=>{void player.prewarmWasm(song.fileFormat)};if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:750});else setTimeout(run,0)},
     async togglePlay(){if(player&&this.currentSong)this.isPlaying=await player.togglePlay()},
