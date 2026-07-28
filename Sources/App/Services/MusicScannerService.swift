@@ -2,6 +2,11 @@ import Foundation
 import Vapor
 import Fluent
 import OrzAudioKit
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 /// 音乐文件扫描服务（CAS 版）
 ///
@@ -29,10 +34,21 @@ public struct MusicScannerService {
     private let sourceRoot: String
     private let importer: MusicImportService
     private let fileManager = FileManager.default
+    private let snapshotDidCopy: (@Sendable (URL) -> Void)?
 
     public init(sourceRoot: String, cas: CasStorageService, db: any Database) {
+        self.init(sourceRoot: sourceRoot, cas: cas, db: db, snapshotDidCopy: nil)
+    }
+
+    init(
+        sourceRoot: String,
+        cas: CasStorageService,
+        db: any Database,
+        snapshotDidCopy: (@Sendable (URL) -> Void)?
+    ) {
         self.sourceRoot = sourceRoot
         self.importer = MusicImportService(cas: cas, db: db)
+        self.snapshotDidCopy = snapshotDidCopy
     }
 
     /// 执行全量扫描
@@ -151,8 +167,8 @@ public struct MusicScannerService {
             scanned += 1
 
             do {
-                switch try await importer.importFile(
-                    sourcePath: fullPath,
+                switch try await importStableSnapshot(
+                    sourceURL: URL(fileURLWithPath: fullPath),
                     relativePath: relativePath
                 ) {
                 case .created:
@@ -168,6 +184,62 @@ public struct MusicScannerService {
         }
 
         return SourceScanResult(scanned: scanned, created: created, skipped: skipped, failed: failed)
+    }
+
+    private struct SourceIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
+        let fileSize: Int64
+        let modificationSeconds: Int64
+        let modificationNanoseconds: Int64
+    }
+
+    private func sourceIdentity(for url: URL) throws -> SourceIdentity {
+        var info = stat()
+        guard lstat(url.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            throw ScanAPIError.rootUnavailable("Scan candidate changed or is not a regular file")
+        }
+        #if canImport(Darwin)
+        let modificationSeconds = Int64(info.st_mtimespec.tv_sec)
+        let modificationNanoseconds = Int64(info.st_mtimespec.tv_nsec)
+        #else
+        let modificationSeconds = Int64(info.st_mtim.tv_sec)
+        let modificationNanoseconds = Int64(info.st_mtim.tv_nsec)
+        #endif
+        return SourceIdentity(
+            device: UInt64(info.st_dev),
+            inode: UInt64(info.st_ino),
+            fileSize: Int64(info.st_size),
+            modificationSeconds: modificationSeconds,
+            modificationNanoseconds: modificationNanoseconds
+        )
+    }
+
+    private func importStableSnapshot(
+        sourceURL: URL,
+        relativePath: String
+    ) async throws -> MusicImportService.ImportResult {
+        let identityBefore = try sourceIdentity(for: sourceURL)
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orz_scan_\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: snapshotDirectory, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: snapshotDirectory) }
+
+        let snapshotURL = snapshotDirectory.appendingPathComponent(
+            "source.\(sourceURL.pathExtension.lowercased())"
+        )
+        try fileManager.copyItem(at: sourceURL, to: snapshotURL)
+        snapshotDidCopy?(sourceURL)
+
+        let identityAfter = try sourceIdentity(for: sourceURL)
+        guard identityAfter == identityBefore else {
+            throw ScanAPIError.rootUnavailable("Scan candidate changed while it was being copied")
+        }
+
+        return try await importer.importFile(
+            sourcePath: snapshotURL.path,
+            relativePath: relativePath
+        )
     }
 
     private func isContained(_ candidate: URL, in root: URL) -> Bool {

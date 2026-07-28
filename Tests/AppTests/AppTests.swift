@@ -1234,6 +1234,66 @@ final class AppTests: XCTestCase {
         }
     }
 
+    func testMusicImportDuplicateWithDifferentExtensionDoesNotCreateOrphanCASFile() async throws {
+        let app = try await createAsyncTestApp()
+        addTeardownBlock { try await app.asyncShutdown() }
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cross-extension-import-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let first = root.appendingPathComponent("same.v2m")
+        let second = root.appendingPathComponent("same.mod")
+        let bytes = Data("identical-audio-content".utf8)
+        try bytes.write(to: first)
+        try bytes.write(to: second)
+
+        let importer = MusicImportService(cas: app.casStorage, db: app.db)
+        guard case .created = try await importer.importFile(sourcePath: first.path) else {
+            return XCTFail("First import should create a song")
+        }
+        guard case .duplicate = try await importer.importFile(sourcePath: second.path) else {
+            return XCTFail("Second import should be a duplicate")
+        }
+
+        let casFiles = FileManager.default.enumerator(atPath: app.casStorage.root)?
+            .compactMap { $0 as? String }
+            .filter { !$0.hasSuffix("/") } ?? []
+        XCTAssertEqual(casFiles.filter { $0.hasSuffix(".v2m") }.count, 1)
+        XCTAssertEqual(casFiles.filter { $0.hasSuffix(".mod") }.count, 0)
+        let songCount = try await Song.query(on: app.db).count()
+        XCTAssertEqual(songCount, 1)
+    }
+
+    func testMusicImportRemovesNewCASObjectWhenDatabaseWorkFails() async throws {
+        struct InjectedFailure: Error {}
+
+        let app = try await createAsyncTestApp()
+        addTeardownBlock { try await app.asyncShutdown() }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("failed-import-\(UUID().uuidString).v2m")
+        defer { try? FileManager.default.removeItem(at: source) }
+        try Data("failure-cleanup-content".utf8).write(to: source)
+
+        let importer = MusicImportService(
+            cas: app.casStorage,
+            db: app.db,
+            afterCASStore: { _ in throw InjectedFailure() }
+        )
+        do {
+            _ = try await importer.importFile(sourcePath: source.path)
+            XCTFail("Injected failure should escape the importer")
+        } catch is InjectedFailure {
+            // Expected.
+        }
+
+        let songCount = try await Song.query(on: app.db).count()
+        XCTAssertEqual(songCount, 0)
+        let casFiles = FileManager.default.enumerator(atPath: app.casStorage.root)?
+            .compactMap { $0 as? String }
+            .filter { $0.contains(".") } ?? []
+        XCTAssertTrue(casFiles.isEmpty)
+    }
+
     func testScannerRejectsUnavailableRoot() throws {
         let missingRoot = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("missing-scan-root-\(UUID().uuidString)")
@@ -1308,6 +1368,41 @@ final class AppTests: XCTestCase {
         }
 
         XCTAssertEqual(try Song.query(on: app.db).count().wait(), 1)
+    }
+
+    func testScannerRejectsCandidateReplacedAfterSnapshotCopy() async throws {
+        let app = try await createAsyncTestApp()
+        addTeardownBlock { try await app.asyncShutdown() }
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scan-snapshot-race-\(UUID().uuidString)")
+        let root = base.appendingPathComponent("root")
+        let outside = base.appendingPathComponent("outside.v2m")
+        let candidate = root.appendingPathComponent("candidate.v2m")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("inside-content".utf8).write(to: candidate)
+        try Data("outside-content".utf8).write(to: outside)
+
+        let scanner = MusicScannerService(
+            sourceRoot: root.path,
+            cas: app.casStorage,
+            db: app.db,
+            snapshotDidCopy: { source in
+                try! FileManager.default.removeItem(at: source)
+                try! FileManager.default.createSymbolicLink(at: source, withDestinationURL: outside)
+            }
+        )
+        let result = try await scanner.scan()
+
+        XCTAssertEqual(result.totalScanned, 1)
+        XCTAssertEqual(result.songsCreated, 0)
+        XCTAssertEqual(result.failedFiles, 1)
+        let songCount = try await Song.query(on: app.db).count()
+        XCTAssertEqual(songCount, 0)
+        let casFiles = FileManager.default.enumerator(atPath: app.casStorage.root)?
+            .compactMap { $0 as? String }
+            .filter { $0.contains(".") } ?? []
+        XCTAssertTrue(casFiles.isEmpty)
     }
 
     func testScannerRejectsConcurrentScanWithStableErrorCode() async throws {

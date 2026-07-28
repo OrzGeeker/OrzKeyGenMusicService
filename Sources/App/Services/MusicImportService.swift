@@ -8,6 +8,33 @@ import OrzAudioKit
 /// transactional, and the database SHA-256 unique constraint is the final
 /// duplicate guard when imports race.
 struct MusicImportService {
+    private actor ImportCoordinator {
+        static let shared = ImportCoordinator()
+
+        private var activeHashes: Set<String> = []
+        private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+        func acquire(_ sha256: String) async {
+            guard activeHashes.contains(sha256) else {
+                activeHashes.insert(sha256)
+                return
+            }
+            await withCheckedContinuation { continuation in
+                waiters[sha256, default: []].append(continuation)
+            }
+        }
+
+        func release(_ sha256: String) {
+            if var queued = waiters[sha256], !queued.isEmpty {
+                let next = queued.removeFirst()
+                waiters[sha256] = queued.isEmpty ? nil : queued
+                next.resume()
+            } else {
+                activeHashes.remove(sha256)
+            }
+        }
+    }
+
     struct ParsedMetadata {
         let artistName: String
         let songTitle: String
@@ -21,10 +48,20 @@ struct MusicImportService {
 
     private let cas: CasStorageService
     private let db: any Database
+    private let afterCASStore: (@Sendable (CasStorageService.StoreResult) throws -> Void)?
 
     init(cas: CasStorageService, db: any Database) {
+        self.init(cas: cas, db: db, afterCASStore: nil)
+    }
+
+    init(
+        cas: CasStorageService,
+        db: any Database,
+        afterCASStore: (@Sendable (CasStorageService.StoreResult) throws -> Void)?
+    ) {
         self.cas = cas
         self.db = db
+        self.afterCASStore = afterCASStore
     }
 
     func importFile(
@@ -44,15 +81,37 @@ struct MusicImportService {
         let artistName = normalized(explicitArtist) ?? metadata.artistName
         let songTitle = normalized(explicitTitle) ?? metadata.songTitle
 
-        let stored = try await cas.store(sourcePath: sourcePath)
-        if let existing = try await findSong(sha256: stored.sha256, on: db) {
+        let inspected = try await cas.inspect(sourcePath: sourcePath)
+        await ImportCoordinator.shared.acquire(inspected.sha256)
+
+        do {
+            let result = try await importInspectedFile(
+                sourcePath: sourcePath,
+                inspected: inspected,
+                format: format,
+                artistName: artistName,
+                songTitle: songTitle
+            )
+            await ImportCoordinator.shared.release(inspected.sha256)
+            return result
+        } catch {
+            await ImportCoordinator.shared.release(inspected.sha256)
+            throw error
+        }
+    }
+
+    private func importInspectedFile(
+        sourcePath: String,
+        inspected: CasStorageService.InspectedFile,
+        format: AudioFormat,
+        artistName: String,
+        songTitle: String
+    ) async throws -> ImportResult {
+        if let existing = try await findSong(sha256: inspected.sha256, on: db) {
             return .duplicate(existing)
         }
 
-        let duration = await AudioDurationProbe.duration(
-            filePath: sourcePath,
-            format: format.rawValue
-        )
+        let duration = await AudioDurationProbe.duration(filePath: sourcePath, format: format.rawValue)
         let fingerprint: String?
         if shouldGenerateAudioFingerprint(format: format) {
             fingerprint = try? await AudioFingerprinter()
@@ -60,21 +119,22 @@ struct MusicImportService {
         } else {
             fingerprint = nil
         }
-
         // Artist upsert happens outside the song transaction so a unique-name
         // race can be recovered on PostgreSQL (where a failed statement aborts
         // the current transaction).
         let artist = try await upsertArtist(name: artistName, on: db)
 
+        let stored = try cas.store(sourcePath: sourcePath, inspected: inspected)
         do {
+            try afterCASStore?(stored)
             return try await db.transaction { transaction in
-                if let existing = try await findSong(sha256: stored.sha256, on: transaction) {
+                if let existing = try await findSong(sha256: inspected.sha256, on: transaction) {
                     return .duplicate(existing)
                 }
 
                 let song = Song(
                     title: songTitle,
-                    sha256: stored.sha256,
+                    sha256: inspected.sha256,
                     fileFormat: format.rawValue,
                     fileSize: stored.fileSize,
                     duration: duration
@@ -88,8 +148,11 @@ struct MusicImportService {
             // A concurrent transaction may have inserted this SHA-256 after the
             // preflight query. Treat the database unique constraint as the final
             // duplicate decision without hiding unrelated failures.
-            if let existing = try? await findSong(sha256: stored.sha256, on: db) {
+            if let existing = try? await findSong(sha256: inspected.sha256, on: db) {
                 return .duplicate(existing)
+            }
+            if stored.created {
+                try? cas.delete(sha256: inspected.sha256, format: inspected.ext)
             }
             throw error
         }

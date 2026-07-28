@@ -9,6 +9,18 @@ import OrzAudioKit
 /// 文件导入后永不移动，天然去重。DB 不存路径，只存 hash + 格式。
 /// 文件原样存储，不做转换。播放时由服务端按需处理编码兼容问题。
 public struct CasStorageService: Sendable {
+    public struct InspectedFile: Sendable {
+        public let sha256: String
+        public let ext: String
+        public let fileSize: Int
+    }
+
+    public struct StoreResult: Sendable {
+        public let sha256: String
+        public let ext: String
+        public let fileSize: Int
+        public let created: Bool
+    }
 
     /// CAS 根目录（如 ./data/music）
     public let root: String
@@ -25,32 +37,54 @@ public struct CasStorageService: Sendable {
     /// 将源文件导入 CAS，返回内容标识
     ///
     /// - Parameter sourcePath: 源文件绝对路径
-    /// - Returns: (sha256, fileExtension, fileSize)
-    public func store(sourcePath: String) async throws -> (sha256: String, ext: String, fileSize: Int) {
+    /// - Returns: Content identity and source file size without mutating CAS.
+    public func inspect(sourcePath: String) async throws -> InspectedFile {
         let sourceURL = URL(fileURLWithPath: sourcePath)
         let ext = sourceURL.pathExtension.lowercased()
-
-        // 1. 计算 SHA-256
         let sha256 = try await computeSHA256(filePath: sourcePath)
+        let attributes = try FileManager.default.attributesOfItem(atPath: sourcePath)
+        let fileSize = (attributes[.size] as? Int) ?? 0
+        return InspectedFile(sha256: sha256, ext: ext, fileSize: fileSize)
+    }
 
-        // 2. 构建存储路径
-        let destPath = resolve(sha256: sha256, format: ext)
+    /// Store a previously inspected stable source and report whether this call
+    /// created the CAS object. Callers can use `created` for failure cleanup.
+    public func store(sourcePath: String, inspected: InspectedFile) throws -> StoreResult {
+        let destPath = resolve(sha256: inspected.sha256, format: inspected.ext)
 
-        // 3. 确保目标目录存在 + 复制文件（如果不存在）
         let fm = FileManager.default
-        try queue.sync {
+        let created = try queue.sync {
             if !fm.fileExists(atPath: destPath) {
                 let dir = (destPath as NSString).deletingLastPathComponent
                 try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-                try fm.copyItem(atPath: sourcePath, toPath: destPath)
+                let stagedPath = (dir as NSString)
+                    .appendingPathComponent(".orz-cas-\(UUID().uuidString).tmp")
+                defer { try? fm.removeItem(atPath: stagedPath) }
+                try fm.copyItem(atPath: sourcePath, toPath: stagedPath)
+                do {
+                    try fm.moveItem(atPath: stagedPath, toPath: destPath)
+                    return true
+                } catch where fm.fileExists(atPath: destPath) {
+                    // Another process may have published the same object.
+                    return false
+                }
             }
+            return false
         }
 
-        // 4. 获取文件大小
         let attrs = try fm.attributesOfItem(atPath: destPath)
         let fileSize = (attrs[.size] as? Int) ?? 0
+        return StoreResult(
+            sha256: inspected.sha256,
+            ext: inspected.ext,
+            fileSize: fileSize,
+            created: created
+        )
+    }
 
-        return (sha256, ext, fileSize)
+    public func store(sourcePath: String) async throws -> StoreResult {
+        let inspected = try await inspect(sourcePath: sourcePath)
+        return try store(sourcePath: sourcePath, inspected: inspected)
     }
 
     /// 根据 SHA-256 和格式构建完整存储路径
