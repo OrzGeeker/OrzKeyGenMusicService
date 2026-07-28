@@ -15,10 +15,12 @@ final class AppTests: XCTestCase {
 
     // MARK: - Test Lifecycle
 
-    private func createTestApp() throws -> Application {
+    private func createTestApp(scanRoot: String? = nil) throws -> Application {
         let app = Application(.testing)
         app.databases.use(.sqlite(.memory), as: .sqlite)
         app.adminAPIToken = "test-admin-token"
+        app.scanRoot = scanRoot
+        app.middleware.use(ErrorResponseMiddleware())
 
         // Register migrations
         app.migrations.add(CreateArtist())
@@ -41,10 +43,12 @@ final class AppTests: XCTestCase {
         return app
     }
 
-    private func createAsyncTestApp() async throws -> Application {
+    private func createAsyncTestApp(scanRoot: String? = nil) async throws -> Application {
         let app = try await Application.make(.testing)
         app.databases.use(.sqlite(.memory), as: .sqlite)
         app.adminAPIToken = "test-admin-token"
+        app.scanRoot = scanRoot
+        app.middleware.use(ErrorResponseMiddleware())
         app.migrations.add(CreateArtist())
         app.migrations.add(CreateAlbum())
         app.migrations.add(CreateSong())
@@ -243,9 +247,11 @@ final class AppTests: XCTestCase {
         try app.test(.POST, "/api/scan", beforeRequest: { request in
             request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
             request.headers.contentType = .json
-            request.body = jsonBuffer(ScannerController.ScanRequestBody(sources: []))
+            request.body = jsonBuffer(["sources": ["/"]])
         }) { response in
-            XCTAssertEqual(response.status, .badRequest, "A valid token must reach the controller")
+            XCTAssertEqual(response.status, .serviceUnavailable, "A valid token must reach the controller")
+            let body = try response.content.decode(AdminAPIErrorResponse.self)
+            XCTAssertEqual(body.error, "scan_root_not_configured")
         }
 
         try app.test(.GET, "/api/songs") { response in
@@ -967,7 +973,7 @@ final class AppTests: XCTestCase {
     func testScannerUsesFilenameArtistWhenScanningSourceDirectoryRoot() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
-        let scanner = MusicScannerService(sourcePaths: [], cas: app.casStorage, db: app.db)
+        let scanner = MusicScannerService(sourceRoot: NSTemporaryDirectory(), cas: app.casStorage, db: app.db)
 
         let metadata = scanner.parseMetadata(
             relativePath: "iOTA - ACDSee Pro 5.3 build 168 crk.v2m",
@@ -981,7 +987,7 @@ final class AppTests: XCTestCase {
     func testScannerOnlyFingerprintsContainerAudioFormats() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
-        let scanner = MusicScannerService(sourcePaths: [], cas: app.casStorage, db: app.db)
+        let scanner = MusicScannerService(sourceRoot: NSTemporaryDirectory(), cas: app.casStorage, db: app.db)
 
         XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "mp3"))
         XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "ogg"))
@@ -993,6 +999,110 @@ final class AppTests: XCTestCase {
         XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "sc68"))
         XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "ym"))
         XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "unknown"))
+    }
+
+    func testScannerRejectsUnavailableRoot() throws {
+        let missingRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("missing-scan-root-\(UUID().uuidString)")
+        let app = try createTestApp(scanRoot: missingRoot.path)
+        defer { app.shutdown() }
+
+        try app.test(.POST, "/api/scan", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        }) { response in
+            XCTAssertEqual(response.status, .serviceUnavailable)
+            let body = try response.content.decode(AdminAPIErrorResponse.self)
+            XCTAssertEqual(body.error, "scan_root_unavailable")
+        }
+    }
+
+    func testScannerScansConfiguredRootWithoutRequestPaths() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scan-root-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("module-audio".utf8).write(to: root.appendingPathComponent("Artist - Song.v2m"))
+
+        let app = try createTestApp(scanRoot: root.path)
+        defer { app.shutdown() }
+
+        try app.test(.POST, "/api/scan", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+            request.headers.contentType = .json
+            request.body = jsonBuffer(["sources": ["/"]])
+        }) { response in
+            XCTAssertEqual(response.status, .ok)
+            let result = try response.content.decode(MusicScannerService.ScanResult.self)
+            XCTAssertEqual(result.totalScanned, 1)
+            XCTAssertEqual(result.songsCreated, 1)
+            XCTAssertEqual(result.duplicatesSkipped, 0)
+            XCTAssertEqual(result.failedFiles, 0)
+        }
+
+        XCTAssertEqual(try Song.query(on: app.db).count().wait(), 1)
+    }
+
+    func testScannerSkipsSymbolicLinksOutsideConfiguredRoot() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scan-symlink-test-\(UUID().uuidString)")
+        let root = base.appendingPathComponent("root")
+        let outside = base.appendingPathComponent("outside")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("inside".utf8).write(to: root.appendingPathComponent("inside.v2m"))
+        try Data("outside".utf8).write(to: outside.appendingPathComponent("outside.v2m"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("escaped.v2m"),
+            withDestinationURL: outside.appendingPathComponent("outside.v2m")
+        )
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("escaped-directory"),
+            withDestinationURL: outside
+        )
+
+        let app = try createTestApp(scanRoot: root.path)
+        defer { app.shutdown() }
+
+        try app.test(.POST, "/api/scan", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        }) { response in
+            XCTAssertEqual(response.status, .ok)
+            let result = try response.content.decode(MusicScannerService.ScanResult.self)
+            XCTAssertEqual(result.totalScanned, 1)
+            XCTAssertEqual(result.songsCreated, 1)
+            XCTAssertEqual(result.failedFiles, 0)
+        }
+
+        XCTAssertEqual(try Song.query(on: app.db).count().wait(), 1)
+    }
+
+    func testScannerRejectsConcurrentScanWithStableErrorCode() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scan-lock-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let app = try await createAsyncTestApp(scanRoot: root.path)
+
+        let acquired = await ScanExecutionCoordinator.shared.tryBegin()
+        XCTAssertTrue(acquired)
+
+        do {
+            let response = try await app.sendRequest(.POST, "/api/scan", beforeRequest: { request in
+                await Task.yield()
+                request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+            })
+            XCTAssertEqual(response.status, .conflict)
+            let body = try response.content.decode(AdminAPIErrorResponse.self)
+            XCTAssertEqual(body.error, "scan_already_running")
+            await ScanExecutionCoordinator.shared.finish()
+            try await app.asyncShutdown()
+        } catch {
+            await ScanExecutionCoordinator.shared.finish()
+            try? await app.asyncShutdown()
+            throw error
+        }
     }
 
     // MARK: - Playlist Reorder

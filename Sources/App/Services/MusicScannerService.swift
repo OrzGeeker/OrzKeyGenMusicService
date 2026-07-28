@@ -6,7 +6,7 @@ import OrzAudioKit
 /// 音乐文件扫描服务（CAS 版）
 ///
 /// 负责：
-/// 1. 扫描一个或多个源目录，识别所有支持的音频格式
+/// 1. 扫描配置的源目录，识别所有支持的音频格式
 /// 2. 将文件导入 CAS（按 SHA-256 内容寻址存储）
 /// 3. SHA-256 去重
 /// 4. 创建 Song 记录（不含 file_path）
@@ -28,13 +28,13 @@ public struct MusicScannerService {
         }
     }
 
-    private let sourcePaths: [String]
+    private let sourceRoot: String
     private let cas: CasStorageService
     private let db: any Database
     private let fileManager = FileManager.default
 
-    public init(sourcePaths: [String], cas: CasStorageService, db: any Database) {
-        self.sourcePaths = sourcePaths
+    public init(sourceRoot: String, cas: CasStorageService, db: any Database) {
+        self.sourceRoot = sourceRoot
         self.cas = cas
         self.db = db
     }
@@ -47,13 +47,12 @@ public struct MusicScannerService {
         var duplicatesSkipped = 0
         var failedFiles = 0
 
-        for sourcePath in sourcePaths {
-            let result = try await scanSource(sourcePath: sourcePath)
-            totalScanned += result.scanned
-            songsCreated += result.created
-            duplicatesSkipped += result.skipped
-            failedFiles += result.failed
-        }
+        let validatedRoot = try validateSourceRoot()
+        let result = try await scanSource(sourceRoot: validatedRoot)
+        totalScanned += result.scanned
+        songsCreated += result.created
+        duplicatesSkipped += result.skipped
+        failedFiles += result.failed
 
         // 不再需要 cleanupRemovedFiles — CAS 模式下 DB 是 append-only 的元数据仓库，
         // 源文件可以随时删除，不影响已有 Song 记录。
@@ -79,22 +78,76 @@ public struct MusicScannerService {
         let failed: Int
     }
 
-    private func scanSource(sourcePath: String) async throws -> SourceScanResult {
+    private func validateSourceRoot() throws -> URL {
+        let configuredRoot = URL(fileURLWithPath: sourceRoot).standardizedFileURL
+
+        do {
+            let values = try configuredRoot.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isSymbolicLinkKey,
+            ])
+            guard values.isSymbolicLink != true else {
+                throw ScanAPIError.rootUnavailable("SCAN_ROOT must not be a symbolic link")
+            }
+            guard values.isDirectory == true else {
+                throw ScanAPIError.rootUnavailable("SCAN_ROOT is not a directory")
+            }
+            guard fileManager.isReadableFile(atPath: configuredRoot.path) else {
+                throw ScanAPIError.rootUnavailable("SCAN_ROOT is not readable")
+            }
+        } catch let error as ScanAPIError {
+            throw error
+        } catch {
+            throw ScanAPIError.rootUnavailable("SCAN_ROOT does not exist or cannot be accessed")
+        }
+
+        return configuredRoot.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    private func scanSource(sourceRoot: URL) async throws -> SourceScanResult {
         var scanned = 0
         var created = 0
         var skipped = 0
         var failed = 0
 
-        guard let enumerator = fileManager.enumerator(atPath: sourcePath) else {
-            return SourceScanResult(scanned: 0, created: 0, skipped: 0, failed: 0)
+        let keys: [URLResourceKey] = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+        ]
+        guard let enumerator = fileManager.enumerator(
+            at: sourceRoot,
+            includingPropertiesForKeys: keys,
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else {
+            throw ScanAPIError.rootUnavailable("SCAN_ROOT cannot be enumerated")
         }
 
-        while let relativePath = enumerator.nextObject() as? String {
-            let fullPath = (sourcePath as NSString).appendingPathComponent(relativePath)
-            var isDir: ObjCBool = false
-            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue else {
+        while let candidate = enumerator.nextObject() as? URL {
+            guard let values = try? candidate.resourceValues(forKeys: Set(keys)) else {
                 continue
             }
+            if values.isSymbolicLink == true {
+                if values.isDirectory == true {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
+
+            let standardizedCandidate = candidate.standardizedFileURL
+            guard isContained(standardizedCandidate, in: sourceRoot) else { continue }
+
+            let resolvedCandidate = standardizedCandidate
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+            guard isContained(resolvedCandidate, in: sourceRoot) else { continue }
+
+            let relativePath = String(
+                standardizedCandidate.path.dropFirst(sourceRoot.path.count + 1)
+            )
+            let fullPath = standardizedCandidate.path
 
             let ext = (relativePath as NSString).pathExtension.lowercased()
             guard AudioFormat.from(fileExtension: ext) != nil else { continue }
@@ -148,6 +201,11 @@ public struct MusicScannerService {
         }
 
         return SourceScanResult(scanned: scanned, created: created, skipped: skipped, failed: failed)
+    }
+
+    private func isContained(_ candidate: URL, in root: URL) -> Bool {
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        return candidate.path.hasPrefix(rootPrefix)
     }
 
     // MARK: - Metadata Parsing

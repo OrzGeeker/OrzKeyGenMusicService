@@ -11,6 +11,13 @@ struct ErrorResponseMiddleware: Middleware {
     func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
         next.respond(to: request).flatMapErrorThrowing { error in
             switch error {
+            case let scanError as ScanAPIError:
+                return try self.jsonResponse(
+                    status: scanError.status,
+                    error: scanError.errorCode,
+                    reason: scanError.reason
+                )
+
             case let abort as Abort:
                 let reason = abort.reason.isEmpty ? statusReason(abort.status) : abort.reason
                 return try self.jsonResponse(
