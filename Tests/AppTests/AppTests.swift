@@ -13,6 +13,33 @@ final class AppTests: XCTestCase {
         let code: Int
     }
 
+    private struct UploadAPIResponse: Content {
+        let status: String
+        let song: SongResponse
+    }
+
+    private func multipartUploadBody(
+        fileBytes: [UInt8],
+        filename: String,
+        fields: [String: String] = [:],
+        boundary: String = "orz-upload-test-boundary"
+    ) -> ByteBuffer {
+        var body = ByteBufferAllocator().buffer(capacity: fileBytes.count + 1024)
+        body.writeString("--\(boundary)\r\n")
+        body.writeString("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.writeString("Content-Type: application/octet-stream\r\n\r\n")
+        body.writeBytes(fileBytes)
+        body.writeString("\r\n")
+        for key in fields.keys.sorted() {
+            body.writeString("--\(boundary)\r\n")
+            body.writeString("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            body.writeString(fields[key]!)
+            body.writeString("\r\n")
+        }
+        body.writeString("--\(boundary)--\r\n")
+        return body
+    }
+
     // MARK: - Test Lifecycle
 
     private func createTestApp(scanRoot: String? = nil) throws -> Application {
@@ -257,6 +284,90 @@ final class AppTests: XCTestCase {
         try app.test(.GET, "/api/songs") { response in
             XCTAssertEqual(response.status, .ok, "Read endpoints must not require the admin token")
         }
+    }
+
+    func testUploadReturnsCreatedThenDuplicateAndUsesExplicitMetadata() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let boundary = "orz-upload-created-duplicate"
+        let body = multipartUploadBody(
+            fileBytes: Array("uploaded-module-content".utf8),
+            filename: "Path Title.v2m",
+            fields: [
+                "relativePath": "Path Artist/Path Title.v2m",
+                "artist": "Explicit Artist",
+                "title": "Explicit Title",
+            ],
+            boundary: boundary
+        )
+        var headers = HTTPHeaders()
+        headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        headers.contentType = .formData(boundary: boundary)
+
+        var createdID: UUID?
+        try app.test(.POST, "/api/upload", headers: headers, body: body) { response in
+            XCTAssertEqual(response.status, .created)
+            let result = try response.content.decode(UploadAPIResponse.self)
+            XCTAssertEqual(result.status, "created")
+            XCTAssertEqual(result.song.title, "Explicit Title")
+            XCTAssertEqual(result.song.artist?.name, "Explicit Artist")
+            createdID = result.song.id
+        }
+
+        try app.test(.POST, "/api/upload", headers: headers, body: body) { response in
+            XCTAssertEqual(response.status, .ok)
+            let result = try response.content.decode(UploadAPIResponse.self)
+            XCTAssertEqual(result.status, "duplicate")
+            XCTAssertEqual(result.song.id, createdID)
+        }
+        XCTAssertEqual(try Song.query(on: app.db).count().wait(), 1)
+    }
+
+    func testUploadUsesRelativePathWhenExplicitMetadataIsAbsent() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let boundary = "orz-upload-relative-path"
+        let body = multipartUploadBody(
+            fileBytes: Array("relative-path-module-content".utf8),
+            filename: "Path Title.v2m",
+            fields: ["relativePath": "Path Artist/Path Title.v2m"],
+            boundary: boundary
+        )
+        var headers = HTTPHeaders()
+        headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        headers.contentType = .formData(boundary: boundary)
+
+        try app.test(.POST, "/api/upload", headers: headers, body: body) { response in
+            XCTAssertEqual(response.status, .created)
+            let result = try response.content.decode(UploadAPIResponse.self)
+            XCTAssertEqual(result.status, "created")
+            XCTAssertEqual(result.song.title, "Path Title")
+            XCTAssertEqual(result.song.artist?.name, "Path Artist")
+        }
+    }
+
+    func testUploadRejectsFileLargerThan32MiBBeforeCASOrDatabaseWrites() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let boundary = "orz-upload-too-large"
+        let fileBytes = Array(repeating: UInt8(0x42), count: UploadController.maximumUploadFileSize + 1)
+        let body = multipartUploadBody(
+            fileBytes: fileBytes,
+            filename: "too-large.v2m",
+            boundary: boundary
+        )
+        var headers = HTTPHeaders()
+        headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        headers.contentType = .formData(boundary: boundary)
+
+        try app.test(.POST, "/api/upload", headers: headers, body: body) { response in
+            XCTAssertEqual(response.status, .payloadTooLarge)
+            let error = try response.content.decode(AdminAPIErrorResponse.self)
+            XCTAssertEqual(error.error, "upload_too_large")
+            XCTAssertEqual(error.code, 413)
+        }
+        XCTAssertEqual(try Song.query(on: app.db).count().wait(), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: app.casStorage.root))
     }
 
     func testCreateAndGetPlaylist() throws {

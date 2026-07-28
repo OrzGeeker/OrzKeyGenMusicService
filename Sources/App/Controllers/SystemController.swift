@@ -344,7 +344,7 @@ struct SystemController: RouteCollection {
                 "/api/upload": [
                     "post": [
                         "summary": "Upload music file",
-                        "description": "Upload a single audio file. Automatically deduplicates via SHA-256.",
+                        "description": "Upload a single audio file up to 32 MiB. Automatically deduplicates via SHA-256. relativePath is used for metadata inference when artist and title are not provided.",
                         "security": [["AdminBearer": []]],
                         "requestBody": [
                             "content": [
@@ -353,6 +353,7 @@ struct SystemController: RouteCollection {
                                         "type": "object",
                                         "properties": [
                                             "file": ["type": "string", "format": "binary"],
+                                            "relativePath": ["type": "string"],
                                             "artist": ["type": "string"],
                                             "title": ["type": "string"]
                                         ] as [String: Any],
@@ -362,9 +363,11 @@ struct SystemController: RouteCollection {
                             ]
                         ],
                         "responses": [
-                            "201": ["description": "Uploaded successfully"],
+                            "201": ["description": "Uploaded successfully; returns { status: created, song }"],
+                            "200": ["description": "Duplicate upload; returns { status: duplicate, song }"],
+                            "400": ["description": "Missing file or unsupported format"],
+                            "413": ["description": "File exceeds 32 MiB; error is upload_too_large"],
                             "401": ["description": "Missing or invalid admin token"],
-                            "409": ["description": "Duplicate file"],
                             "503": ["description": "Admin API is disabled"]
                         ]
                     ] as [String: Any]

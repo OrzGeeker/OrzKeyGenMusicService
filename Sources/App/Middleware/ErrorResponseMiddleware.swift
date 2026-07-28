@@ -22,7 +22,7 @@ struct ErrorResponseMiddleware: Middleware {
                 let reason = abort.reason.isEmpty ? statusReason(abort.status) : abort.reason
                 return try self.jsonResponse(
                     status: abort.status,
-                    error: self.errorCode(for: abort.status),
+                    error: self.errorCode(for: abort.status, request: request),
                     reason: reason
                 )
 
@@ -52,7 +52,7 @@ struct ErrorResponseMiddleware: Middleware {
         return response
     }
 
-    private func errorCode(for status: HTTPStatus) -> String {
+    private func errorCode(for status: HTTPStatus, request: Request) -> String {
         switch status {
         case .notFound: return "notFound"
         case .badRequest: return "badRequest"
@@ -62,6 +62,12 @@ struct ErrorResponseMiddleware: Middleware {
         case .tooManyRequests: return "rateLimited"
         case .internalServerError: return "internalServerError"
         case .notImplemented: return "notImplemented"
+        case .payloadTooLarge:
+            // The upload route has a user-visible file-size contract. Preserve
+            // the generic code for every other endpoint.
+            return request.url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "api/upload"
+                ? "upload_too_large"
+                : "payloadTooLarge"
         default: return "httpError"
         }
     }
