@@ -1,6 +1,6 @@
 # 性能测量
 
-本文定义 OrzMusic 首屏、API 和播放 HTTP 链路的稳定测量入口。具体待办、模型分工和实施状态见 [全链路性能优化计划](backlog/performance-optimization-plan.md)。
+本文定义 OrzMusic 首屏、API 和播放 HTTP 链路的稳定测量入口。历史模型分工、实施过程和验收记录见已归档的 [全链路性能优化计划](archived/performance-optimization-plan.md)。
 
 ## 快速开始
 

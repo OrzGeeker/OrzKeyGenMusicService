@@ -143,7 +143,7 @@ bash Tests/AppTests/performance-smoke-test.sh
 
 **目标**：在真实部署环境记录冷、热缓存基线，并为后续任务确定合理预算。
 
-**允许改动**：`Docs/backlog/performance-optimization-plan.md` 的基线记录区；性能结果产物不要提交大型二进制。
+**允许改动**：本计划归档前的基线记录区；性能结果产物不要提交大型二进制。
 
 **实现要求**：
 
@@ -818,9 +818,9 @@ git diff --check
 ## 8. 单任务交接模板
 
 ```text
-请领取 Docs/backlog/performance-optimization-plan.md 中的任务 PERF-xxx。
+历史执行时从 Docs/archived/performance-optimization-plan.md 中领取任务 PERF-xxx。
 
-先阅读 AGENTS.md、Docs/backlog/performance-optimization-plan.md，以及任务列出的允许改动文件。
+先阅读 AGENTS.md、Docs/archived/performance-optimization-plan.md，以及任务列出的允许改动文件。
 只实现该任务，保留工作区中所有无关改动；不要合并相邻 PERF 任务。
 
 开始前记录与本任务直接相关的基线。实现后运行任务中的最小验证，并更新：

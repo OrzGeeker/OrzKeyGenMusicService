@@ -1,8 +1,8 @@
 # 播放页全息声场与当前曲目定位实施计划
 
-> 状态：待实施
+> 状态：已完成并归档
 >
-> 最后更新：2026-07-22
+> 最后更新：2026-07-28
 >
 > 适用模型：GPT-5.5、GPT-5.4、DeepSeek V4 Flash 等低成本编码模型
 
@@ -281,7 +281,7 @@ node --test Tests/Browser/*.test.mjs
 领取任务时，将下面整段与对应任务小节一起交给执行模型：
 
 ```text
-请领取 Docs/backlog/player-visualizer-location-plan.md 中的任务 <PVL编号>。
+历史执行时从 Docs/archived/player-visualizer-location-plan.md 中领取任务 <PVL编号>。
 
 执行规则：
 1. 先完整阅读 AGENTS.md、本计划的第 1–3 节、任务总表和指定任务小节。
