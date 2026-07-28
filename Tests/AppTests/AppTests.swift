@@ -973,9 +973,9 @@ final class AppTests: XCTestCase {
     func testScannerUsesFilenameArtistWhenScanningSourceDirectoryRoot() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
-        let scanner = MusicScannerService(sourceRoot: NSTemporaryDirectory(), cas: app.casStorage, db: app.db)
+        let importer = MusicImportService(cas: app.casStorage, db: app.db)
 
-        let metadata = scanner.parseMetadata(
+        let metadata = importer.parseMetadata(
             relativePath: "iOTA - ACDSee Pro 5.3 build 168 crk.v2m",
             fileName: "iOTA - ACDSee Pro 5.3 build 168 crk.v2m"
         )
@@ -987,18 +987,140 @@ final class AppTests: XCTestCase {
     func testScannerOnlyFingerprintsContainerAudioFormats() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
-        let scanner = MusicScannerService(sourceRoot: NSTemporaryDirectory(), cas: app.casStorage, db: app.db)
+        let importer = MusicImportService(cas: app.casStorage, db: app.db)
 
-        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "mp3"))
-        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "ogg"))
-        XCTAssertTrue(scanner.shouldGenerateAudioFingerprint(format: "wav"))
+        XCTAssertTrue(importer.shouldGenerateAudioFingerprint(format: .mp3))
+        XCTAssertTrue(importer.shouldGenerateAudioFingerprint(format: .ogg))
+        XCTAssertTrue(importer.shouldGenerateAudioFingerprint(format: .wav))
 
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "xm"))
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "mod"))
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "v2m"))
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "sc68"))
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "ym"))
-        XCTAssertFalse(scanner.shouldGenerateAudioFingerprint(format: "unknown"))
+        XCTAssertFalse(importer.shouldGenerateAudioFingerprint(format: .xm))
+        XCTAssertFalse(importer.shouldGenerateAudioFingerprint(format: .mod))
+        XCTAssertFalse(importer.shouldGenerateAudioFingerprint(format: .v2m))
+        XCTAssertFalse(importer.shouldGenerateAudioFingerprint(format: .sc68))
+        XCTAssertFalse(importer.shouldGenerateAudioFingerprint(format: .ym))
+    }
+
+    func testMusicImportServiceCreatesMetadataAndReturnsDuplicate() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("music-import-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("source.v2m")
+        try Data("same-module-content".utf8).write(to: source)
+
+        let app = try await createAsyncTestApp()
+        let cas = CasStorageService(root: root.appendingPathComponent("cas").path)
+        let importer = MusicImportService(cas: cas, db: app.db)
+
+        do {
+            let first = try await importer.importFile(
+                sourcePath: source.path,
+                relativePath: "Demo Group/iOTA - Product keygen.v2m"
+            )
+            guard case .created(let created) = first else {
+                return XCTFail("Expected a newly created song")
+            }
+            XCTAssertEqual(created.title, "Product")
+            XCTAssertNil(created.audioFingerprint)
+
+            let artist = try await created.$artist.get(on: app.db)
+            XCTAssertEqual(artist?.name, "iOTA")
+
+            let second = try await importer.importFile(
+                sourcePath: source.path,
+                relativePath: "Different/Other Title.v2m"
+            )
+            guard case .duplicate(let duplicate) = second else {
+                return XCTFail("Expected duplicate result")
+            }
+            XCTAssertEqual(duplicate.id, created.id)
+            let songCount = try await Song.query(on: app.db).count()
+            XCTAssertEqual(songCount, 1)
+            XCTAssertTrue(cas.contains(sha256: created.sha256, format: "v2m"))
+            try await app.asyncShutdown()
+        } catch {
+            try? await app.asyncShutdown()
+            throw error
+        }
+    }
+
+    func testMusicImportServiceExplicitMetadataOverridesPathInference() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("music-import-explicit-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("source.v2m")
+        try Data("explicit-module-content".utf8).write(to: source)
+
+        let app = try await createAsyncTestApp()
+        let importer = MusicImportService(
+            cas: CasStorageService(root: root.appendingPathComponent("cas").path),
+            db: app.db
+        )
+
+        do {
+            let result = try await importer.importFile(
+                sourcePath: source.path,
+                relativePath: "Path Artist/Path Title.v2m",
+                artist: " Explicit Artist ",
+                title: " Explicit Title "
+            )
+            guard case .created(let song) = result else {
+                return XCTFail("Expected a newly created song")
+            }
+            XCTAssertEqual(song.title, "Explicit Title")
+            let artist = try await song.$artist.get(on: app.db)
+            XCTAssertEqual(artist?.name, "Explicit Artist")
+            try await app.asyncShutdown()
+        } catch {
+            try? await app.asyncShutdown()
+            throw error
+        }
+    }
+
+    func testMusicImportServiceConcurrentSameContentProducesOneSong() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("music-import-race-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let firstSource = root.appendingPathComponent("first.v2m")
+        let secondSource = root.appendingPathComponent("second.v2m")
+        let bytes = Data("concurrent-module-content".utf8)
+        try bytes.write(to: firstSource)
+        try bytes.write(to: secondSource)
+
+        let app = try await createAsyncTestApp()
+        let importer = MusicImportService(
+            cas: CasStorageService(root: root.appendingPathComponent("cas").path),
+            db: app.db
+        )
+
+        do {
+            async let first = importer.importFile(
+                sourcePath: firstSource.path,
+                relativePath: "Artist/First.v2m"
+            )
+            async let second = importer.importFile(
+                sourcePath: secondSource.path,
+                relativePath: "Artist/Second.v2m"
+            )
+            let results = try await [first, second]
+
+            let createdCount = results.reduce(into: 0) { count, result in
+                if case .created = result { count += 1 }
+            }
+            let duplicateCount = results.reduce(into: 0) { count, result in
+                if case .duplicate = result { count += 1 }
+            }
+            XCTAssertEqual(createdCount, 1)
+            XCTAssertEqual(duplicateCount, 1)
+            let songCount = try await Song.query(on: app.db).count()
+            XCTAssertEqual(songCount, 1)
+            try await app.asyncShutdown()
+        } catch {
+            try? await app.asyncShutdown()
+            throw error
+        }
     }
 
     func testScannerRejectsUnavailableRoot() throws {

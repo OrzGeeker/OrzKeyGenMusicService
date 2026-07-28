@@ -7,9 +7,7 @@ import OrzAudioKit
 ///
 /// 负责：
 /// 1. 扫描配置的源目录，识别所有支持的音频格式
-/// 2. 将文件导入 CAS（按 SHA-256 内容寻址存储）
-/// 3. SHA-256 去重
-/// 4. 创建 Song 记录（不含 file_path）
+/// 2. 通过 MusicImportService 导入、去重并创建 Song
 public struct MusicScannerService {
 
     public struct ScanResult: Content {
@@ -29,14 +27,12 @@ public struct MusicScannerService {
     }
 
     private let sourceRoot: String
-    private let cas: CasStorageService
-    private let db: any Database
+    private let importer: MusicImportService
     private let fileManager = FileManager.default
 
     public init(sourceRoot: String, cas: CasStorageService, db: any Database) {
         self.sourceRoot = sourceRoot
-        self.cas = cas
-        self.db = db
+        self.importer = MusicImportService(cas: cas, db: db)
     }
 
     /// 执行全量扫描
@@ -155,44 +151,15 @@ public struct MusicScannerService {
             scanned += 1
 
             do {
-                // 1. 导入 CAS（复制到内容寻址存储）
-                let (sha256, _, fileSize) = try await cas.store(sourcePath: fullPath)
-
-                // 2. SHA-256 去重
-                if try await Song.query(on: db).filter("sha256", .equal, sha256).first() != nil {
+                switch try await importer.importFile(
+                    sourcePath: fullPath,
+                    relativePath: relativePath
+                ) {
+                case .created:
+                    created += 1
+                case .duplicate:
                     skipped += 1
-                    continue
                 }
-
-                // 3. 解析元数据
-                let info = parseMetadata(relativePath: relativePath, fileName: (relativePath as NSString).lastPathComponent)
-
-                // 4. Upsert Artist
-                let artist = try await upsertArtist(name: info.artistName)
-
-                // 5. 创建 Song
-                let song = Song(
-                    title: info.songTitle,
-                    sha256: sha256,
-                    fileFormat: ext,
-                    fileSize: fileSize
-                )
-                song.$artist.id = artist?.id
-                song.duration = await extractDuration(filePath: fullPath, format: ext)
-
-                // 尝试生成音频指纹（可选，静默跳过失败）。
-                //
-                // 指纹工具链依赖 fpcalc/ffmpeg，更适合常规音频容器。对 XM/MOD/V2M/SC68
-                // 这类模块/芯片格式，ffmpeg 往往不支持或可能长时间挂起；扫描去重已经由
-                // CAS SHA-256 完成，因此这些格式不需要额外生成感知指纹。
-                if shouldGenerateAudioFingerprint(format: ext),
-                   let fp = try? await generateFingerprint(filePath: fullPath) {
-                    song.audioFingerprint = fp
-                }
-
-                try await song.create(on: db)
-                created += 1
-
             } catch {
                 // 单个文件失败不影响扫描继续
                 failed += 1
@@ -208,93 +175,4 @@ public struct MusicScannerService {
         return candidate.path.hasPrefix(rootPrefix)
     }
 
-    // MARK: - Metadata Parsing
-
-    struct ParsedMetadata {
-        let artistName: String
-        let songTitle: String
-        let trackType: String?
-    }
-
-    func parseMetadata(relativePath: String, fileName: String) -> ParsedMetadata {
-        let name = (fileName as NSString).deletingPathExtension
-
-        // 获取父目录名作为 artist
-        let parentDir = ((relativePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
-
-        let artistFromDir: String
-        if parentDir.isEmpty || parentDir == "KEYGENMUSiC MusicPack" || parentDir == "!Others" || parentDir == "." || parentDir.hasPrefix(".") {
-            artistFromDir = "Unknown"
-        } else {
-            artistFromDir = parentDir
-        }
-
-        var songTitle = name
-        var trackType: String? = nil
-        var artistName = artistFromDir
-
-        if let range = name.range(of: " - ") {
-            let prefix = String(name[..<range.lowerBound])
-            var suffix = String(name[range.upperBound...])
-
-            if prefix.count > 0 && prefix.count < 20 {
-                if artistFromDir == "Unknown" || !name.hasPrefix(artistFromDir) {
-                    artistName = prefix
-                    suffix = String(name[range.upperBound...])
-                }
-            }
-
-            songTitle = suffix
-        }
-
-        let typeKeywords = ["intro", "kg", "crk", "trn", "trainer", "installer", "keygen", "activator", "launcher"]
-        for keyword in typeKeywords {
-            if let typeRange = songTitle.range(of: "\\b\(keyword)\\b", options: [.regularExpression, .caseInsensitive]) {
-                trackType = keyword
-                var cleanChars = CharacterSet.whitespacesAndNewlines
-                cleanChars.formUnion(.punctuationCharacters)
-                songTitle = String(songTitle[..<typeRange.lowerBound]).trimmingCharacters(in: cleanChars)
-                break
-            }
-        }
-
-        return ParsedMetadata(
-            artistName: artistName,
-            songTitle: songTitle.isEmpty ? name : songTitle,
-            trackType: trackType
-        )
-    }
-
-    // MARK: - Helpers
-
-    func upsertArtist(name: String) async throws -> Artist? {
-        if let existing = try await Artist.query(on: db).filter("name", .equal, name).first() {
-            return existing
-        }
-        let artist = Artist(name: name)
-        try await artist.create(on: db)
-        return artist
-    }
-
-    func extractDuration(filePath: String, format: String) async -> Double? {
-        await AudioDurationProbe.duration(filePath: filePath, format: format)
-    }
-
-    func shouldGenerateAudioFingerprint(format: String) -> Bool {
-        guard let audioFormat = AudioFormat.from(fileExtension: format) else { return false }
-        switch audioFormat {
-        case .mp3, .ogg, .wav, .flac, .m4a, .aac:
-            return true
-        case .xm, .mod, .it, .s3m, .mo3, .mtm,
-             .mid, .nsf, .spc, .sid, .sc68,
-             .hsc, .ym, .ahx, .amd, .fc13, .fc14,
-             .sap, .rad, .d00, .v2m, .bp:
-            return false
-        }
-    }
-
-    func generateFingerprint(filePath: String) async throws -> String? {
-        let fingerprinter = AudioFingerprinter()
-        return try? await fingerprinter.generateFingerprintFromFile(filePath: filePath)
-    }
 }

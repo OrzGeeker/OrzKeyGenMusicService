@@ -38,8 +38,8 @@ public struct CasStorageService: Sendable {
 
         // 3. 确保目标目录存在 + 复制文件（如果不存在）
         let fm = FileManager.default
-        if !fm.fileExists(atPath: destPath) {
-            try queue.sync {
+        try queue.sync {
+            if !fm.fileExists(atPath: destPath) {
                 let dir = (destPath as NSString).deletingLastPathComponent
                 try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
                 try fm.copyItem(atPath: sourcePath, toPath: destPath)
