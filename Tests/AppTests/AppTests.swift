@@ -7,11 +7,18 @@ import FluentSQLiteDriver
 
 final class AppTests: XCTestCase {
 
+    private struct AdminAPIErrorResponse: Content {
+        let error: String
+        let reason: String
+        let code: Int
+    }
+
     // MARK: - Test Lifecycle
 
     private func createTestApp() throws -> Application {
         let app = Application(.testing)
         app.databases.use(.sqlite(.memory), as: .sqlite)
+        app.adminAPIToken = "test-admin-token"
 
         // Register migrations
         app.migrations.add(CreateArtist())
@@ -37,6 +44,7 @@ final class AppTests: XCTestCase {
     private func createAsyncTestApp() async throws -> Application {
         let app = try await Application.make(.testing)
         app.databases.use(.sqlite(.memory), as: .sqlite)
+        app.adminAPIToken = "test-admin-token"
         app.migrations.add(CreateArtist())
         app.migrations.add(CreateAlbum())
         app.migrations.add(CreateSong())
@@ -196,6 +204,52 @@ final class AppTests: XCTestCase {
             let page = try res.content.decode(Page<SongResponse>.self)
             XCTAssertEqual(page.items.count, 0)
             XCTAssertEqual(page.metadata.total, 0)
+        }
+    }
+
+    func testAdministrativeEndpointsRequireConfiguredBearerToken() throws {
+        let disabledApp = Application(.testing)
+        defer { disabledApp.shutdown() }
+        disabledApp.databases.use(.sqlite(.memory), as: .sqlite)
+        disabledApp.adminAPIToken = nil
+        disabledApp.casStorage = CasStorageService(root: NSTemporaryDirectory() + "cas-test-\(UUID().uuidString)")
+        try routes(disabledApp)
+
+        try disabledApp.test(.POST, "/api/scan") { response in
+            XCTAssertEqual(response.status, .serviceUnavailable)
+            let body = try response.content.decode(AdminAPIErrorResponse.self)
+            XCTAssertEqual(body.error, "admin_api_disabled")
+        }
+
+        let app = try createTestApp()
+        defer { app.shutdown() }
+
+        try app.test(.POST, "/api/upload") { response in
+            XCTAssertEqual(response.status, .unauthorized)
+        }
+
+        try app.test(.POST, "/api/upload", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        }) { response in
+            XCTAssertNotEqual(response.status, .unauthorized, "A valid token must reach the controller")
+        }
+
+        try app.test(.DELETE, "/api/songs/\(UUID())", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer wrong-token")
+        }) { response in
+            XCTAssertEqual(response.status, .unauthorized)
+        }
+
+        try app.test(.POST, "/api/scan", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+            request.headers.contentType = .json
+            request.body = jsonBuffer(ScannerController.ScanRequestBody(sources: []))
+        }) { response in
+            XCTAssertEqual(response.status, .badRequest, "A valid token must reach the controller")
+        }
+
+        try app.test(.GET, "/api/songs") { response in
+            XCTAssertEqual(response.status, .ok, "Read endpoints must not require the admin token")
         }
     }
 
@@ -640,7 +694,9 @@ final class AppTests: XCTestCase {
         song.$artist.id = artist.id!
         try song.create(on: app.db).wait()
 
-        try app.test(.DELETE, "/api/songs/\(song.id!)") { res in
+        try app.test(.DELETE, "/api/songs/\(song.id!)", beforeRequest: { request in
+            request.headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        }) { res in
             XCTAssertEqual(res.status, .noContent)
         }
 

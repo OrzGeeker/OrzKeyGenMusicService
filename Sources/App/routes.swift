@@ -10,8 +10,8 @@ func routes(_ app: Application) throws {
     try app.register(collection: ArtistController())
     try app.register(collection: AlbumController())
     try app.register(collection: PlaylistController())
-    try app.register(collection: ScannerController())
-    try app.register(collection: UploadController())
+    try app.register(collection: ScannerController(adminAPIToken: app.adminAPIToken))
+    try app.register(collection: UploadController(adminAPIToken: app.adminAPIToken))
     try app.register(collection: SystemController())
     try app.register(collection: PlaybackDiagnosticsController())
 }

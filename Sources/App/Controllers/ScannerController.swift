@@ -1,9 +1,14 @@
 import Vapor
 
 struct ScannerController: RouteCollection {
+    private let adminAPIToken: String?
+
+    init(adminAPIToken: String?) {
+        self.adminAPIToken = adminAPIToken
+    }
 
     func boot(routes: any RoutesBuilder) throws {
-        let api = routes.grouped("api")
+        let api = routes.grouped("api").grouped(AdminAPITokenMiddleware(token: adminAPIToken))
         api.post("scan", use: scan)
     }
 
