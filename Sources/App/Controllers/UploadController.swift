@@ -61,8 +61,10 @@ struct UploadController: RouteCollection {
             throw Abort(.badRequest, reason: "Cannot read uploaded file")
         }
         let tmpPath = "/tmp/orz_upload_\(UUID().uuidString).\(ext)"
-        try fileData.write(to: URL(fileURLWithPath: tmpPath))
+        // Register cleanup before writing: Data.write may create a partial
+        // file before it reports a filesystem error.
         defer { try? FileManager.default.removeItem(atPath: tmpPath) }
+        try fileData.write(to: URL(fileURLWithPath: tmpPath))
 
         let importer = MusicImportService(cas: req.application.casStorage, db: req.db)
         switch try await importer.importFile(

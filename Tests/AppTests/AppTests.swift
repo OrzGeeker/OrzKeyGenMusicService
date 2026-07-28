@@ -346,6 +346,33 @@ final class AppTests: XCTestCase {
         }
     }
 
+    func testUploadCleansUpTemporaryFileAfterImport() throws {
+        let app = try createTestApp()
+        defer { app.shutdown() }
+        let boundary = "orz-upload-temp-cleanup"
+        let temporaryDirectory = NSTemporaryDirectory()
+        let filesBefore = try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory)
+            .filter { $0.hasPrefix("orz_upload_") }
+            .sorted()
+        let body = multipartUploadBody(
+            fileBytes: Array("temporary-upload-content".utf8),
+            filename: "Temporary.v2m",
+            boundary: boundary
+        )
+        var headers = HTTPHeaders()
+        headers.replaceOrAdd(name: .authorization, value: "Bearer test-admin-token")
+        headers.contentType = .formData(boundary: boundary)
+
+        try app.test(.POST, "/api/upload", headers: headers, body: body) { response in
+            XCTAssertEqual(response.status, .created)
+        }
+
+        let filesAfter = try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory)
+            .filter { $0.hasPrefix("orz_upload_") }
+            .sorted()
+        XCTAssertEqual(filesAfter, filesBefore)
+    }
+
     func testUploadRejectsFileLargerThan32MiBBeforeCASOrDatabaseWrites() throws {
         let app = try createTestApp()
         defer { app.shutdown() }
@@ -764,6 +791,15 @@ final class AppTests: XCTestCase {
             XCTAssertNotNil(version, "info.version should be present")
             XCTAssertNotEqual(version, "1.1.0", "version should no longer be the old hardcoded value")
             XCTAssertEqual(version, AppVersion.current, "OpenAPI version should match AppVersion.current")
+
+            let paths = body?["paths"] as? [String: Any]
+            let songPath = paths?["/api/songs/{id}"] as? [String: Any]
+            let delete = songPath?["delete"] as? [String: Any]
+            let deleteSecurity = delete?["security"] as? [[String: [String]]]
+            XCTAssertEqual(deleteSecurity, [["AdminBearer": []]])
+            let deleteResponses = delete?["responses"] as? [String: [String: Any]]
+            XCTAssertNotNil(deleteResponses?["401"])
+            XCTAssertNotNil(deleteResponses?["503"])
         }
     }
 

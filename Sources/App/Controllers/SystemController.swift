@@ -128,7 +128,9 @@ struct SystemController: RouteCollection {
                         ],
                         "responses": [
                             "204": ["description": "Deleted successfully"],
-                            "404": ["description": "Song not found"]
+                            "401": ["description": "Missing or invalid admin token"],
+                            "404": ["description": "Song not found"],
+                            "503": ["description": "Admin API is disabled"]
                         ]
                     ] as [String: Any]
                 ],
