@@ -9,6 +9,8 @@ db.sqlite
 .swiftpm
 node_modules/
 .env
+.env.native
+.orzmusic/
 .vscode/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock

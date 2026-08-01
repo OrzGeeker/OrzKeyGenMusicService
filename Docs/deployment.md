@@ -14,6 +14,43 @@
 
 部署包只包含生产机需要的运维文件，不包含源码、Swift 构建产物、测试、SDK 下载缓存或样例音乐。
 
+## Native 一键部署（源码仓库）
+
+Native 模式适合开发机或已有 PostgreSQL/systemd 管理体系的轻量部署。以下命令适用于源码仓库；GitHub Release 的生产部署包只包含 Docker 运行所需文件，不包含 Swift 源码和 Native 编译脚本。
+
+```bash
+cp .env.native.example .env.native
+# 编辑 .env.native，至少设置数据库密码、SCAN_ROOT 和 ADMIN_API_TOKEN
+make native-install   # 安装 SDK、编译 release、执行迁移
+make native-up        # 后台启动并等待 /api/health ready
+make native-status    # 查看 PID 和健康状态
+make native-down      # 安全停止 Native 进程
+```
+
+`native-install` 不会安装或初始化 PostgreSQL，也不会替用户创建系统服务；数据库、音频工具链和目录权限必须先准备好。生产环境可将 `make native-up` 包装进 systemd、launchd 或 supervisor。
+
+Native 运行时使用 `.env.native`，也可以通过 `NATIVE_ENV_FILE=/path/to/env make native-up` 指定其他环境文件。脚本默认将 PID 和日志写入 `.orzmusic/`，该目录不应提交到 Git。
+
+生成管理员令牌可以直接运行：
+
+```bash
+make generate-admin-token
+```
+
+命令只输出一个由 OpenSSL 生成的 32 字节随机令牌，不会自动写入配置文件。将输出值填入 `.env.native`，或作为 `ADMIN_API_TOKEN` 环境变量传给 Docker 命令；令牌不应提交到 Git、写入 URL 或日志。
+
+## Docker 一键首次部署
+
+源码仓库中的 Docker 首次部署可以由一个命令完成：
+
+```bash
+MUSIC_DIR=/absolute/path/to/music \
+ADMIN_API_TOKEN=<a-long-random-secret> \
+make docker-install
+```
+
+该命令依次校验 Docker/Compose 和音乐目录、检查 Compose 配置、启动 PostgreSQL 与 CAS 初始化、等待数据库、执行迁移、启动 app，并运行 release smoke check。它适合本地或自建主机的首次 Compose 部署；生产版本升级仍使用后文的 `release-preflight`、`release-upgrade` 和 `release-rollback` 流程。
+
 ## 部署包内容
 
 ```text
@@ -34,7 +71,8 @@ orzmusic-deploy-<version>/
     ├── release-upgrade.sh
     ├── release-rollback.sh
     ├── release-smoke.sh
-    └── release-scan.sh
+    ├── release-scan.sh
+    └── generate-admin-token.sh
 ```
 
 ## 首次部署

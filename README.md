@@ -57,11 +57,22 @@ README 只保留项目入口信息。易变化或需要精确口径的内容维�
 # 安装/更新 OrzAudioCore native SDK 与 Web/WASM SDK
 make setup
 
-# 本机开发：需要可用的 PostgreSQL
-make build
-make run
+# Native 一键安装（需要可用的 PostgreSQL、ffmpeg）
+cp .env.native.example .env.native
+# 编辑 .env.native 后执行：
+make native-install
+make native-up
 
-# Docker 部署：包含 PostgreSQL 与服务
+# Native 状态/停止
+make native-status
+make native-down
+
+# Docker 一键首次部署：校验、启动 db/CAS、迁移、启动 app、健康检查
+MUSIC_DIR=/absolute/path/to/music \
+ADMIN_API_TOKEN=change-me \
+make docker-install
+
+# Docker 日常启动（已有 volume/迁移时）
 make docker-up
 
 # 生成生产轻量部署包（Release workflow 会自动执行）
@@ -76,6 +87,9 @@ make help
 ```bash
 # 查看端口和服务状态
 make status
+
+# 生成管理员令牌（只输出，不写入文件）
+make generate-admin-token
 
 # 停止本机/Docker 服务
 make stop

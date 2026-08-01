@@ -53,6 +53,7 @@ copy_file script/release-upgrade.sh script/release-upgrade.sh
 copy_file script/release-rollback.sh script/release-rollback.sh
 copy_file script/release-smoke.sh script/release-smoke.sh
 copy_file script/release-scan.sh script/release-scan.sh
+copy_file script/generate-admin-token.sh script/generate-admin-token.sh
 
 chmod +x "$STAGING_DIR/$PACKAGE_ROOT"/script/*.sh
 
@@ -71,6 +72,7 @@ help:
 	@echo "  make release-smoke      Run smoke check after upgrade (SERVICE_URL=http://...)"
 	@echo "  make db-backup          Database backup (VERSION=X.Y.Z)"
 	@echo "  make scan               Scan configured music directory (ADMIN_API_TOKEN=...)"
+	@echo "  make generate-admin-token Generate a secure ADMIN_API_TOKEN"
 
 .PHONY: release-preflight
 release-preflight:
@@ -95,6 +97,10 @@ db-backup:
 .PHONY: scan
 scan:
 	./script/release-scan.sh
+
+.PHONY: generate-admin-token
+generate-admin-token:
+	@./script/generate-admin-token.sh
 EOF
 
 cat > "$STAGING_DIR/$PACKAGE_ROOT/DEPLOYMENT.txt" <<EOF

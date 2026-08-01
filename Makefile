@@ -26,6 +26,11 @@ help:
 	@echo "  make status         Show local ports and Docker service status"
 	@echo "  make build          Build the Swift service"
 	@echo "  make run            Run the Vapor service locally"
+	@echo "  make native-install Install SDK, build release, and migrate Native service"
+	@echo "  make native-up      Start Native release service and wait for health"
+	@echo "  make native-down    Stop Native release service"
+	@echo "  make native-status  Show Native PID and health status"
+	@echo "  make generate-admin-token Generate a secure ADMIN_API_TOKEN"
 	@echo "  make stop           Stop local OrzMusic services and Docker services"
 	@echo "  make restart        Stop then run the local Vapor service"
 	@echo "  make scan-local     Trigger configured local scan root (ADMIN_API_TOKEN=...)"
@@ -39,6 +44,7 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up      Build and start the full stack in Docker"
+	@echo "  make docker-install Validate, migrate, start, and smoke-check Docker stack"
 	@echo "  make docker-restart Stop then start the full Docker stack"
 	@echo "  make docker-down    Stop Docker services"
 	@echo "  make docker-logs    Follow app logs"
@@ -121,6 +127,26 @@ stop: stop-local docker-down
 run:
 	swift run OrzMusicService
 
+.PHONY: native-install
+native-install:
+	./script/native-install.sh
+
+.PHONY: native-up
+native-up:
+	./script/native-up.sh
+
+.PHONY: native-down
+native-down:
+	./script/native-down.sh
+
+.PHONY: native-status
+native-status:
+	./script/native-status.sh
+
+.PHONY: generate-admin-token
+generate-admin-token:
+	@./script/generate-admin-token.sh
+
 .PHONY: restart
 restart: stop-local run
 
@@ -187,6 +213,10 @@ docker-build:
 .PHONY: docker-up
 docker-up:
 	$(DOCKER_COMPOSE) up --build -d
+
+.PHONY: docker-install
+docker-install:
+	./script/docker-install.sh
 
 .PHONY: docker-restart
 docker-restart: docker-down docker-up
