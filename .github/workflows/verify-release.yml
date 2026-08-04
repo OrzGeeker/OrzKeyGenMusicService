@@ -80,7 +80,9 @@ jobs:
 
       - name: Verify published tag matches digest
         run: |
-          TAG_IMAGE="ghcr.io/${{ github.repository }}:${VERSION}"
+          # 从 DEPLOYMENT.txt 的 digest 推导 tag 镜像名，保持小写（github.repository
+          # 含大写，docker 会报 "repository name must be lowercase"）
+          TAG_IMAGE="${IMAGE_REF%%@*}:${VERSION}"
           docker pull "$TAG_IMAGE"
           docker pull "$IMAGE_REF"
           TAG_ID="$(docker inspect --format '{{.Id}}' "$TAG_IMAGE")"
