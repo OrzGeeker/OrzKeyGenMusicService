@@ -124,7 +124,16 @@ function playerApp(){return{
     },
     async startImport(){
         if(this.importRunning)return this._importPromise||false;
-        if(!this.adminToken.trim()){this.notify('请输入管理令牌后再导入','error');return false}
+        if(!this.adminToken.trim()){
+            // Without a token every queued item would sit in "等待中" forever.
+            // Mark them retryable-failed instead so the list shows a reason and
+            // the user can start once a token is entered.
+            this.notify('请先填写管理令牌，再点击“重试失败项”开始导入','error');
+            for(const item of this.importItems){
+                if(item.status==='queued'){item.status='failed';item.error='未设置管理令牌，请填写后重试';item.retryable=true}
+            }
+            return false;
+        }
         if(!this.importItems.some(item=>item.status==='queued'))return true;
         this.importRunning=true;
         this._importPromise=(async()=>{

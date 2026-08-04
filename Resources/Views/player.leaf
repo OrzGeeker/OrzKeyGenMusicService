@@ -9,12 +9,12 @@
     <link rel="icon" href="/brand/orz-logo.svg?v=20260727-rounded-v5" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/brand/orz-logo-192.png?v=20260727-rounded-v5">
     <style>[x-cloak]{display:none!important}</style>
-    <link rel="stylesheet" href="/audio/app.css?v=20260801-directory-import-v4">
+    <link rel="stylesheet" href="/audio/app.css?v=20260801-directory-import-v5">
     <script>window.ORZ_PLAYBACK_DIAGNOSTICS_ENABLED = #(playbackDiagnosticsEnabled);</script>
     <script defer src="/audio/player.js?v=20260726-worker-reuse-v1"></script>
     <script defer src="/audio/decoder-manifest.generated.js?v=20260718-sdk-v1"></script>
     <script defer src="/audio/visualizer.js?v=20260723b"></script>
-    <script defer src="/audio/app.js?v=20260801-directory-import-v4"></script>
+    <script defer src="/audio/app.js?v=20260801-directory-import-v5"></script>
     <script defer src="/vendor/alpinejs/alpine-3.15.12.min.js"></script>
 </head>
 <body x-data="playerApp()" @keydown.window="handleShortcut($event)"
@@ -210,14 +210,10 @@
                 <input type="password" autocomplete="off" x-model="adminToken" @input="saveAdminToken" placeholder="ADMIN_API_TOKEN" aria-label="管理令牌">
             </label>
             <div class="import-actions">
-                <label class="import-picker-field">
-                    <span>选择目录</span>
-                    <input id="directoryPicker" class="import-picker-native" type="file" webkitdirectory directory multiple :disabled="importRunning" @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐目录">
-                </label>
-                <label class="import-picker-field">
-                    <span>选择文件</span>
-                    <input id="filePicker" class="import-picker-native" type="file" multiple :disabled="importRunning" @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐文件">
-                </label>
+                <input id="directoryPicker" class="visually-hidden" type="file" webkitdirectory directory multiple :disabled="importRunning" @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐目录" x-ref="directoryPicker">
+                <input id="filePicker" class="visually-hidden" type="file" multiple :disabled="importRunning" @change="selectImportFiles($event.target.files);$event.target.value=''" aria-label="选择本地音乐文件" x-ref="filePicker">
+                <button type="button" class="import-picker-button" @click="$refs.directoryPicker.click()" :disabled="importRunning" title="选择本地音乐目录">选择目录</button>
+                <button type="button" class="import-picker-button" @click="$refs.filePicker.click()" :disabled="importRunning" title="选择本地音乐文件">选择文件</button>
                 <button type="button" class="quiet" @click="clearAdminToken" :disabled="importRunning || !adminToken">清除令牌</button>
             </div>
             <div class="import-summary" x-show="importItems.length" x-cloak aria-live="polite">

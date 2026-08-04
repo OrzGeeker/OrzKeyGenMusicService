@@ -94,18 +94,22 @@ function createApp(fetchImpl = defaultFetch, xhrHandler = defaultXhr) {
 
 const file = (name, size = 128, relativePath = '') => ({ name, size, webkitRelativePath: relativePath });
 
-test('directory import UI provides directory and file pickers, never uses localStorage, and exposes the I shortcut', () => {
+test('directory import UI provides picker buttons that trigger hidden file inputs, never uses localStorage, and exposes the I shortcut', () => {
     assert.match(playerView, /webkitdirectory directory multiple/);
-    assert.match(playerView, /app\.css\?v=20260801-directory-import-v4/);
+    assert.match(playerView, /app\.css\?v=20260801-directory-import-v5/);
     assert.match(playerView, /id="filePicker"[^>]*type="file" multiple/);
-    assert.match(playerView, /class="import-picker-field"/);
-    assert.match(playerView, /class="import-picker-native"/);
     assert.match(playerView, /id="directoryPicker"[^>]*webkitdirectory directory multiple/);
-    assert.match(playerView, /:disabled="importRunning"/);
-    assert.match(appStyles, /\.import-picker-native::file-selector-button/);
+    assert.match(playerView, /class="visually-hidden"/);
+    assert.match(playerView, /class="import-picker-button"[^>]*>选择目录<\/button>/);
+    assert.match(playerView, /class="import-picker-button"[^>]*>选择文件<\/button>/);
+    assert.match(playerView, /\$refs\.directoryPicker\.click\(\)/);
+    assert.match(playerView, /\$refs\.filePicker\.click\(\)/);
+    assert.doesNotMatch(playerView, /import-picker-field/);
+    assert.doesNotMatch(playerView, /import-picker-native/);
+    assert.doesNotMatch(playerView, /<span>选择目录<\/span>|<span>选择文件<\/span>/);
+    assert.doesNotMatch(appStyles, /import-picker-native/);
     assert.doesNotMatch(appStyles, /\.import-picker-native[^}]*opacity:0/);
-    assert.doesNotMatch(playerView, /\$refs\.directoryPicker\.click\(\)/);
-    assert.doesNotMatch(playerView, /\$refs\.filePicker\.click\(\)/);
+    assert.match(playerView, /:disabled="importRunning"/);
     assert.match(playerView, /管理员“?工具|管理员工具/);
     assert.match(playerView, /aria-keyshortcuts="I" title="导入本地目录 \(I\)"/);
     assert.match(playerView, /class="import-hint-key">I<\/kbd>/);
@@ -127,6 +131,22 @@ test('directory preflight accepts server-supported formats and rejects unsupport
     assert.equal(app.importItems.length, 3);
     assert.equal(app.importItems.filter(item => item.status === 'failed').length, 2);
     assert.equal(app.importItems[0].path, 'demo.mod');
+});
+
+test('selecting files without an admin token marks them retryable-failed instead of waiting forever; retry uploads after a token is set', async () => {
+    const { app, uploads } = createApp();
+    await app.selectImportFiles([file('a.mod'), file('b.xm')]);
+    assert.equal(app.importItems.length, 2);
+    assert.equal(app.importItems.every(item => item.status === 'failed'), true);
+    assert.equal(app.importItems.every(item => item.retryable), true);
+    assert.match(app.importItems[0].error, /管理令牌/);
+    assert.equal(uploads.length, 0);
+
+    app.adminToken = 'token';
+    await app.retryImportFailures();
+    assert.equal(app.importItems[0].status, 'created');
+    assert.equal(app.importItems[1].status, 'created');
+    assert.equal(uploads.length, 2);
 });
 
 test('directory upload has two workers, counts created and duplicates, and sends session token with relative path', async () => {
