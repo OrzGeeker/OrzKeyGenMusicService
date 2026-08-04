@@ -38,8 +38,9 @@ jobs:
         with:
           account: ${{ github.repository_owner }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_TOKEN 不支持 * 通配，必须用精确包名（lower() 归一化大小写）
-          image-names: ${{ lower(github.event.repository.name) }}
+          # GITHUB_TOKEN 不支持 * 通配，必须用精确包名；GitHub 表达式无 lower() 函数，
+          # 包名 orzmusic 与 release.yml 的 IMAGE_NAME 保持一致（仓库改名时需同步）
+          image-names: orzmusic
           tag-selection: untagged
           cut-off: 7d
           dry-run: ${{ inputs.dry_run || false }}
