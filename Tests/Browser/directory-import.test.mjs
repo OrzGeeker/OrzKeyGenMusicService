@@ -96,7 +96,7 @@ const file = (name, size = 128, relativePath = '') => ({ name, size, webkitRelat
 
 test('directory import UI provides picker buttons that trigger hidden file inputs, never uses localStorage, and exposes the I shortcut', () => {
     assert.match(playerView, /webkitdirectory directory multiple/);
-    assert.match(playerView, /app\.css\?v=20260801-directory-import-v5/);
+    assert.match(playerView, /app\.css\?v=20260801-directory-import-v6/);
     assert.match(playerView, /id="filePicker"[^>]*type="file" multiple/);
     assert.match(playerView, /id="directoryPicker"[^>]*webkitdirectory directory multiple/);
     assert.match(playerView, /class="visually-hidden"/);
@@ -147,6 +147,35 @@ test('selecting files without an admin token marks them retryable-failed instead
     assert.equal(app.importItems[0].status, 'created');
     assert.equal(app.importItems[1].status, 'created');
     assert.equal(uploads.length, 2);
+});
+
+test('server-side admin_api_disabled is surfaced as an actionable message', async () => {
+    const { app } = createApp(
+        defaultFetch,
+        async () => ({ status: 503, body: { error: 'admin_api_disabled', reason: 'Administrative API is disabled', code: 503 } })
+    );
+    app.adminToken = 'token';
+    app.importItems = [
+        { file: file('a.mod'), path: 'a.mod', status: 'queued', loaded: 0 },
+    ];
+    await app.startImport();
+    assert.equal(app.importItems[0].status, 'failed');
+    assert.equal(app.importItems[0].retryable, true);
+    assert.match(app.importItems[0].error, /ADMIN_API_TOKEN/);
+});
+
+test('invalid admin token surfaces a clear message', async () => {
+    const { app } = createApp(
+        defaultFetch,
+        async () => ({ status: 401, body: { error: 'unauthorized', reason: 'Missing or invalid bearer token', code: 401 } })
+    );
+    app.adminToken = 'wrong-token';
+    app.importItems = [
+        { file: file('a.mod'), path: 'a.mod', status: 'queued', loaded: 0 },
+    ];
+    await app.startImport();
+    assert.equal(app.importItems[0].status, 'failed');
+    assert.match(app.importItems[0].error, /令牌不正确/);
 });
 
 test('directory upload has two workers, counts created and duplicates, and sends session token with relative path', async () => {

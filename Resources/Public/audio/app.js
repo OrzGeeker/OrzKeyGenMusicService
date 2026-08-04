@@ -152,7 +152,14 @@ function playerApp(){return{
         try{
             const body=new FormData();body.append('file',item.file,item.file.name);body.append('relativePath',item.path);
             const {status,body:payload}=await uploadWithProgress(body,{Authorization:`Bearer ${this.adminToken.trim()}`},progress=>{item.loaded=progress.loaded;item.uploadTotal=progress.total||item.file.size});
-            if(status<200||status>=300)throw new Error(payload?.reason||payload?.error||`HTTP ${status}`);
+            if(status<200||status>=300){
+            const reason=payload?.error==='admin_api_disabled'
+                ?'服务端未启用管理 API（需配置 ADMIN_API_TOKEN）'
+                :payload?.error==='unauthorized'
+                    ?'管理令牌不正确'
+                    :(payload?.reason||payload?.error||`HTTP ${status}`);
+            throw new Error(reason);
+        }
             item.status=payload?.status==='duplicate'||status===200?'duplicate':'created';item.retryable=false;
         }catch(error){item.status='failed';item.error=error?.message||'上传失败';item.retryable=true}
     },
