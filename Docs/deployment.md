@@ -14,6 +14,8 @@
 
 部署包只包含生产机需要的运维文件，不包含源码、Swift 构建产物、测试、SDK 下载缓存或样例音乐。
 
+镜像按架构分别构建后合并为多架构 manifest，发布时自动删除中间架构 tag；对应的 untagged 镜像版本由仓库定时工作流（`ghcr-cleanup.yml`，每周）在保留 7 天后清理。
+
 ## Native 一键部署（源码仓库）
 
 Native 模式适合开发机或已有 PostgreSQL/systemd 管理体系的轻量部署。以下命令适用于源码仓库；GitHub Release 的生产部署包只包含 Docker 运行所需文件，不包含 Swift 源码和 Native 编译脚本。
@@ -86,7 +88,7 @@ tar -xzf orzmusic-deploy-0.0.2.tar.gz
 cd orzmusic-deploy-0.0.2
 ```
 
-4. 指定镜像，并设置管理令牌。生产环境推荐使用 Release 页面里的 digest；令牌可运行 `make generate-admin-token` 生成：
+4. 指定镜像并设置管理令牌。生产环境推荐使用 Release 页面里的 digest；令牌可运行 `make generate-admin-token` 生成：
 
 ```bash
 export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:<digest>
@@ -94,6 +96,8 @@ export ADMIN_API_TOKEN=<a-long-random-secret>
 ```
 
 `ADMIN_API_TOKEN` 在容器启动时读取，未配置时管理写接口会按设计关闭（返回 `503 admin_api_disabled`）。令牌不要提交到 Git、写入 URL 或日志。
+
+> **项目名已由 Compose 文件兜底**：`docker-compose.yml` 钉死了 `name: orzmusic`（自 v0.0.6 起的部署包生效），无论部署包解压到哪个目录，所有版本都共享同一组 `db_data`/`cas_data` volume，升级能真正复用数据。早期版本（v0.0.5 及以前）没有这个兜底，必须手动 `export COMPOSE_PROJECT_NAME=orzmusic` 并在首次部署与每次升级中保持一致，否则按目录切换版本会新建空数据库。需要同时运行多套独立实例时，可用 `COMPOSE_PROJECT_NAME` 或 `--project-name` 覆盖（两者优先级都高于 `name` 字段）。
 
 5. 启动数据库并执行升级流程：
 
@@ -118,6 +122,8 @@ make release-preflight
 make release-upgrade
 EXPECTED_VERSION=0.0.3 make release-smoke
 ```
+
+项目名无需重复设置：`docker-compose.yml` 已钉死 `name: orzmusic`（v0.0.6 起），所有版本自动共享同一组 volume。使用早期部署包时仍需手动设置并保持 `COMPOSE_PROJECT_NAME` 一致。
 
 `release-upgrade` 会校验 `IMAGE_REF` 与 `ADMIN_API_TOKEN` 均已设置，缺失时立即中止，避免静默部署出管理 API 被关闭的服务。
 
@@ -206,3 +212,6 @@ curl -fsS -X POST "http://127.0.0.1:8080/api/scan" \
 - 不要执行 `docker compose down -v`，避免删除数据库和 CAS volume。
 - 发布镜像优先使用 digest，而不是浮动标签。
 - 升级前必须确认数据库备份成功。
+- 项目名由 `docker-compose.yml` 的 `name: orzmusic` 兜底（v0.0.6 起），按目录切换版本不会新建空数据库。早期版本部署包仍需手动保持 `COMPOSE_PROJECT_NAME` 一致。
+- 镜像同时发布 `linux/amd64` 与 `linux/arm64`（v0.0.6 起），Docker 按运行平台自动拉取对应变体，Apple Silicon 生产机无需额外配置。
+- 自定义 Compose 配置统一用 `COMPOSE_BASE`（空格分隔的 `-f` 参数）；不要用 docker compose 原生语义的 `COMPOSE_FILE`（冒号分隔路径列表），两种语义混用会让 `db-backup` 失败。

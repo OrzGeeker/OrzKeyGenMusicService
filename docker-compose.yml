@@ -7,6 +7,11 @@
 # Import music: ADMIN_API_TOKEN=... curl -X POST http://localhost:8080/api/scan
 #       Stop all: docker compose down (add -v to wipe db)
 
+# 固定项目名：Compose 默认用目录名作为项目名，按版本目录切换部署时会新建项目与全新
+# volume（等于新建空数据库），导致升级不复用数据。这里钉死 name 作安全网；仍可通过
+# COMPOSE_PROJECT_NAME 环境变量或 --project-name 覆盖（优先级高于 name 字段）。
+name: orzmusic
+
 volumes:
   db_data:
   cas_data:

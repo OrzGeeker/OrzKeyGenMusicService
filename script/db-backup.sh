@@ -50,11 +50,16 @@ if [ -f "$FILEPATH" ]; then
 fi
 
 # ---- Docker Compose 包装 ----
+# COMPOSE_BASE 继承自 release-upgrade.sh 的 -f 参数列表；直接运行时可为空。
+# 注意：不要向本脚本传入 docker compose 原生语义的 COMPOSE_FILE（冒号分隔路径列表），
+# 这里统一使用 COMPOSE_BASE（空格分隔的 -f 参数）。
 compose() {
+    # shellcheck disable=SC2206,SC2086
+    local args=(${COMPOSE_BASE:-})
     if [ -n "$COMPOSE_PROJECT" ]; then
-        docker compose --project-name "$COMPOSE_PROJECT" "$@"
+        docker compose "${args[@]}" --project-name "$COMPOSE_PROJECT" "$@"
     else
-        docker compose "$@"
+        docker compose "${args[@]}" "$@"
     fi
 }
 

@@ -1,0 +1,45 @@
+# GHCR 镜像保留策略
+#
+# GitHub 没有内置的 untagged 镜像自动删除；发布时删掉中间架构 tag 后，
+# 对应的镜像 version 会变成 untagged 残留并持续占存储。本工作流按社区
+# 标准做法，用 snok/container-retention-policy 定时清理 untagged 版本。
+#
+# 策略:
+#   - 带 tag 的版本（vX.Y.Z、<commit>）永久保留
+#   - untagged 版本保留 7 天后删除
+#   - 手动触发时可选 dry-run 仅预览不删除
+#
+# 权限说明:
+#   - GITHUB_TOKEN + 公开包即可删除；本仓库是 orzmusic 包的发布者，默认对包
+#     具备 Admin 角色（snok/container-retention-policy 用 GITHUB_TOKEN 的前提）
+#   - 若包改为私有，需改用 PAT（delete:packages scope）作为 token
+name: GHCR Retention Cleanup
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # 每周一 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "仅预览要删除的版本（不实际删除）"
+        type: boolean
+        default: false
+
+permissions:
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Prune untagged GHCR versions
+        uses: snok/container-retention-policy@v3.1.0
+        with:
+          account: ${{ github.repository_owner }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN 不支持 * 通配，必须用精确包名（lower() 归一化大小写）
+          image-names: ${{ lower(github.event.repository.name) }}
+          tag-selection: untagged
+          cut-off: 7d
+          dry-run: ${{ inputs.dry_run || false }}

@@ -119,6 +119,9 @@ Typical production upgrade:
   make release-upgrade
   EXPECTED_VERSION=${VERSION_VALUE} make release-smoke
 
+项目名由 docker-compose.yml 钉死为 orzmusic（name: 字段），按版本目录切换
+不会新建空数据库；多实例隔离可用 COMPOSE_PROJECT_NAME 覆盖。
+
 See Docs/deployment.md for details.
 EOF
 

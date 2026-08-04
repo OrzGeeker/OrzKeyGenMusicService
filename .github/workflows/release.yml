@@ -5,6 +5,12 @@
 # 非匹配版本标签（不与 VERSION 文件一致）会失败。
 # 不推送或覆盖 latest 标签。
 #
+# 多架构构建：amd64 与 arm64 分别在各自的原生 GitHub runner 上并行构建
+# （ubuntu-24.04 / ubuntu-24.04-arm），不走 QEMU 仿真；最后由 publish job
+# 用 docker buildx imagetools create 合并成多架构 manifest index。
+# OrzAudioCore 服务端 SDK 已发布 linux-arm64 资产（audio-core-sdk.lock.json），
+# Dockerfile 内 update-audio-core-server.sh 按 uname -m 自动选择对应架构资产。
+#
 # 首次使用前确认：
 #   仓库 Settings → Actions → General → Workflow permissions 设为
 #   "Read and write permissions"。
@@ -15,17 +21,18 @@ on:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
 
-permissions:
-  contents: write
-  packages: write
-
 jobs:
+  # ---- 版本校验 + 测试（amd64 原生）----
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/.audio-core-sdk/server/native/lib
-      IMAGE_NAME: ghcr.io/orzgeeker/orzmusic
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build_time: ${{ steps.meta.outputs.build_time }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,6 +40,7 @@ jobs:
 
       # --- 版本校验 ---
       - name: Validate version tag
+        id: meta
         run: |
           VERSION_CONTENT=$(cat VERSION | tr -d '[:space:]')
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -42,16 +50,15 @@ jobs:
             echo "ERROR: Tag '$GITHUB_REF_NAME' does not match VERSION file ($VERSION_CONTENT)"
             exit 1
           fi
-          echo "VERSION_TAG=$TAG_VERSION" >> "$GITHUB_ENV"
-          echo "COMMIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
-          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       # --- 安装运行时依赖 ---
       - name: Install system deps
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      # --- 安装 SDK ---
+      # --- 安装 SDK（供宿主测试用；Docker 构建在容器内自行安装） ---
       - name: Install server SDK
         run: ./script/update-audio-core-server.sh
       - name: Install Web SDK
@@ -62,10 +69,38 @@ jobs:
         run: swift test
       - name: Run browser tests
         run: node --test Tests/Browser/*.test.mjs
+      - name: Run deployment script tests
+        run: make script-test
       - name: Validate Docker Compose config
         run: docker compose config --quiet
 
-      # --- Docker 构建与推送 ---
+  # ---- 构建并推送各架构镜像（原生 runner，并行）----
+  build:
+    needs: release
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            runs-on: ubuntu-24.04
+          - platform: arm64
+            runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      actions: write # buildx gha cache 读写需要
+    env:
+      IMAGE_NAME: ghcr.io/orzgeeker/orzmusic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -73,33 +108,79 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push linux/${{ matrix.platform }}
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/${{ matrix.platform }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}
-            ${{ env.IMAGE_NAME }}:${{ env.COMMIT_SHA }}
+            ${{ env.IMAGE_NAME }}:${{ needs.release.outputs.version }}-${{ matrix.platform }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ matrix.platform }}
           build-args: |
-            APP_VERSION=${{ env.VERSION_TAG }}
-            GIT_COMMIT=${{ env.COMMIT_SHA }}
-            BUILD_TIME=${{ env.BUILD_TIME }}
+            APP_VERSION=${{ needs.release.outputs.version }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ needs.release.outputs.build_time }}
           labels: |
-            org.opencontainers.image.created=${{ env.BUILD_TIME }}
-            org.opencontainers.image.version=${{ env.VERSION_TAG }}
-            org.opencontainers.image.revision=${{ env.COMMIT_SHA }}
+            org.opencontainers.image.created=${{ needs.release.outputs.build_time }}
+            org.opencontainers.image.version=${{ needs.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.title=OrzMusic Service
             org.opencontainers.image.description=Music management and streaming API for OrzPlayer
 
-      # --- 镜像 Digest ---
-      - name: Save image digest
+  # ---- 合并多架构 manifest + 打包 + 发布 ----
+  publish:
+    needs: [release, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE_NAME: ghcr.io/orzgeeker/orzmusic
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
         run: |
-          DIGEST="${{ steps.build.outputs.digest }}"
-          IMAGE_DIGEST="${{ env.IMAGE_NAME }}@${DIGEST}"
-          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
-          echo "Pushed digest: $IMAGE_DIGEST"
+          docker buildx imagetools create \
+            --tag "$IMAGE_NAME:$VERSION" \
+            --metadata-file /tmp/orz-index.json \
+            "$IMAGE_NAME:$VERSION-amd64" "$IMAGE_NAME:$VERSION-arm64"
+          docker buildx imagetools create \
+            --tag "$IMAGE_NAME:${{ github.sha }}" \
+            "$IMAGE_NAME:${{ github.sha }}-amd64" "$IMAGE_NAME:${{ github.sha }}-arm64"
+          # --metadata-file 直接输出合并后 index 的 digest（比 docker pull + RepoDigests 更稳）。
+          # 注意该 JSON 使用扁平点号 key：containerimage.descriptor.digest。
+          DIGEST="$(python3 -c 'import json; print(json.load(open("/tmp/orz-index.json"))["containerimage.descriptor"]["digest"])')"
+          case "$DIGEST" in
+            sha256:[0-9a-f]*)
+              echo "IMAGE_DIGEST=$IMAGE_NAME@$DIGEST" >> "$GITHUB_ENV"
+              echo "Pushed multi-arch manifest: $IMAGE_NAME@$DIGEST"
+              ;;
+            *)
+              echo "ERROR: unexpected digest from metadata file: $DIGEST" >&2
+              exit 1
+              ;;
+          esac
+          # 最终产物必须可按 digest 拉取（verify-release 也会校验）
+          docker pull "$IMAGE_NAME@$DIGEST" >/dev/null
 
       # --- 轻量部署包 ---
       - name: Package deployment bundle
@@ -111,19 +192,36 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ env.VERSION_TAG }}
+          name: ${{ env.VERSION }}
           body: |
-            ## OrzMusic ${{ env.VERSION_TAG }}
+            ## OrzMusic ${{ env.VERSION }}
 
             ### 发布制品
-            - Docker 镜像: `${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}`
+            - Docker 镜像: `${{ env.IMAGE_NAME }}:${{ env.VERSION }}`
             - 镜像 Digest: `${{ env.IMAGE_DIGEST }}`
-            - 部署包: `orzmusic-deploy-${{ env.VERSION_TAG }}.tar.gz`
+            - 部署包: `orzmusic-deploy-${{ env.VERSION }}.tar.gz`
             - Git Tag: `${{ github.ref_name }}`
-            - Git Commit: `${{ env.COMMIT_SHA }}`
-            - 构建时间: `${{ env.BUILD_TIME }}`
+            - Git Commit: `${{ github.sha }}`
+            - 构建时间: ${{ needs.release.outputs.build_time }}
           files: |
-            dist/orzmusic-deploy-${{ env.VERSION_TAG }}.tar.gz
+            dist/orzmusic-deploy-${{ env.VERSION }}.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
+
+      # --- 清理中间架构 tag ---
+      # 合并后的多架构 index 直接按 digest 引用各平台 manifest，删除中间 tag 不影响
+      # 已发布的 vX.Y.Z / <commit>。通过 GitHub Packages REST API 删除 tag；
+      # 公开包只需 write:packages，私有包需要 delete:packages 的 PAT。
+      # 权限不足时仅警告，不阻断发布。
+      - name: Clean up intermediate arch tags
+        run: |
+          PKG="${IMAGE_NAME##*/}"
+          for tag in "$VERSION-amd64" "$VERSION-arm64" "${{ github.sha }}-amd64" "${{ github.sha }}-arm64"; do
+            if output="$(gh api --method DELETE \
+                "/orgs/${{ github.repository_owner }}/packages/containers/$PKG/tags/$tag" 2>&1)"; then
+              echo "  removed $tag"
+            else
+              echo "  WARNING: could not remove tag $tag — ${output:-unknown error}"
+            fi
+          done

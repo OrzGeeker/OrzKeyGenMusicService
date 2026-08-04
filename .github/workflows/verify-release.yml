@@ -1,0 +1,150 @@
+# Verify Release
+#
+# 发布后自动化验证：对已发布的制品（Docker 镜像 + 轻量部署包）执行真实部署流程，
+# 确保 GitHub Release 发布后可以正常工作，而不只是通过了源码级单元测试。
+#
+# 覆盖：
+#   - 部署包可从 Release 下载并正确解压
+#   - DEPLOYMENT.txt 中的镜像 digest 可拉取，且与 vX.Y.Z 浮动标签内容一致
+#   - release-preflight / release-upgrade 对真实 PostgreSQL 栈执行成功
+#   - release-smoke 验收通过，健康接口 version 与发布版本一致
+#   - 管理 API 令牌正确接线（无令牌 401，带令牌扫描可用）
+#
+# 触发：发布 published（含 workflow_dispatch 手动对任意版本重跑）。
+# 注意：本工作流运行发布产物中的脚本与镜像，仅在仓库自身创建的 Release 上运行。
+
+name: Verify Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要验证的版本号，例如 0.0.5"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # 稳定项目名：同一验证运行内一致，避免依赖目录名导致 volume 隔离
+      COMPOSE_PROJECT_NAME: orzmusic-verify-${{ github.run_id }}
+      COMPOSE_BASE: -f docker-compose.yml -f docker-compose.production.yml
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "ERROR: invalid version '$VERSION'"; exit 1 ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Verifying version $VERSION"
+
+      - name: Download deploy package
+        run: |
+          gh release download "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --pattern "orzmusic-deploy-${VERSION}.tar.gz" \
+            --dir artifacts
+          ls -la artifacts
+
+      - name: Extract deploy package
+        run: |
+          tar -xzf "artifacts/orzmusic-deploy-${VERSION}.tar.gz"
+          test -d "orzmusic-deploy-${VERSION}"
+          test -x "orzmusic-deploy-${VERSION}/script/release-upgrade.sh"
+
+      - name: Read image reference from package
+        id: image
+        run: |
+          IMAGE_REF="$(sed -n 's/^Image: *//p' "orzmusic-deploy-${VERSION}/DEPLOYMENT.txt" | tr -d '[:space:]')"
+          if [ -z "$IMAGE_REF" ] || [[ "$IMAGE_REF" != *"@"* ]]; then
+            echo "ERROR: DEPLOYMENT.txt has no image digest reference"
+            exit 1
+          fi
+          echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
+          echo "Resolved image: $IMAGE_REF"
+
+      - name: Verify published tag matches digest
+        run: |
+          TAG_IMAGE="ghcr.io/${{ github.repository }}:${VERSION}"
+          docker pull "$TAG_IMAGE"
+          docker pull "$IMAGE_REF"
+          TAG_ID="$(docker inspect --format '{{.Id}}' "$TAG_IMAGE")"
+          DIGEST_ID="$(docker inspect --format '{{.Id}}' "$IMAGE_REF")"
+          if [ "$TAG_ID" != "$DIGEST_ID" ]; then
+            echo "ERROR: tag $VERSION and DEPLOYMENT.txt digest resolve to different images"
+            exit 1
+          fi
+          echo "OK: tag $VERSION and DEPLOYMENT.txt digest resolve to the same image"
+
+      - name: Generate admin token and empty music dir
+        run: |
+          echo "ADMIN_API_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          mkdir -p /tmp/orzmusic-verify-music
+
+      - name: Boot database and wait for readiness
+        run: |
+          cd "orzmusic-deploy-${VERSION}"
+          docker compose $COMPOSE_BASE up -d db
+          for i in $(seq 1 30); do
+            if docker compose $COMPOSE_BASE exec -T db \
+                pg_isready -U vapor_username -d vapor_database >/dev/null 2>&1; then
+              echo "Database ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: database did not become ready"
+          exit 1
+
+      - name: Run release upgrade (preflight → pull → backup → migrate → start)
+        run: |
+          cd "orzmusic-deploy-${VERSION}"
+          export IMAGE_REF
+          export ADMIN_API_TOKEN
+          export MUSIC_DIR=/tmp/orzmusic-verify-music
+          ./script/release-preflight.sh
+          ./script/release-upgrade.sh
+
+      - name: Run smoke check against expected version
+        run: |
+          cd "orzmusic-deploy-${VERSION}"
+          EXPECTED_VERSION="$VERSION" ./script/release-smoke.sh
+
+      - name: Verify admin API wiring and bodyless scan
+        run: |
+          # 已配置令牌时，无令牌访问管理接口应 401
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/api/scan)"
+          if [ "$code" != "401" ]; then
+            echo "ERROR: expected 401 without token, got $code"
+            exit 1
+          fi
+          # 带令牌触发 bodyless 扫描（空目录应快速返回）
+          curl -fsS -X POST http://127.0.0.1:8080/api/scan \
+            -H "Authorization: Bearer ${ADMIN_API_TOKEN}" >/dev/null
+          # 健康接口版本断言
+          version="$(curl -fsS http://127.0.0.1:8080/api/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')"
+          if [ "$version" != "$VERSION" ]; then
+            echo "ERROR: health version '$version' != expected '$VERSION'"
+            exit 1
+          fi
+          echo "OK: admin API gated and scan works on version $VERSION"
+
+      - name: Cleanup stack
+        if: always()
+        run: |
+          cd "orzmusic-deploy-${VERSION}" 2>/dev/null || exit 0
+          docker compose $COMPOSE_BASE down -v 2>/dev/null || true

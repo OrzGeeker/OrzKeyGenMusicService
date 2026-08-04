@@ -83,7 +83,10 @@ echo ""
 
 # ---- 3. 数据库备份 ----
 echo "[3/6] Creating database backup..."
-if ! VERSION="${IMAGE_REF##*:}" BACKUP_DIR="$BACKUP_DIR" ./script/db-backup.sh; then
+# 备份文件使用部署包 VERSION 文件（digest 引用下比 IMAGE_REF 片段更可读）；
+# COMPOSE_BASE 透传给 db-backup.sh，保证与后续 compose 命令使用同一组配置文件。
+BACKUP_VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo "${IMAGE_REF##*:}")"
+if ! VERSION="$BACKUP_VERSION" BACKUP_DIR="$BACKUP_DIR" COMPOSE_BASE="$COMPOSE_BASE" ./script/db-backup.sh; then
     log_release "backup" "FAILED"
     echo "ERROR: Database backup failed. Aborting."
     exit 1
