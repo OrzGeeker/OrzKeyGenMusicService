@@ -54,7 +54,7 @@ help:
 	@echo "  make db-backup      Database backup (VERSION=X.Y.Z)"
 	@echo "  make release-smoke   Run smoke check after upgrade (SERVICE_URL=http://...)"
 	@echo "  make release-preflight  Preflight checks for production release"
-	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
+	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=..., ADMIN_API_TOKEN=...)"
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make package-deploy     Build lightweight deployment package"
 	@echo "  make release-scan       Scan production music dir (ADMIN_API_TOKEN=...)"

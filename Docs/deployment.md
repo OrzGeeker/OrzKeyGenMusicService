@@ -86,11 +86,14 @@ tar -xzf orzmusic-deploy-0.0.2.tar.gz
 cd orzmusic-deploy-0.0.2
 ```
 
-4. 指定镜像。生产环境推荐使用 Release 页面里的 digest：
+4. 指定镜像，并设置管理令牌。生产环境推荐使用 Release 页面里的 digest；令牌可运行 `make generate-admin-token` 生成：
 
 ```bash
 export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:<digest>
+export ADMIN_API_TOKEN=<a-long-random-secret>
 ```
+
+`ADMIN_API_TOKEN` 在容器启动时读取，未配置时管理写接口会按设计关闭（返回 `503 admin_api_disabled`）。令牌不要提交到 Git、写入 URL 或日志。
 
 5. 启动数据库并执行升级流程：
 
@@ -103,17 +106,20 @@ EXPECTED_VERSION=0.0.2 make release-smoke
 
 ## 日常升级
 
-日常升级不需要拉仓库，只需要下载新版本部署包并指定新镜像：
+日常升级不需要拉仓库，只需要下载新版本部署包并指定新镜像。管理令牌同样在容器启动时读取，所以新 shell 里需要连同令牌一起导出；更换令牌也要重新执行 `release-upgrade`：
 
 ```bash
 tar -xzf orzmusic-deploy-0.0.3.tar.gz
 cd orzmusic-deploy-0.0.3
 
 export IMAGE_REF=ghcr.io/orzgeeker/orzmusic@sha256:<new-digest>
+export ADMIN_API_TOKEN=<与首次部署相同的令牌>
 make release-preflight
 make release-upgrade
 EXPECTED_VERSION=0.0.3 make release-smoke
 ```
+
+`release-upgrade` 会校验 `IMAGE_REF` 与 `ADMIN_API_TOKEN` 均已设置，缺失时立即中止，避免静默部署出管理 API 被关闭的服务。
 
 `release-upgrade` 会按固定顺序执行：
 

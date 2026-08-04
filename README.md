@@ -72,8 +72,8 @@ MUSIC_DIR=/absolute/path/to/music \
 ADMIN_API_TOKEN=change-me \
 make docker-install
 
-# Docker 日常启动（已有 volume/迁移时）
-make docker-up
+# Docker 日常启动（已有 volume/迁移时；令牌在容器启动时读取，每次需带上或写入 .env）
+ADMIN_API_TOKEN=change-me make docker-up
 
 # 生成生产轻量部署包（Release workflow 会自动执行）
 make package-deploy

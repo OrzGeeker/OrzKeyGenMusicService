@@ -6,7 +6,8 @@
 # 用法: IMAGE_REF=ghcr.io/<owner>/orzmusic:0.0.1 ./script/release-upgrade.sh
 #
 # 环境变量 (必须):
-#   IMAGE_REF       目标镜像引用（必须包含版本或 digest）
+#   IMAGE_REF        目标镜像引用（必须包含版本或 digest）
+#   ADMIN_API_TOKEN  管理写操作 Bearer Token；在容器启动时读取，缺失时管理接口会关闭
 #
 # 环境变量 (可选):
 #   COMPOSE_FILE     docker-compose 配置（默认 -f docker-compose.yml -f docker-compose.production.yml）
@@ -28,7 +29,15 @@ RELEASE_LOG="${RELEASE_LOG:-./release-log.txt}"
 # ---- 参数校验 ----
 if [ -z "${IMAGE_REF:-}" ]; then
     echo "ERROR: IMAGE_REF is required"
-    echo "Usage: IMAGE_REF=ghcr.io/<owner>/orzmusic:<version> $0"
+    echo "Usage: IMAGE_REF=ghcr.io/<owner>/orzmusic:<version> ADMIN_API_TOKEN=<token> $0"
+    exit 1
+fi
+
+if [ -z "${ADMIN_API_TOKEN:-}" ]; then
+    echo "ERROR: ADMIN_API_TOKEN is required"
+    echo "The token is read when the app container starts; without it every admin "
+    echo "write endpoint (upload/scan/delete) is disabled with 503 admin_api_disabled."
+    echo "Generate one with make generate-admin-token and re-run release-upgrade."
     exit 1
 fi
 
@@ -124,5 +133,6 @@ echo ""
 echo "Next steps:"
 echo "  1. Run smoke checks:   curl -fsS http://localhost:8080/api/health"
 echo "  2. Verify format count: curl -fsS http://localhost:8080/api/songs/formats"
-echo "  3. Check logs:         $COMPOSE $COMPOSE_BASE logs --tail=50 app"
+echo "  3. Trigger scan:       ADMIN_API_TOKEN=<token> ./script/release-scan.sh"
+echo "  4. Check logs:         $COMPOSE $COMPOSE_BASE logs --tail=50 app"
 echo "  Release log: $RELEASE_LOG"

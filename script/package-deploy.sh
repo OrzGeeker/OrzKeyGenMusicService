@@ -67,7 +67,7 @@ help:
 	@echo "OrzMusic production deployment commands"
 	@echo ""
 	@echo "  make release-preflight  Preflight checks for production release"
-	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=ghcr.io/...)"
+	@echo "  make release-upgrade    Production upgrade (IMAGE_REF=..., ADMIN_API_TOKEN=...)"
 	@echo "  make release-rollback   Rollback to previous version (IMAGE_REF=...)"
 	@echo "  make release-smoke      Run smoke check after upgrade (SERVICE_URL=http://...)"
 	@echo "  make db-backup          Database backup (VERSION=X.Y.Z)"
@@ -114,6 +114,7 @@ Typical production upgrade:
   tar -xzf ${PACKAGE_NAME}
   cd ${PACKAGE_ROOT}
   export IMAGE_REF=${IMAGE_REF_VALUE:-ghcr.io/orzgeeker/orzmusic:${VERSION_VALUE}}
+  export ADMIN_API_TOKEN=<a-long-random-secret>
   make release-preflight
   make release-upgrade
   EXPECTED_VERSION=${VERSION_VALUE} make release-smoke

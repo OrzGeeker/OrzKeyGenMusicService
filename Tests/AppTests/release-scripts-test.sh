@@ -31,8 +31,19 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 2: rollback 不能缺少 IMAGE_REF
-echo "=== Test 2: rollback rejects missing IMAGE_REF ==="
+# Test 2: upgrade 不能缺少 ADMIN_API_TOKEN
+echo "=== Test 2: upgrade rejects missing ADMIN_API_TOKEN ==="
+OUTPUT=$(IMAGE_REF="ghcr.io/test/orzmusic:0.0.2" ADMIN_API_TOKEN="" bash "$SCRIPT_DIR/release-upgrade.sh" 2>&1) || true
+if echo "$OUTPUT" | grep -qi "ERROR.*ADMIN_API_TOKEN"; then
+    green "PASS"
+    PASS=$((PASS + 1))
+else
+    red "FAIL: $(echo "$OUTPUT" | head -3)"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test 3: rollback 不能缺少 IMAGE_REF
+echo "=== Test 3: rollback rejects missing IMAGE_REF ==="
 OUTPUT=$(IMAGE_REF="" bash "$SCRIPT_DIR/release-rollback.sh" 2>&1) || true
 if echo "$OUTPUT" | grep -qi "ERROR.*IMAGE_REF"; then
     green "PASS"
@@ -42,8 +53,8 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 3: release-scan 要求管理令牌，并只调用主服务扫描接口
-echo "=== Test 3: release scan requires token and posts to main service ==="
+# Test 4: release-scan 要求管理令牌，并只调用主服务扫描接口
+echo "=== Test 4: release scan requires token and posts to main service ==="
 OUTPUT=$(ADMIN_API_TOKEN="" bash "$SCRIPT_DIR/release-scan.sh" 2>&1) || true
 if ! echo "$OUTPUT" | grep -qi "ERROR.*ADMIN_API_TOKEN"; then
     red "FAIL: release-scan accepted missing ADMIN_API_TOKEN"
@@ -72,8 +83,8 @@ MOCK
     fi
 fi
 
-# Test 4: preflight 可以运行（无 Docker 时报告失败，但不崩溃）
-echo "=== Test 4: preflight runs without crashing ==="
+# Test 5: preflight 可以运行（无 Docker 时报告失败，但不崩溃）
+echo "=== Test 5: preflight runs without crashing ==="
 OUTPUT=$(bash "$SCRIPT_DIR/release-preflight.sh" 2>&1) || true
 # 即使无 Docker 环境，脚本也应该正常输出结果而不崩溃
 if echo "$OUTPUT" | grep -qi "Preflight:"; then
@@ -84,8 +95,8 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 5: upgrade 带有效 IMAGE_REF 时执行完整步骤顺序
-echo "=== Test 5: upgrade with valid IMAGE_REF executes step sequence ==="
+# Test 6: upgrade 带有效 IMAGE_REF 时执行完整步骤顺序
+echo "=== Test 6: upgrade with valid IMAGE_REF executes step sequence ==="
 # 创建隔离测试目录，mock docker compose
 TESTDIR=$(mktemp -d /tmp/release-test-XXXXXX)
 trap 'chmod -R 755 "$TESTDIR" 2>/dev/null; rm -rf "$TESTDIR"' EXIT
@@ -142,6 +153,7 @@ OUTPUT=$(
     cd "$TESTDIR" || exit 1
     export PATH="$TESTDIR/mock-bin:$PATH"
     export IMAGE_REF="ghcr.io/test/orzmusic:0.0.2"
+    export ADMIN_API_TOKEN="test-token"
     export BACKUP_DIR="$TESTDIR/backups"
     export DOCKER_COMPOSE="$TESTDIR/mock-bin/docker"
     export RELEASE_LOG="$TESTDIR/release-log.txt"
@@ -163,8 +175,8 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 6: 验证发布日志写入
-echo "=== Test 6: release log is written ==="
+# Test 7: 验证发布日志写入
+echo "=== Test 7: release log is written ==="
 if [ -f "$TESTDIR/release-log.txt" ]; then
     LOG_COUNT=$(grep -c '' "$TESTDIR/release-log.txt" 2>/dev/null || echo "0")
     if [ "$LOG_COUNT" -gt 0 ] 2>/dev/null; then
@@ -180,8 +192,8 @@ else
     PASS=$((PASS + 1))
 fi
 
-# Test 7: preflight 缺少参数时优雅退出
-echo "=== Test 7: preflight with mock environment ==="
+# Test 8: preflight 缺少参数时优雅退出
+echo "=== Test 8: preflight with mock environment ==="
 TESTDIR2=$(mktemp -d /tmp/release-test2-XXXXXX)
 mkdir -p "$TESTDIR2/mock-bin"
 
