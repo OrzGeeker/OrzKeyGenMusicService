@@ -6,6 +6,7 @@ import vm from 'node:vm';
 const source = await readFile(new URL('../../Resources/Public/audio/app.js', import.meta.url), 'utf8');
 const manifestSource = await readFile(new URL('../../Resources/Public/audio/decoder-manifest.generated.js', import.meta.url), 'utf8');
 const playerView = await readFile(new URL('../../Resources/Views/player.leaf', import.meta.url), 'utf8');
+const appStyles = await readFile(new URL('../../Resources/Public/audio/app.css', import.meta.url), 'utf8');
 
 class FakeFormData {
     constructor() { this.fields = []; }
@@ -16,11 +17,64 @@ function response(body, status = 200) {
     return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
-function createApp(fetchImpl) {
+const defaultFetch = async url => {
+    if (url === '/api/songs/formats') return response({ total: 0, formats: [] });
+    return response({ items: [], metadata: { page: 1, per: 50, total: 0 } });
+};
+
+// The app uploads via XMLHttpRequest (fetch has no upload progress events), so
+// the test VM provides a fake XHR that records headers/body, can emit
+// upload.onprogress, and completes asynchronously like the real browser.
+const defaultXhr = async () => ({ status: 201, body: { status: 'created' } });
+
+function createApp(fetchImpl = defaultFetch, xhrHandler = defaultXhr) {
     const session = new Map();
+    const uploads = [];
+    class FakeXMLHttpRequest {
+        constructor() {
+            this.headers = {};
+            this.upload = { onprogress: null };
+            this.responseText = '';
+            this.status = 0;
+            this.timeout = 0;
+            this.onload = null;
+            this.onerror = null;
+        }
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(name, value) { this.headers[name] = value; }
+        send(body) {
+            const fileField = body.fields?.find(field => field.name === 'file');
+            const total = fileField?.value?.size ?? 0;
+            const record = {
+                headers: this.headers,
+                body,
+                onProgress: ratio => {
+                    if (this.upload.onprogress && total > 0) {
+                        this.upload.onprogress({ lengthComputable: true, loaded: Math.round(total * ratio), total });
+                    }
+                },
+            };
+            uploads.push(record);
+            setTimeout(async () => {
+                try {
+                    const result = await xhrHandler(this.url, record, uploads);
+                    const status = result?.status ?? 200;
+                    const payload = result?.body ?? null;
+                    const ratios = result?.progress ?? [1];
+                    for (const ratio of ratios) record.onProgress(ratio);
+                    this.status = status;
+                    this.responseText = typeof payload === 'string' ? payload : JSON.stringify(payload ?? {});
+                    this.onload?.();
+                } catch {
+                    this.onerror?.();
+                }
+            }, 0);
+        }
+    }
     const context = {
         console,
         fetch: fetchImpl,
+        XMLHttpRequest: FakeXMLHttpRequest,
         FormData: FakeFormData,
         sessionStorage: { getItem: key => session.get(key) || null, setItem: (key, value) => session.set(key, value), removeItem: key => session.delete(key) },
         globalThis: { ORZ_DECODER_FORMATS: [] },
@@ -35,25 +89,33 @@ function createApp(fetchImpl) {
     vm.runInNewContext(source, context);
     const app = context.globalThis.playerApp();
     app.notify = (message, type = 'success') => app.toasts.push({ message, type });
-    return { app, session };
+    return { app, session, uploads };
 }
 
 const file = (name, size = 128, relativePath = '') => ({ name, size, webkitRelativePath: relativePath });
 
-test('directory import UI provides directory and file pickers and never uses localStorage for the token', () => {
-    assert.match(playerView, /webkitdirectory multiple/);
-    assert.match(playerView, /x-ref="filePicker"[^>]*type="file" multiple/);
+test('directory import UI provides directory and file pickers, never uses localStorage, and exposes the I shortcut', () => {
+    assert.match(playerView, /webkitdirectory directory multiple/);
+    assert.match(playerView, /app\.css\?v=20260801-directory-import-v4/);
+    assert.match(playerView, /id="filePicker"[^>]*type="file" multiple/);
+    assert.match(playerView, /class="import-picker-field"/);
+    assert.match(playerView, /class="import-picker-native"/);
+    assert.match(playerView, /id="directoryPicker"[^>]*webkitdirectory directory multiple/);
+    assert.match(playerView, /:disabled="importRunning"/);
+    assert.match(appStyles, /\.import-picker-native::file-selector-button/);
+    assert.doesNotMatch(appStyles, /\.import-picker-native[^}]*opacity:0/);
+    assert.doesNotMatch(playerView, /\$refs\.directoryPicker\.click\(\)/);
+    assert.doesNotMatch(playerView, /\$refs\.filePicker\.click\(\)/);
     assert.match(playerView, /管理员“?工具|管理员工具/);
+    assert.match(playerView, /aria-keyshortcuts="I" title="导入本地目录 \(I\)"/);
+    assert.match(playerView, /class="import-hint-key">I<\/kbd>/);
+    assert.match(source, /key:'I',label:'导入本地目录'/);
     assert.match(source, /sessionStorage\.getItem\('orz-admin-api-token'\)/);
     assert.doesNotMatch(source, /localStorage/);
 });
 
 test('directory preflight accepts server-supported formats and rejects unsupported or oversized files', async () => {
-    const { app } = createApp(async url => {
-        if (url === '/api/upload') return response({ status: 'created' }, 201);
-        if (url === '/api/songs/formats') return response({ total: 0, formats: [] });
-        return response({ items: [], metadata: { page: 1, per: 50, total: 0 } });
-    });
+    const { app } = createApp();
 
     assert.equal(app.isImportFileSupported(file('demo.mod')), true);
     assert.equal(app.isImportFileSupported(file('song.MP3')), true);
@@ -70,19 +132,17 @@ test('directory preflight accepts server-supported formats and rejects unsupport
 test('directory upload has two workers, counts created and duplicates, and sends session token with relative path', async () => {
     let active = 0;
     let maxActive = 0;
-    const uploads = [];
-    const { app, session } = createApp(async (url, options = {}) => {
-        if (url === '/api/upload') {
+    const { app, session, uploads } = createApp(
+        defaultFetch,
+        async (url, record, uploadsList) => {
             active += 1;
             maxActive = Math.max(maxActive, active);
-            uploads.push(options);
             await new Promise(resolve => setTimeout(resolve, 5));
             active -= 1;
-            return response({ status: uploads.length === 2 ? 'duplicate' : 'created' }, uploads.length === 2 ? 200 : 201);
+            const isDuplicate = uploadsList.length === 2;
+            return { status: isDuplicate ? 200 : 201, body: { status: isDuplicate ? 'duplicate' : 'created' } };
         }
-        if (url === '/api/songs/formats') return response({ total: 0, formats: [] });
-        return response({ items: [], metadata: { page: 1, per: 50, total: 0 } });
-    });
+    );
     app.adminToken = 'session-only-token';
     app.saveAdminToken();
     assert.equal(session.get('orz-admin-api-token'), 'session-only-token');
@@ -105,17 +165,15 @@ test('directory upload has two workers, counts created and duplicates, and sends
 
 test('failed files do not stop the batch and retry only retryable failures', async () => {
     let failedOnce = true;
-    const uploads = [];
-    const { app } = createApp(async (url, options = {}) => {
-        if (url === '/api/upload') {
-            const path = options.body.fields.find(field => field.name === 'relativePath').value;
-            uploads.push(path);
+    const { app, uploads } = createApp(
+        defaultFetch,
+        async (url, record) => {
+            const path = record.body.fields.find(field => field.name === 'relativePath').value;
             if (path === 'retry.mod' && failedOnce) { failedOnce = false; throw new Error('offline'); }
-            return response({ status: 'created' }, 201);
+            return { status: 201, body: { status: 'created' } };
         }
-        if (url === '/api/songs/formats') return response({ total: 0, formats: [] });
-        return response({ items: [], metadata: { page: 1, per: 50, total: 0 } });
-    });
+    );
+    const uploadedPaths = () => uploads.map(record => record.body.fields.find(field => field.name === 'relativePath').value);
     app.adminToken = 'token';
     app.importItems = [
         { file: file('retry.mod'), path: 'retry.mod', status: 'queued' },
@@ -129,8 +187,56 @@ test('failed files do not stop the batch and retry only retryable failures', asy
     assert.equal(app.importItems[0].retryable, true);
     await app.retryImportFailures();
 
-    assert.deepEqual(uploads, ['retry.mod', 'continues.xm', 'retry.mod']);
+    assert.deepEqual(uploadedPaths(), ['retry.mod', 'continues.xm', 'retry.mod']);
     assert.equal(app.importCreated, 2);
     assert.equal(app.importFailed, 1);
     assert.equal(app.importItems[2].status, 'failed');
+});
+
+test('byte-weighted progress reflects uploaded bytes and excludes preflight-rejected files', async () => {
+    const { app } = createApp();
+    app.adminToken = 'token';
+    app.importItems = [
+        { file: file('small.mod', 1, 'small.mod'), path: 'small.mod', status: 'created', retryable: false, loaded: 1 },
+        { file: file('big.xm', 100, 'big.xm'), path: 'big.xm', status: 'uploading', retryable: false, loaded: 50, uploadTotal: 100 },
+        { file: file('rejected.txt', 50, 'rejected.txt'), path: 'rejected.txt', status: 'failed', error: '不支持的音频格式', retryable: false },
+    ];
+    assert.equal(app.importTotalBytes, 101);   // rejected.txt excluded
+    assert.equal(app.importLoadedBytes, 51);
+    assert.equal(app.importProgress, 50);      // 51/101 ≈ 50%, not 66% by count
+    assert.equal(app.itemUploadPercent(app.importItems[1]), 50);
+    assert.equal(app.currentUploadLabel(), 'big.xm · 50%');
+
+    app.importItems[1].status = 'created';
+    app.importItems[1].loaded = 100;
+    assert.equal(app.importProgress, 100);
+});
+
+test('XHR upload progress drives the live byte-weighted bar', async () => {
+    let releaseBig;
+    const gate = new Promise(resolve => { releaseBig = resolve; });
+    const { app } = createApp(
+        defaultFetch,
+        async (url, record) => {
+            const path = record.body.fields.find(field => field.name === 'relativePath').value;
+            if (path === 'big.xm') {
+                record.onProgress(0.5);
+                await gate;
+            }
+            return { status: 201, body: { status: 'created' } };
+        }
+    );
+    app.adminToken = 'token';
+    app.importItems = [
+        { file: file('small.mod', 1, 'small.mod'), path: 'small.mod', status: 'queued', loaded: 0 },
+        { file: file('big.xm', 100, 'big.xm'), path: 'big.xm', status: 'queued', loaded: 0 },
+    ];
+    const done = app.startImport();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(app.importItems[1].status, 'uploading');
+    assert.equal(app.importProgress, 50);      // small.mod 1/1 + big.xm 50/100
+    assert.equal(app.itemUploadPercent(app.importItems[1]), 50);
+    releaseBig();
+    await done;
+    assert.equal(app.importProgress, 100);
 });

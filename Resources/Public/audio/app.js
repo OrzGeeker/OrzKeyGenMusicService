@@ -13,13 +13,26 @@ const ORZ_GROUPS=[['modules','模块音乐'],['retro','复古主机'],['synth','
 const clamp=(value,min=0,max=1)=>Math.min(max,Math.max(min,Number(value)||0));
 const formatClock=seconds=>{if(!Number.isFinite(Number(seconds))||Number(seconds)<0)return '0:00';const n=Math.floor(Number(seconds)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=String(n%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`};
 const formatDuration=seconds=>Number.isFinite(Number(seconds))&&Number(seconds)>0?formatClock(seconds):'—';
+// fetch has no upload progress events; XMLHttpRequest.upload.onprogress is the
+// only standard way to surface bytes during a multipart upload.
+const uploadWithProgress=(formData,headers,onProgress)=>new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','/api/upload');
+    if(headers?.Authorization)xhr.setRequestHeader('Authorization',headers.Authorization);
+    xhr.timeout=5*60*1000;
+    xhr.upload.onprogress=event=>{if(event.lengthComputable)onProgress?.({loaded:event.loaded,total:event.total})};
+    xhr.onload=()=>{let body=null;try{body=JSON.parse(xhr.responseText||'null')}catch(e){body=null}resolve({status:xhr.status,body})};
+    xhr.onerror=()=>reject(new Error('网络错误，请重试'));
+    xhr.ontimeout=()=>reject(new Error('上传超时，请重试'));
+    xhr.send(formData);
+});
 const isEditableTarget=target=>Boolean(target?.closest?.('input,textarea,select,[contenteditable="true"]'));
 const releaseShortcutFocus=()=>{const active=document.activeElement;if(active&&active!==document.body&&active.matches?.('button,[tabindex]'))active.blur()};
 const shortcutAction=(event,editable=isEditableTarget(event.target))=>{
     const key=event.key?.toLowerCase();
     if((event.metaKey||event.ctrlKey)&&key==='k') return 'search';
     if(editable) return key==='escape'?'escape':null;
-    return ({' ':'play','arrowleft':event.shiftKey?'back15':'back5','arrowright':event.shiftKey?'forward15':'forward5','arrowup':'volumeUp','arrowdown':'volumeDown','m':'mute','n':'next','p':'prev','l':'locate','v':event.shiftKey?'visualizerMode':'visualizer','/':'search','q':'queue','?':'help','h':'help','escape':'escape'})[key]||null;
+    return ({' ':'play','arrowleft':event.shiftKey?'back15':'back5','arrowright':event.shiftKey?'forward15':'forward5','arrowup':'volumeUp','arrowdown':'volumeDown','m':'mute','n':'next','p':'prev','l':'locate','v':event.shiftKey?'visualizerMode':'visualizer','/':'search','q':'queue','i':'import','?':'help','h':'help','escape':'escape'})[key]||null;
 };
 
 let player=null;
@@ -28,7 +41,7 @@ function playerApp(){return{
     currentSong:null,selectedSong:null,queue:[],queueIndex:-1,isPlaying:false,isLoadingTrack:false,volume:.7,lastVolume:.7,progressPercent:0,currentTime:0,duration:0,seekPreview:null,
     sidebarOpen:false,playlistOpen:false,shortcutOpen:false,importOpen:false,adminToken:'',importItems:[],importRunning:false,_importPromise:null,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
     locating:false,locatedSongId:null,visualizerOpen:true,visualizerMode:'holographic',_visualizer:null,_visualizerInited:false,
-    shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
+    shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'I',label:'导入本地目录'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
     async init(){
         player=new OrzAudioPlayer(); player.volume=this.volume; this.attachPlayerCallbacks(); player.initWasm();
         this.adminToken=this.readAdminToken();
@@ -66,11 +79,17 @@ function playerApp(){return{
     get activeList(){return this.songs.some(s=>s.id===this.currentSong?.id)?this.songs:this.queue},
     get currentIndex(){return this.activeList.findIndex(s=>s.id===this.currentSong?.id)},
     get canPrev(){return this.currentIndex>0},get canNext(){return this.currentIndex>=0&&this.currentIndex<this.activeList.length-1},
-    get importCompleted(){return this.importItems.filter(item=>item.status!=='queued'&&item.status!=='uploading').length},
     get importCreated(){return this.importItems.filter(item=>item.status==='created').length},
     get importDuplicates(){return this.importItems.filter(item=>item.status==='duplicate').length},
     get importFailed(){return this.importItems.filter(item=>item.status==='failed').length},
-    get importProgress(){return this.importItems.length?Math.round(this.importCompleted/this.importItems.length*100):0},
+    // Preflight-rejected items (status failed && !retryable) never upload, so
+    // they are excluded from both the byte numerator and denominator.
+    importIsCounted(item){return !(item.status==='failed'&&!item.retryable)},
+    get importTotalBytes(){return this.importItems.reduce((sum,item)=>this.importIsCounted(item)?sum+(item.file?.size||0):sum,0)},
+    get importLoadedBytes(){return this.importItems.reduce((sum,item)=>{if(!this.importIsCounted(item)||item.status==='queued')return sum;if(item.status==='uploading')return sum+(item.loaded||0);return sum+(item.file?.size||0)},0)},
+    get importProgress(){return this.importTotalBytes?Math.round(this.importLoadedBytes/this.importTotalBytes*100):0},
+    itemUploadPercent(item){const total=item?.uploadTotal||item?.file?.size||1;return Math.min(100,Math.round((item?.loaded||0)/total*100))},
+    currentUploadLabel(){const item=this.importItems.find(i=>i.status==='uploading');return item?`${item.path} · ${this.itemUploadPercent(item)}%`:'准备中'},
     strategyLabel(value){return({directFile:'浏览器直放',wasmDecode:'WASM 实时解码',serverDecode:'服务端解码'})[value]||'自动解码'},
     formatColor(format){return ORZ_FORMATS.find(x=>x.id===format?.toLowerCase())?.color||'#9ca3af'},
     formatTime(seconds){return formatClock(seconds)},formatDuration(seconds){return formatDuration(seconds)},
@@ -98,7 +117,7 @@ function playerApp(){return{
         const selected=Array.from(files||[]);if(!selected.length)return false;
         this.importItems=selected.map(file=>{
             const problem=!this.isImportFileSupported(file)?'不支持的音频格式':file.size>ORZ_MAX_UPLOAD_BYTES?'文件超过 32 MiB 限制':null;
-            return {file,path:this.importPathFor(file),status:problem?'failed':'queued',error:problem,retryable:!problem};
+            return {file,path:this.importPathFor(file),status:problem?'failed':'queued',error:problem,retryable:!problem,loaded:0};
         });
         const rejected=this.importFailed;if(rejected)this.notify(`${rejected} 个文件未通过导入预检`,'error');
         return this.startImport();
@@ -120,13 +139,12 @@ function playerApp(){return{
     },
     async runImportWorker(){while(true){const item=this.importItems.find(candidate=>candidate.status==='queued');if(!item)return;await this.uploadImportItem(item)}},
     async uploadImportItem(item){
-        item.status='uploading';item.error='';
+        item.status='uploading';item.error='';item.loaded=0;
         try{
             const body=new FormData();body.append('file',item.file,item.file.name);body.append('relativePath',item.path);
-            const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:`Bearer ${this.adminToken.trim()}`},body});
-            const payload=await response.json().catch(()=>null);
-            if(!response.ok)throw new Error(payload?.reason||payload?.error||`HTTP ${response.status}`);
-            item.status=payload?.status==='duplicate'||response.status===200?'duplicate':'created';item.retryable=false;
+            const {status,body:payload}=await uploadWithProgress(body,{Authorization:`Bearer ${this.adminToken.trim()}`},progress=>{item.loaded=progress.loaded;item.uploadTotal=progress.total||item.file.size});
+            if(status<200||status>=300)throw new Error(payload?.reason||payload?.error||`HTTP ${status}`);
+            item.status=payload?.status==='duplicate'||status===200?'duplicate':'created';item.retryable=false;
         }catch(error){item.status='failed';item.error=error?.message||'上传失败';item.retryable=true}
     },
     retryImportFailures(){if(this.importRunning)return;const failures=this.importItems.filter(item=>item.status==='failed'&&item.retryable);for(const item of failures){item.status='queued';item.error=''}if(failures.length)return this.startImport();return false},
@@ -140,7 +158,7 @@ function playerApp(){return{
     setVolume(){this.volume=clamp(this.volume);if(this.volume>0)this.lastVolume=this.volume;player?.setVolume(this.volume)},
     adjustVolume(delta){this.volume=clamp(this.volume+delta);this.setVolume()},toggleMute(){if(this.volume>0){this.lastVolume=this.volume;this.volume=0}else this.volume=this.lastVolume||.7;this.setVolume()},
     seekRelative(seconds){if(!this.duration)return;this.seekToPercent((this.currentTime+seconds)/this.duration)},
-    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen?this.playlistOpen=false:this.openPlaylistPanel(),help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else this.clearSearch()}})[action]?.()},
+    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen?this.playlistOpen=false:this.openPlaylistPanel(),import:()=>this.openImportPanel(),help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else if(this.importOpen)this.importOpen=false;else this.clearSearch()}})[action]?.()},
     removeFromQueue(index){this.queue.splice(index,1);if(index<=this.queueIndex)this.queueIndex--},
     openPlaylistPanel(){this.playlistOpen=true;void this.loadPlaylists()},
     async loadPlaylists(force=false){

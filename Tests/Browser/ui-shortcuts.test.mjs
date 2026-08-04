@@ -25,6 +25,7 @@ test('keyboard shortcuts map playback and navigation actions', () => {
     assert.equal(shortcutAction(event('?')), 'help');
     assert.equal(shortcutAction(event('h')), 'help');
     assert.equal(shortcutAction(event('k', { metaKey: true })), 'search');
+    assert.equal(shortcutAction(event('i')), 'import');
 });
 
 test('editable controls suppress media shortcuts except escape', () => {
