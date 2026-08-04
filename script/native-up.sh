@@ -20,14 +20,27 @@ if native_pid_running; then
     exit 0
 fi
 
+health_url="http://127.0.0.1:$APP_PORT/api/health"
+if curl -s --max-time 2 -o /dev/null "$health_url"; then
+    echo "ERROR: port $APP_PORT is already serving HTTP, but it is not the managed Native OrzMusic process" >&2
+    echo "Stop the process or Docker service using the port before starting Native OrzMusic." >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "$NATIVE_PID_FILE")"
 rm -f "$NATIVE_PID_FILE"
+cd "$NATIVE_PROJECT_ROOT"
 nohup "$SERVICE_BINARY" serve --env production --hostname 0.0.0.0 --port "$APP_PORT" \
     >>"$NATIVE_LOG_FILE" 2>&1 < /dev/null &
 echo $! > "$NATIVE_PID_FILE"
 
 for _ in $(seq 1 30); do
-    if curl -fsS --max-time 2 "http://127.0.0.1:$APP_PORT/api/health" \
+    if ! native_pid_running; then
+        rm -f "$NATIVE_PID_FILE"
+        echo "ERROR: Native OrzMusic exited before becoming ready; see $NATIVE_LOG_FILE" >&2
+        exit 1
+    fi
+    if curl -fsS --max-time 2 "$health_url" \
         | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"'; then
         echo "Native OrzMusic is ready on http://127.0.0.1:$APP_PORT"
         exit 0

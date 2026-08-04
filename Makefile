@@ -41,6 +41,7 @@ help:
 	@echo "  make test           Run Swift and browser tests"
 	@echo "  make swift-test     Run Swift tests"
 	@echo "  make browser-test   Run browser/WASM tests"
+	@echo "  make script-test    Run deployment script tests"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up      Build and start the full stack in Docker"
@@ -196,7 +197,7 @@ maintain-decode-cache:
 	eval swift run OrzDecodeCacheMaintenance "$$args"
 
 .PHONY: test
-test: swift-test browser-test docker-config
+test: swift-test browser-test script-test docker-config
 
 .PHONY: swift-test
 swift-test:
@@ -205,6 +206,11 @@ swift-test:
 .PHONY: browser-test
 browser-test:
 	node --test Tests/Browser/*.test.mjs
+
+.PHONY: script-test
+script-test:
+	bash Tests/AppTests/native-scripts-test.sh
+	bash Tests/AppTests/release-scripts-test.sh
 
 .PHONY: docker-build
 docker-build:
