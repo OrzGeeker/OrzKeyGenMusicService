@@ -1,11 +1,32 @@
 # Changelog
 
-## [未发布]
+## [0.0.5] — 2026-08-04
 
-### 修复
-- 修正生产 Compose 覆盖配置中 scanner 服务丢失音乐源目录挂载的问题。
+### 新增
+- 前端"导入本地目录"支持实时上传进度（按字节加权），导入面板样式优化，新增 `I` 快捷键。
+- 上传面板的"选择目录 / 选择文件"直接用按钮标题区分，移除多余标签；隐藏的原生文件输入保留可访问性。
 - 新增生产扫描脚本和部署包内 `make scan` 入口，支持
   `MUSIC_DIR=/absolute/path/to/music make scan` 一键临时启动 scanner 并触发扫描。
+- Native 部署脚本加固：端口占用检测、子进程启动失败快速退出、托管/未托管服务状态区分；新增 `make script-test` 运行部署脚本测试。
+- 服务端管理 API 错误的中文提示：`503 admin_api_disabled` 提示需配置 `ADMIN_API_TOKEN`，`401 unauthorized` 提示管理令牌不正确。
+
+### 优化
+- 测试套件从 XCTest/XCTVapor 迁移到 swift-testing/VaporTesting：无 Xcode 环境
+  （CLT SDK 无 `XCTest.framework`）下 `swift test` 可直接运行。
+- 全面采用 async/await：中间件改用 `AsyncMiddleware`，测试与应用生命周期使用
+  `Application.make` + `asyncShutdown`，移除全部同步 `EventLoopFuture` / `.wait()` 用法。
+- 依赖升级到最新版本：Vapor 4.122.0、Fluent 4.13.0、FluentKit 1.57.0、
+  FluentPostgresDriver 2.12.0、FluentSQLiteDriver 4.9.0、Leaf 4.5.2。
+
+### 修复
+- 修复未填写管理令牌时选择文件/文件夹后上传任务永久停留在"等待中"：现在标记为
+  可重试失败并提示先填写令牌。
+- 修正生产 Compose 覆盖配置中 scanner 服务丢失音乐源目录挂载的问题。
+- 修正 `AppTests` 目标中 `native-scripts-test.sh` 未被声明为资源导致的 SPM 构建告警。
+
+### 文档
+- 补齐 `ADMIN_API_TOKEN` 在全部部署路径（Native、Docker 首次/日常、生产首次/日常
+  升级、部署包）的配置说明；`release-upgrade` 在令牌缺失时 fail-closed 报错。
 - 更新生产部署文档，明确扫描时宿主机路径与容器内 `/sources/keygen` 的对应关系。
 
 ## [0.0.4] — 2026-07-27
