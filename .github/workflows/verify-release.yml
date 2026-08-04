@@ -36,6 +36,7 @@ jobs:
       # 稳定项目名：同一验证运行内一致，避免依赖目录名导致 volume 隔离
       COMPOSE_PROJECT_NAME: orzmusic-verify-${{ github.run_id }}
       COMPOSE_BASE: -f docker-compose.yml -f docker-compose.production.yml
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # gh CLI 在 Actions 中不会自动使用 GITHUB_TOKEN
     steps:
       - name: Resolve version
         id: version

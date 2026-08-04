@@ -139,9 +139,11 @@ jobs:
     permissions:
       contents: write
       packages: write
+      actions: write # 派发 verify-release 需要
     env:
       IMAGE_NAME: ghcr.io/orzgeeker/orzmusic
       VERSION: ${{ needs.release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # gh CLI 在 Actions 中不会自动使用 GITHUB_TOKEN
     steps:
       - uses: actions/checkout@v4
         with:
@@ -208,6 +210,18 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+
+      # --- 派发发布后验证 ---
+      # GITHUB_TOKEN 创建的 release 不会触发 release: published 事件（GitHub 防递归
+      # 机制），但 workflow_dispatch 是明确例外、总会创建新 run。因此发布后显式派发
+      # verify-release；失败仅告警，不把已创建的 release 标为失败。
+      - name: Dispatch post-release verification
+        run: |
+          if gh workflow run verify-release.yml --ref main -f version="$VERSION"; then
+            echo "Dispatched verify-release for version $VERSION"
+          else
+            echo "WARNING: could not dispatch verify-release for $VERSION"
+          fi
 
       # --- 清理中间架构 tag ---
       # 合并后的多架构 index 直接按 digest 引用各平台 manifest，删除中间 tag 不影响
