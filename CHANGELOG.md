@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.0.6] — 2026-08-05
+
+### 新增
+- 发布镜像同时支持 `linux/amd64` 与 `linux/arm64`（原生 runner 并行构建后合并
+  多架构 manifest），Apple Silicon 生产机无需额外配置即可直接拉取对应架构。
+- 新增发布后自动化验证工作流 `verify-release.yml`：发布后对部署包执行真实
+  PostgreSQL 升级、冒烟检查与管理 API 门控验证，确保 Release 制品可正常工作。
+- 新增 GHCR 保留策略工作流 `ghcr-cleanup.yml`：每周清理 untagged 镜像版本
+  （保留 7 天），避免发布产生的中间架构镜像持续占用存储。
+
+### 优化
+- 发布工作流改为在 `ubuntu-24.04` 与 `ubuntu-24.04-arm` 原生 runner 上并行构建
+  amd64/arm64，不再使用 QEMU 仿真，显著缩短 arm64 构建时间。
+- 部署脚本测试 `make script-test` 接入发布工作流 CI。
+- `docker-compose.yml` 钉死 `name: orzmusic`：Compose 不再随部署包目录名变化
+  创建全新项目与 volume，按版本目录升级时数据可靠复用；仍可用 `COMPOSE_PROJECT_NAME`
+  覆盖实现多实例隔离。
+
+### 修复
+- `db-backup.sh` 与 `release-upgrade.sh` 的 Compose 配置参数语义统一为
+  `COMPOSE_BASE`（空格分隔的 `-f` 参数），修复设置 `COMPOSE_FILE` 时数据库备份
+  必然失败的问题。
+- 数据库备份文件名改用部署包 `VERSION` 文件，digest 镜像引用下不再产生晦涩的
+  64 位十六进制文件名。
+
+### 文档
+- 部署文档补充：Compose 项目名由 `name: orzmusic` 兜底（早期版本需手动保持一致）、
+  arm64 镜像支持、发布制品生命周期与 untagged 清理说明。
+
 ## [0.0.5] — 2026-08-04
 
 ### 新增
