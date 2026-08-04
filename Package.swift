@@ -92,6 +92,7 @@ let package = Package(
             "performance-smoke-test.sh",
             "db-backup-test.sh",
             "release-scripts-test.sh",
+            "native-scripts-test.sh",
         ], linkerSettings: audioCoreLinkerSettings)
     ]
 )
