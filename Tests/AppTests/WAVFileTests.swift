@@ -1,8 +1,8 @@
 import Foundation
-import XCTest
+import Testing
 @testable import OrzAudioKit
 
-final class WAVFileTests: XCTestCase {
+@Suite(.serialized) struct WAVFileTests {
     private func le16(_ value: UInt16) -> [UInt8] {
         [UInt8(truncatingIfNeeded: value), UInt8(truncatingIfNeeded: value >> 8)]
     }
@@ -30,7 +30,7 @@ final class WAVFileTests: XCTestCase {
         le16(4) + le16(16) + extensionBytes
     }
 
-    func testWalksUnknownChunksOddPaddingAndExtendedFmt() throws {
+    @Test func testWalksUnknownChunksOddPaddingAndExtendedFmt() async throws {
         let samples: [UInt8] = [0, 0, 255, 127, 0, 128, 1, 0]
         let data = wave([
             chunk("JUNK", [1, 2, 3]),
@@ -40,14 +40,14 @@ final class WAVFileTests: XCTestCase {
         ])
 
         let parsed = try WAVFile.parse(data)
-        XCTAssertEqual(parsed.encoding, .pcm)
-        XCTAssertEqual(parsed.sampleRate, 44_100)
-        XCTAssertEqual(parsed.channels, 2)
-        XCTAssertEqual(parsed.bitsPerSample, 16)
-        XCTAssertEqual(parsed.samples, Data(samples))
+        #expect(parsed.encoding == .pcm)
+        #expect(parsed.sampleRate == 44_100)
+        #expect(parsed.channels == 2)
+        #expect(parsed.bitsPerSample == 16)
+        #expect(parsed.samples == Data(samples))
     }
 
-    func testClassifiesExtensibleFloatAndADPCM() throws {
+    @Test func testClassifiesExtensibleFloatAndADPCM() async throws {
         var extensible = le16(22) + le16(32) + le32(3) // cbSize, valid bits, channel mask
         extensible += le16(3) + [0, 0] // IEEE float subformat tag + GUID remainder
         extensible += [UInt8](repeating: 0, count: 12)
@@ -55,34 +55,37 @@ final class WAVFileTests: XCTestCase {
             chunk("fmt ", fmt(tag: 0xFFFE, extensionBytes: extensible)),
             chunk("data", [UInt8](repeating: 0, count: 8)),
         ])
-        XCTAssertEqual(try WAVFile.parse(floatWAV).encoding, .ieeeFloat)
+        let floatEncoding = try WAVFile.parse(floatWAV).encoding
+        #expect(floatEncoding == .ieeeFloat)
 
         let adpcm = wave([
             chunk("fmt ", fmt(tag: 2)),
             chunk("data", [0, 0, 0, 0]),
         ])
-        XCTAssertEqual(try WAVFile.parse(adpcm).encoding, .compressed(formatTag: 2))
-        XCTAssertThrowsError(try WAVFile.parse(adpcm).linearPCM())
+        let adpcmEncoding = try WAVFile.parse(adpcm).encoding
+        #expect(adpcmEncoding == .compressed(formatTag: 2))
+        #expect(throws: (any Error).self) { try WAVFile.parse(adpcm).linearPCM() }
     }
 
-    func testRejectsTruncatedAndMisalignedData() {
+    @Test func testRejectsTruncatedAndMisalignedData() async throws {
         var truncated = wave([chunk("fmt ", fmt()), chunk("data", [0, 0, 0, 0])])
         truncated.removeLast()
-        XCTAssertThrowsError(try WAVFile.parse(truncated))
+        #expect(throws: (any Error).self) { try WAVFile.parse(truncated) }
 
         let misaligned = wave([chunk("fmt ", fmt()), chunk("data", [0, 0])])
-        XCTAssertThrowsError(try WAVFile.parse(misaligned))
+        #expect(throws: (any Error).self) { try WAVFile.parse(misaligned) }
     }
 
-    func testPCMEncoderPadsOddDataChunkAndRoundTrips() throws {
+    @Test func testPCMEncoderPadsOddDataChunkAndRoundTrips() async throws {
         let encoded = PCMData(
             samples: Data([0, 127, 255]), sampleRate: 8_000, channels: 1, bitsPerSample: 8
         ).encodeWAV()
-        XCTAssertEqual(encoded.count, 48)
-        XCTAssertEqual(try WAVFile.parse(encoded).samples, Data([0, 127, 255]))
+        #expect(encoded.count == 48)
+        let samples = try WAVFile.parse(encoded).samples
+        #expect(samples == Data([0, 127, 255]))
     }
 
-    func testAudioEngineOnlyServerDecodesCompressedWAV() throws {
+    @Test func testAudioEngineOnlyServerDecodesCompressedWAV() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wav-strategy-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -93,7 +96,7 @@ final class WAVFileTests: XCTestCase {
         if case .directFile = AudioEngine().resolveStreamStrategy(filePath: pcmURL.path, format: .wav) {
             // expected
         } else {
-            XCTFail("PCM WAV should be sent directly to the browser")
+            Issue.record("PCM WAV should be sent directly to the browser")
         }
 
         let adpcmURL = directory.appendingPathComponent("adpcm.wav")
@@ -102,11 +105,11 @@ final class WAVFileTests: XCTestCase {
         if case .serverDecode = AudioEngine().resolveStreamStrategy(filePath: adpcmURL.path, format: .wav) {
             // expected
         } else {
-            XCTFail("compressed WAV should be transcoded on the server")
+            Issue.record("compressed WAV should be transcoded on the server")
         }
     }
 
-    func testStandardDecoderStreamsDirectlyToWAVFile() async throws {
+    @Test func testStandardDecoderStreamsDirectlyToWAVFile() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("standard-wav-stream-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -120,9 +123,9 @@ final class WAVFileTests: XCTestCase {
             filePath: input.path, destinationPath: output.path
         )
         let parsed = try WAVFile.parse(Data(contentsOf: output))
-        XCTAssertEqual(parsed.encoding, .pcm)
-        XCTAssertEqual(parsed.sampleRate, 44_100)
-        XCTAssertEqual(parsed.channels, 2)
-        XCTAssertEqual(parsed.samples.count, sourcePCM.count)
+        #expect(parsed.encoding == .pcm)
+        #expect(parsed.sampleRate == 44_100)
+        #expect(parsed.channels == 2)
+        #expect(parsed.samples.count == sourcePCM.count)
     }
 }

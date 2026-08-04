@@ -1,18 +1,19 @@
+import Foundation
 import FluentSQLiteDriver
 import OrzAudioKit
 import Vapor
-import XCTest
+import Testing
 @testable import App
 
-final class DecodeCacheWarmupServiceTests: XCTestCase {
-    private func makeApp(casRoot: String) throws -> Application {
-        let app = Application(.testing)
+@Suite(.serialized) struct DecodeCacheWarmupServiceTests {
+    private func makeApp(casRoot: String) async throws -> Application {
+        let app = try await Application.make(.testing)
         app.databases.use(.sqlite(.memory), as: .sqlite)
         app.migrations.add(CreateArtist())
         app.migrations.add(CreateAlbum())
         app.migrations.add(CreateSong())
         app.casStorage = CasStorageService(root: casRoot)
-        try app.autoMigrate().wait()
+        try await app.autoMigrate()
         return app
     }
 
@@ -43,11 +44,11 @@ final class DecodeCacheWarmupServiceTests: XCTestCase {
         return path
     }
 
-    func testDryRunSelectsExplicitIDsAndNeverCreatesCache() async throws {
+    @Test func testDryRunSelectsExplicitIDsAndNeverCreatesCache() async throws {
         let root = NSTemporaryDirectory() + "orz-warmup-dry-\(UUID().uuidString)"
-        let app = try makeApp(casRoot: root)
-        addTeardownBlock {
-            try await app.asyncShutdown()
+        let app = try await makeApp(casRoot: root)
+        defer {
+            scheduleShutdown(app)
             try? FileManager.default.removeItem(atPath: root)
         }
         let server = song(title: "server", sha: String(repeating: "a", count: 64), format: "sc68")
@@ -60,18 +61,18 @@ final class DecodeCacheWarmupServiceTests: XCTestCase {
         let summary = try await DecodeCacheWarmupService(database: app.db, cas: app.casStorage)
             .run(options: .init(ids: [server.id!, wasm.id!], concurrency: 2, dryRun: true))
 
-        XCTAssertEqual(summary.selected, 2)
-        XCTAssertEqual(summary.eligible, 1)
-        XCTAssertEqual(summary.skippedNonServerDecode, 1)
-        XCTAssertEqual(summary.warmed, 0)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: "\(root)/.cache/wav"))
+        #expect(summary.selected == 2)
+        #expect(summary.eligible == 1)
+        #expect(summary.skippedNonServerDecode == 1)
+        #expect(summary.warmed == 0)
+        #expect(!FileManager.default.fileExists(atPath: "\(root)/.cache/wav"))
     }
 
-    func testExistingCacheIsIdempotentAndUsesWebCacheSemantics() async throws {
+    @Test func testExistingCacheIsIdempotentAndUsesWebCacheSemantics() async throws {
         let root = NSTemporaryDirectory() + "orz-warmup-hit-\(UUID().uuidString)"
-        let app = try makeApp(casRoot: root)
-        addTeardownBlock {
-            try await app.asyncShutdown()
+        let app = try await makeApp(casRoot: root)
+        defer {
+            scheduleShutdown(app)
             try? FileManager.default.removeItem(atPath: root)
         }
         let server = song(title: "cached", sha: String(repeating: "c", count: 64), format: "sc68")
@@ -91,18 +92,18 @@ final class DecodeCacheWarmupServiceTests: XCTestCase {
             format: .sc68
         )
 
-        XCTAssertEqual(first.cacheHits, 1)
-        XCTAssertEqual(second.cacheHits, 1)
-        XCTAssertEqual(first.warmed + second.warmed, 0)
-        XCTAssertTrue(webOutcome.cacheHit)
-        XCTAssertEqual(webOutcome.path, expectedPath)
+        #expect(first.cacheHits == 1)
+        #expect(second.cacheHits == 1)
+        #expect(first.warmed + second.warmed == 0)
+        #expect(webOutcome.cacheHit)
+        #expect(webOutcome.path == expectedPath)
     }
 
-    func testFormatAndRecentSelectorsAreAppliedBeforeWarmup() async throws {
+    @Test func testFormatAndRecentSelectorsAreAppliedBeforeWarmup() async throws {
         let root = NSTemporaryDirectory() + "orz-warmup-filter-\(UUID().uuidString)"
-        let app = try makeApp(casRoot: root)
-        addTeardownBlock {
-            try await app.asyncShutdown()
+        let app = try await makeApp(casRoot: root)
+        defer {
+            scheduleShutdown(app)
             try? FileManager.default.removeItem(atPath: root)
         }
         let older = song(title: "older", sha: String(repeating: "d", count: 64), format: "sc68")
@@ -119,8 +120,8 @@ final class DecodeCacheWarmupServiceTests: XCTestCase {
         let summary = try await DecodeCacheWarmupService(database: app.db, cas: app.casStorage)
             .run(options: .init(format: "sc68", recent: 1, dryRun: true))
 
-        XCTAssertEqual(summary.selected, 1)
-        XCTAssertEqual(summary.eligible, 1)
-        XCTAssertEqual(summary.skippedNonServerDecode, 0)
+        #expect(summary.selected == 1)
+        #expect(summary.eligible == 1)
+        #expect(summary.skippedNonServerDecode == 0)
     }
 }

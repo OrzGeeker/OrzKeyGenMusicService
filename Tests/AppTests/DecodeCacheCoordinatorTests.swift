@@ -1,7 +1,8 @@
-import XCTest
+import Foundation
+import Testing
 @testable import App
 
-final class DecodeCacheCoordinatorTests: XCTestCase {
+@Suite(.serialized) struct DecodeCacheCoordinatorTests {
     private actor Counter {
         var value = 0
         func increment() { value += 1 }
@@ -20,7 +21,7 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
         )
     }
 
-    func testConcurrentSameKeyRunsOperationOnce() async throws {
+    @Test func testConcurrentSameKeyRunsOperationOnce() async throws {
         let coordinator = DecodeCacheCoordinator()
         let counter = Counter()
         let sharedKey = Self.key()
@@ -38,14 +39,14 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
             return try await group.reduce(into: []) { $0.append($1) }
         }
 
-        XCTAssertEqual(Set(values.map(\.path)), ["/cache/result.wav"])
+        #expect(Set(values.map(\.path)) == ["/cache/result.wav"])
         let operationCount = await counter.value
         let activeFlights = await coordinator.activeFlightCount()
-        XCTAssertEqual(operationCount, 1)
-        XCTAssertEqual(activeFlights, 0)
+        #expect(operationCount == 1)
+        #expect(activeFlights == 0)
     }
 
-    func testDifferentSubsongKeysRunIndependently() async throws {
+    @Test func testDifferentSubsongKeysRunIndependently() async throws {
         let coordinator = DecodeCacheCoordinator()
         let counter = Counter()
         let firstKey = Self.key(subsong: 0)
@@ -62,11 +63,11 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
 
         let result = try await [first, second]
         let operationCount = await counter.value
-        XCTAssertEqual(Set(result.map(\.path)), ["zero", "one"])
-        XCTAssertEqual(operationCount, 2)
+        #expect(Set(result.map(\.path)) == ["zero", "one"])
+        #expect(operationCount == 2)
     }
 
-    func testFailureIsSharedAndNextRequestCanRetry() async throws {
+    @Test func testFailureIsSharedAndNextRequestCanRetry() async throws {
         let coordinator = DecodeCacheCoordinator()
         let counter = Counter()
         let sharedKey = Self.key()
@@ -91,19 +92,19 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
             return await group.reduce(into: []) { $0.append($1) }
         }
 
-        XCTAssertTrue(failures.allSatisfy { $0 })
+        #expect(failures.allSatisfy { $0 })
         let failedOperationCount = await counter.value
-        XCTAssertEqual(failedOperationCount, 1)
+        #expect(failedOperationCount == 1)
         let retried = try await coordinator.run(key: sharedKey) {
             await counter.increment()
             return "retried"
         }
         let retriedOperationCount = await counter.value
-        XCTAssertEqual(retried.path, "retried")
-        XCTAssertEqual(retriedOperationCount, 2)
+        #expect(retried.path == "retried")
+        #expect(retriedOperationCount == 2)
     }
 
-    func testCancellingOneWaiterDoesNotCancelSharedWork() async throws {
+    @Test func testCancellingOneWaiterDoesNotCancelSharedWork() async throws {
         let coordinator = DecodeCacheCoordinator()
         let counter = Counter()
         let sharedKey = Self.key()
@@ -121,11 +122,11 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
 
         let secondValue = try await second.value
         let operationCount = await counter.value
-        XCTAssertEqual(secondValue.path, "complete")
-        XCTAssertEqual(operationCount, 1)
+        #expect(secondValue.path == "complete")
+        #expect(operationCount == 1)
     }
 
-    func testGlobalLimitCapsDifferentKeys() async throws {
+    @Test func testGlobalLimitCapsDifferentKeys() async throws {
         actor Gauge {
             var active = 0
             var maximum = 0
@@ -156,13 +157,13 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
 
         let maximum = await gauge.maximum
         let diagnostics = await coordinator.diagnostics()
-        XCTAssertEqual(maximum, 2)
-        XCTAssertEqual(diagnostics.limit, 2)
-        XCTAssertEqual(diagnostics.active, 0)
-        XCTAssertEqual(diagnostics.queued, 0)
+        #expect(maximum == 2)
+        #expect(diagnostics.limit == 2)
+        #expect(diagnostics.active == 0)
+        #expect(diagnostics.queued == 0)
     }
 
-    func testCancelledQueuedWaiterDoesNotLeakPermit() async throws {
+    @Test func testCancelledQueuedWaiterDoesNotLeakPermit() async throws {
         let coordinator = DecodeCacheCoordinator(concurrencyLimit: 1)
         let firstKey = Self.key(subsong: 100)
         let queuedKey = Self.key(subsong: 101)
@@ -186,7 +187,7 @@ final class DecodeCacheCoordinatorTests: XCTestCase {
         _ = try await first.value
         _ = try await queued.value
         let diagnostics = await coordinator.diagnostics()
-        XCTAssertEqual(diagnostics.active, 0)
-        XCTAssertEqual(diagnostics.queued, 0)
+        #expect(diagnostics.active == 0)
+        #expect(diagnostics.queued == 0)
     }
 }

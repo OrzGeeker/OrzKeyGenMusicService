@@ -1,11 +1,13 @@
-import XCTVapor
+import Foundation
+import VaporTesting
+import Testing
 @testable import App
 
-final class PlaybackDiagnosticsControllerTests: XCTestCase {
+@Suite(.serialized) struct PlaybackDiagnosticsControllerTests {
     private func withDiagnosticsEnvironment<T>(
         _ enabled: Bool,
-        _ body: () throws -> T
-    ) rethrows -> T {
+        _ body: () async throws -> T
+    ) async rethrows -> T {
         let name = "PLAYBACK_DIAGNOSTICS_ENABLED"
         let previous = ProcessInfo.processInfo.environment[name]
         setenv(name, enabled ? "true" : "false", 1)
@@ -16,16 +18,16 @@ final class PlaybackDiagnosticsControllerTests: XCTestCase {
                 unsetenv(name)
             }
         }
-        return try body()
+        return try await body()
     }
 
-    func testEndpointIsUnavailableWhenDiagnosticsAreDisabled() throws {
-        try withDiagnosticsEnvironment(false) {
-            let app = Application(.testing)
-            defer { app.shutdown() }
+    @Test func testEndpointIsUnavailableWhenDiagnosticsAreDisabled() async throws {
+        try await withDiagnosticsEnvironment(false) {
+            let app = try await Application.make(.testing)
+            defer { scheduleShutdown(app) }
             try app.register(collection: PlaybackDiagnosticsController())
 
-            try app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
+            try await app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
                 try request.content.encode([
                     "strategy": "directFile",
                     "format": "ogg",
@@ -35,15 +37,15 @@ final class PlaybackDiagnosticsControllerTests: XCTestCase {
                     "fallbackUsed": "false",
                 ])
             }, afterResponse: { response in
-                XCTAssertEqual(response.status, .notFound)
+                #expect(response.status == .notFound)
             })
         }
     }
 
-    func testEnabledEndpointAcceptsBoundedAnonymousMetrics() throws {
-        try withDiagnosticsEnvironment(true) {
-            let app = Application(.testing)
-            defer { app.shutdown() }
+    @Test func testEnabledEndpointAcceptsBoundedAnonymousMetrics() async throws {
+        try await withDiagnosticsEnvironment(true) {
+            let app = try await Application.make(.testing)
+            defer { scheduleShutdown(app) }
             try app.register(collection: PlaybackDiagnosticsController())
             let payload = PlaybackDiagnosticsController.Payload(
                 strategy: "wasmDecode",
@@ -57,18 +59,18 @@ final class PlaybackDiagnosticsControllerTests: XCTestCase {
                 fallbackUsed: false
             )
 
-            try app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
+            try await app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
                 try request.content.encode(payload)
             }, afterResponse: { response in
-                XCTAssertEqual(response.status, .noContent)
+                #expect(response.status == .noContent)
             })
         }
     }
 
-    func testEndpointRejectsUnboundedOrIdentifyingFormatValues() throws {
-        try withDiagnosticsEnvironment(true) {
-            let app = Application(.testing)
-            defer { app.shutdown() }
+    @Test func testEndpointRejectsUnboundedOrIdentifyingFormatValues() async throws {
+        try await withDiagnosticsEnvironment(true) {
+            let app = try await Application.make(.testing)
+            defer { scheduleShutdown(app) }
             try app.register(collection: PlaybackDiagnosticsController())
             let payload = PlaybackDiagnosticsController.Payload(
                 strategy: "serverDecode",
@@ -82,10 +84,10 @@ final class PlaybackDiagnosticsControllerTests: XCTestCase {
                 fallbackUsed: false
             )
 
-            try app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
+            try await app.test(.POST, "/api/diagnostics/playback", beforeRequest: { request in
                 try request.content.encode(payload)
             }, afterResponse: { response in
-                XCTAssertEqual(response.status, .badRequest)
+                #expect(response.status == .badRequest)
             })
         }
     }

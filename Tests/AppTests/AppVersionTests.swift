@@ -1,7 +1,8 @@
+import Foundation
 @testable import App
-import XCTest
+import Testing
 
-final class AppVersionTests: XCTestCase {
+@Suite(.serialized) struct AppVersionTests {
 
     private let testVersion = "1.2.3"
     private let invalidVersions = ["", "abc", "1.0", "v1.0.0", "1.0.0-beta", "01.0.0", "1.0.0.0"]
@@ -11,27 +12,27 @@ final class AppVersionTests: XCTestCase {
 
     // MARK: - 环境变量优先
 
-    func testEnvironmentVariableTakesPriority() {
+    @Test func testEnvironmentVariableTakesPriority() async throws {
         let version = AppVersion.resolve(environment: ["APP_VERSION": testVersion])
-        XCTAssertEqual(version, testVersion)
+        #expect(version == testVersion)
     }
 
-    func testEnvironmentVariableOverridesFile() {
+    @Test func testEnvironmentVariableOverridesFile() async throws {
         let version = AppVersion.resolve(
             environment: ["APP_VERSION": testVersion],
             currentDirectoryPath: "/nonexistent"
         )
-        XCTAssertEqual(version, testVersion)
+        #expect(version == testVersion)
     }
 
-    func testInvalidEnvironmentVariableFallsBack() {
+    @Test func testInvalidEnvironmentVariableFallsBack() async throws {
         let version = AppVersion.resolve(environment: ["APP_VERSION": "v1.0.0"], currentDirectoryPath: emptyDir)
-        XCTAssertEqual(version, "development")
+        #expect(version == "development")
     }
 
     // MARK: - VERSION 文件回退
 
-    func testVersionFileFallback() {
+    @Test func testVersionFileFallback() async throws {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("version-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -44,10 +45,10 @@ final class AppVersionTests: XCTestCase {
             environment: [:],
             currentDirectoryPath: tmpDir.path
         )
-        XCTAssertEqual(version, testVersion)
+        #expect(version == testVersion)
     }
 
-    func testVersionFileTrimsWhitespace() {
+    @Test func testVersionFileTrimsWhitespace() async throws {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("version-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -60,10 +61,10 @@ final class AppVersionTests: XCTestCase {
             environment: [:],
             currentDirectoryPath: tmpDir.path
         )
-        XCTAssertEqual(version, testVersion)
+        #expect(version == testVersion)
     }
 
-    func testInvalidVersionFileFallsBack() {
+    @Test func testInvalidVersionFileFallsBack() async throws {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("version-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -76,12 +77,12 @@ final class AppVersionTests: XCTestCase {
             environment: [:],
             currentDirectoryPath: tmpDir.path
         )
-        XCTAssertEqual(version, "development")
+        #expect(version == "development")
     }
 
     // MARK: - development 回退
 
-    func testDevelopmentFallbackWhenNoEnvAndNoFile() {
+    @Test func testDevelopmentFallbackWhenNoEnvAndNoFile() async throws {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("version-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -91,28 +92,28 @@ final class AppVersionTests: XCTestCase {
             environment: [:],
             currentDirectoryPath: tmpDir.path
         )
-        XCTAssertEqual(version, "development")
+        #expect(version == "development")
     }
 
-    func testDevelopmentFallbackWithEmptyEnvVar() {
+    @Test func testDevelopmentFallbackWithEmptyEnvVar() async throws {
         let version = AppVersion.resolve(environment: ["APP_VERSION": ""], currentDirectoryPath: emptyDir)
-        XCTAssertEqual(version, "development")
+        #expect(version == "development")
     }
 
     // MARK: - SemVer 格式校验
 
-    func testAllInvalidVersionFormatsReturnDevelopment() {
+    @Test func testAllInvalidVersionFormatsReturnDevelopment() async throws {
         for invalid in invalidVersions {
             let version = AppVersion.resolve(environment: ["APP_VERSION": invalid], currentDirectoryPath: emptyDir)
-            XCTAssertEqual(version, "development", "Expected 'development' for invalid version: '\(invalid)'")
+            #expect(version == "development", "Expected 'development' for invalid version: '\(invalid)'")
         }
     }
 
-    func testValidSemVerAccepted() {
+    @Test func testValidSemVerAccepted() async throws {
         let validVersions = ["0.0.1", "1.0.0", "10.20.30", "999.999.999"]
         for valid in validVersions {
             let version = AppVersion.resolve(environment: ["APP_VERSION": valid], currentDirectoryPath: emptyDir)
-            XCTAssertEqual(version, valid, "Expected valid version '\(valid)' to be accepted")
+            #expect(version == valid, "Expected valid version '\(valid)' to be accepted")
         }
     }
 }

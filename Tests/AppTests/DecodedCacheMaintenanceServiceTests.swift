@@ -1,8 +1,9 @@
+import Foundation
 import OrzAudioKit
-import XCTest
+import Testing
 @testable import App
 
-final class DecodedCacheMaintenanceServiceTests: XCTestCase {
+@Suite(.serialized) struct DecodedCacheMaintenanceServiceTests {
     private func filename(sha: Character, fingerprint: String, format: String = "sc68", subsong: Int = 0) -> String {
         "\(String(repeating: String(sha), count: 64))-\(fingerprint)-\(format)-rate-native-ch-native-sub-\(subsong).wav"
     }
@@ -19,7 +20,7 @@ final class DecodedCacheMaintenanceServiceTests: XCTestCase {
         return url
     }
 
-    func testReportsFingerprintsAndDryRunDeletesNothing() throws {
+    @Test func testReportsFingerprintsAndDryRunDeletesNothing() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("orz-cache-report-\(UUID().uuidString)")
         let cache = root.appendingPathComponent(".cache/wav")
@@ -34,17 +35,17 @@ final class DecodedCacheMaintenanceServiceTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_000)
         )
 
-        XCTAssertEqual(summary.files, 2)
-        XCTAssertEqual(summary.totalBytes, 50)
-        XCTAssertEqual(summary.fingerprintUsage.map(\.fingerprint), ["old-sdk", AudioDecoder.cacheFingerprint].sorted())
-        XCTAssertEqual(summary.selectedFiles, 1)
-        XCTAssertEqual(summary.selectedBytes, 30)
-        XCTAssertEqual(summary.deletedFiles, 0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: old.path))
+        #expect(summary.files == 2)
+        #expect(summary.totalBytes == 50)
+        #expect(summary.fingerprintUsage.map(\.fingerprint) == ["old-sdk", AudioDecoder.cacheFingerprint].sorted())
+        #expect(summary.selectedFiles == 1)
+        #expect(summary.selectedBytes == 30)
+        #expect(summary.deletedFiles == 0)
+        #expect(FileManager.default.fileExists(atPath: current.path))
+        #expect(FileManager.default.fileExists(atPath: old.path))
     }
 
-    func testCapacityDeletesOldestEligibleFileOnlyWhenApplied() throws {
+    @Test func testCapacityDeletesOldestEligibleFileOnlyWhenApplied() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("orz-cache-capacity-\(UUID().uuidString)")
         let cache = root.appendingPathComponent(".cache/wav")
@@ -58,13 +59,13 @@ final class DecodedCacheMaintenanceServiceTests: XCTestCase {
             now: .init(timeIntervalSince1970: 1_000)
         )
 
-        XCTAssertEqual(summary.deletedFiles, 1)
-        XCTAssertEqual(summary.deletedBytes, 40)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: oldest.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: newest.path))
+        #expect(summary.deletedFiles == 1)
+        #expect(summary.deletedBytes == 40)
+        #expect(!FileManager.default.fileExists(atPath: oldest.path))
+        #expect(FileManager.default.fileExists(atPath: newest.path))
     }
 
-    func testSharedStreamingLeaseProtectsFileFromCleanup() throws {
+    @Test func testSharedStreamingLeaseProtectsFileFromCleanup() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("orz-cache-busy-\(UUID().uuidString)")
         let cache = root.appendingPathComponent(".cache/wav")
@@ -79,12 +80,12 @@ final class DecodedCacheMaintenanceServiceTests: XCTestCase {
             now: .init(timeIntervalSince1970: 1_000)
         )
 
-        XCTAssertEqual(summary.busyFiles, 1)
-        XCTAssertEqual(summary.deletedFiles, 0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        #expect(summary.busyFiles == 1)
+        #expect(summary.deletedFiles == 0)
+        #expect(FileManager.default.fileExists(atPath: file.path))
     }
 
-    func testSymlinkEscapeIsRejectedWithoutTouchingExternalFile() throws {
+    @Test func testSymlinkEscapeIsRejectedWithoutTouchingExternalFile() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("orz-cache-root-\(UUID().uuidString)")
         let external = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -102,7 +103,7 @@ final class DecodedCacheMaintenanceServiceTests: XCTestCase {
             withDestinationURL: external
         )
 
-        XCTAssertThrowsError(try DecodedCacheMaintenanceService(casRoot: root.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: sentinel.path))
+        #expect(throws: (any Error).self) { try DecodedCacheMaintenanceService(casRoot: root.path) }
+        #expect(FileManager.default.fileExists(atPath: sentinel.path))
     }
 }

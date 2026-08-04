@@ -26,12 +26,12 @@ let package = Package(
         .executable(name: "OrzMusicService", targets: ["Run"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/vapor/vapor.git", from: "4.89.3"),
-        .package(url: "https://github.com/vapor/fluent.git", from: "4.8.0"),
-        .package(url: "https://github.com/vapor/fluent-kit.git", from: "1.52.2"),
-        .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.8.0"),
-        .package(url: "https://github.com/vapor/fluent-sqlite-driver.git", from: "4.0.0"),
-        .package(url: "https://github.com/vapor/leaf.git", from: "4.2.4"),
+        .package(url: "https://github.com/vapor/vapor.git", from: "4.122.0"),
+        .package(url: "https://github.com/vapor/fluent.git", from: "4.13.0"),
+        .package(url: "https://github.com/vapor/fluent-kit.git", from: "1.57.0"),
+        .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.12.0"),
+        .package(url: "https://github.com/vapor/fluent-sqlite-driver.git", from: "4.9.0"),
+        .package(url: "https://github.com/vapor/leaf.git", from: "4.5.2"),
     ],
     targets: [
         // ── OrzAudioCore SDK (system library from release artifact) ──
@@ -84,7 +84,7 @@ let package = Package(
             .target(name: "App"),
             .target(name: "OrzAudioKit"),
             .target(name: "OrzAudioCoreSDK"),
-            .product(name: "XCTVapor", package: "vapor"),
+            .product(name: "VaporTesting", package: "vapor"),
             .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
             .product(name: "FluentSQL", package: "fluent-kit"),
         ], exclude: [

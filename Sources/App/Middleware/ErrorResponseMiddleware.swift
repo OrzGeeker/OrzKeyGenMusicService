@@ -6,10 +6,12 @@ import Vapor
 /// ```json
 /// { "error": "notFound", "reason": "Song not found", "code": 404 }
 /// ```
-struct ErrorResponseMiddleware: Middleware {
+struct ErrorResponseMiddleware: AsyncMiddleware {
 
-    func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
-        next.respond(to: request).flatMapErrorThrowing { error in
+    func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
+        do {
+            return try await next.respond(to: request)
+        } catch {
             switch error {
             case let scanError as ScanAPIError:
                 return try self.jsonResponse(
@@ -18,7 +20,7 @@ struct ErrorResponseMiddleware: Middleware {
                     reason: scanError.reason
                 )
 
-            case let abort as Abort:
+            case let abort as any AbortError:
                 let reason = abort.reason.isEmpty ? statusReason(abort.status) : abort.reason
                 return try self.jsonResponse(
                     status: abort.status,
