@@ -39,12 +39,14 @@ let player=null;
 function playerApp(){return{
     songs:[],page:1,perPage:50,hasMore:false,isLoading:false,totalResults:0,searchQuery:'',formatFilter:'',formatCounts:{},libraryTotal:0,
     currentSong:null,selectedSong:null,queue:[],queueIndex:-1,isPlaying:false,isLoadingTrack:false,volume:.7,lastVolume:.7,progressPercent:0,currentTime:0,duration:0,seekPreview:null,
-    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,importOpen:false,adminToken:'',importItems:[],importRunning:false,_importPromise:null,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
+    sidebarOpen:false,playlistOpen:false,shortcutOpen:false,importOpen:false,adminEnabled:false,adminToken:'',importItems:[],importRunning:false,_importPromise:null,playlists:[],newPlaylistName:'',toasts:[],toastId:0,_playlistsLoaded:false,_playlistsRequest:null,
     locating:false,locatedSongId:null,visualizerOpen:true,visualizerMode:'holographic',_visualizer:null,_visualizerInited:false,
-    shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'I',label:'导入本地目录'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
+    _shortcuts:[{key:'Space',label:'播放 / 暂停'},{key:'← / →',label:'前后 5 秒'},{key:'Shift + ← / →',label:'前后 15 秒'},{key:'↑ / ↓',label:'调整音量'},{key:'M',label:'静音'},{key:'P / N',label:'上一首 / 下一首'},{key:'L',label:'定位当前曲目'},{key:'V',label:'展开 / 收起声场'},{key:'Shift + V',label:'切换声场类型'},{key:'⌘K 或 /',label:'搜索'},{key:'Q',label:'播放队列'},{key:'I',label:'导入本地目录'},{key:'? 或 H',label:'显示快捷键帮助'},{key:'Esc',label:'关闭面板 / 清空搜索'}],
+    get shortcuts(){return this._shortcuts.filter(item=>this.adminEnabled||item.key!=='I')},
     async init(){
         player=new OrzAudioPlayer(); player.volume=this.volume; this.attachPlayerCallbacks(); player.initWasm();
         this.adminToken=this.readAdminToken();
+        this.refreshAdminStatus();
         await Promise.all([this.loadFormatCounts(),this.loadSongs()]);
         window.addEventListener('scroll',()=>this.onScroll(),{passive:true});
     },
@@ -109,6 +111,7 @@ function playerApp(){return{
     readAdminToken(){try{return sessionStorage.getItem('orz-admin-api-token')||''}catch(error){return ''}},
     saveAdminToken(){try{const token=this.adminToken.trim();if(token)sessionStorage.setItem('orz-admin-api-token',token);else sessionStorage.removeItem('orz-admin-api-token')}catch(error){this.notify('此浏览器无法保存本次会话令牌','error')}},
     clearAdminToken(){this.adminToken='';this.saveAdminToken()},
+    async refreshAdminStatus(){try{const res=await fetch('/api/health');if(!res.ok)throw new Error(`HTTP ${res.status}`);const data=await res.json();this.adminEnabled=data.adminApi==='enabled'}catch(error){this.adminEnabled=false}},
     openImportPanel(){this.importOpen=true},
     isImportFileSupported(file){const name=String(file?.name||'');const dot=name.lastIndexOf('.');return dot>0&&ORZ_IMPORT_EXTENSIONS.has(name.slice(dot+1).toLowerCase())},
     importPathFor(file){return file?.webkitRelativePath||file?.name||'未命名文件'},
@@ -174,7 +177,7 @@ function playerApp(){return{
     setVolume(){this.volume=clamp(this.volume);if(this.volume>0)this.lastVolume=this.volume;player?.setVolume(this.volume)},
     adjustVolume(delta){this.volume=clamp(this.volume+delta);this.setVolume()},toggleMute(){if(this.volume>0){this.lastVolume=this.volume;this.volume=0}else this.volume=this.lastVolume||.7;this.setVolume()},
     seekRelative(seconds){if(!this.duration)return;this.seekToPercent((this.currentTime+seconds)/this.duration)},
-    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen?this.playlistOpen=false:this.openPlaylistPanel(),import:()=>this.openImportPanel(),help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else if(this.importOpen)this.importOpen=false;else this.clearSearch()}})[action]?.()},
+    handleShortcut(event){const action=shortcutAction(event);if(!action)return;event.preventDefault();releaseShortcutFocus();({play:()=>this.togglePlay(),back5:()=>this.seekRelative(-5),forward5:()=>this.seekRelative(5),back15:()=>this.seekRelative(-15),forward15:()=>this.seekRelative(15),volumeUp:()=>this.adjustVolume(.05),volumeDown:()=>this.adjustVolume(-.05),mute:()=>this.toggleMute(),next:()=>this.next(),prev:()=>this.prev(),locate:()=>this.locateCurrentSong(),visualizer:()=>this.toggleVisualizer(),visualizerMode:()=>this.toggleVisualizerMode(),search:()=>document.querySelector('#songSearch')?.focus(),queue:()=>this.playlistOpen?this.playlistOpen=false:this.openPlaylistPanel(),import:()=>{if(this.adminEnabled)this.openImportPanel()},help:()=>this.shortcutOpen=true,escape:()=>{if(this.shortcutOpen)this.shortcutOpen=false;else if(this.playlistOpen)this.playlistOpen=false;else if(this.sidebarOpen)this.sidebarOpen=false;else if(this.importOpen)this.importOpen=false;else this.clearSearch()}})[action]?.()},
     removeFromQueue(index){this.queue.splice(index,1);if(index<=this.queueIndex)this.queueIndex--},
     openPlaylistPanel(){this.playlistOpen=true;void this.loadPlaylists()},
     async loadPlaylists(force=false){

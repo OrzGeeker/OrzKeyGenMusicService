@@ -60,7 +60,7 @@
                            x-model="searchQuery" @input.debounce.250ms="search" @keydown.escape.stop="clearSearch">
                     <kbd>⌘K</kbd>
                 </label>
-                <button class="import-trigger" @click="openImportPanel" :aria-expanded="importOpen" aria-controls="directory-import-panel" aria-keyshortcuts="I" title="导入本地目录 (I)">
+                <button class="import-trigger" x-cloak x-show="adminEnabled" @click="openImportPanel" :aria-expanded="importOpen" aria-controls="directory-import-panel" aria-keyshortcuts="I" title="导入本地目录 (I)">
                     <span aria-hidden="true">↑</span><span>导入</span>
                 </button>
                 <button class="queue-trigger" @click="playlistOpen ? playlistOpen=false : openPlaylistPanel()" aria-keyshortcuts="Q" :aria-expanded="playlistOpen" title="播放队列 (Q)">

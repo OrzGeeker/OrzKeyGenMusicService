@@ -736,6 +736,7 @@ import FluentSQLiteDriver
             #expect(health.commit == "unknown")
             #expect(health.database == "healthy")
             #expect(health.cas == "healthy")
+            #expect(health.adminApi == "enabled") // createTestApp 配置了管理令牌
         }
     }
 
@@ -759,6 +760,7 @@ import FluentSQLiteDriver
             #expect(health.status == "degraded")
             #expect(health.database == "healthy")
             #expect(health.cas == "unhealthy")
+            #expect(health.adminApi == "disabled") // 该测试 app 未配置管理令牌
         }
     }
 

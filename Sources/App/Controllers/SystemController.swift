@@ -38,7 +38,8 @@ struct SystemController: RouteCollection {
             version: version,
             commit: commit,
             database: dbHealthy ? "healthy" : "unhealthy",
-            cas: casHealthy ? "healthy" : "unhealthy"
+            cas: casHealthy ? "healthy" : "unhealthy",
+            adminApi: req.application.adminAPIToken != nil ? "enabled" : "disabled"
         )
 
         let response = Response(status: allHealthy ? .ok : .serviceUnavailable)
@@ -438,4 +439,5 @@ struct HealthResponse: Content {
     let commit: String
     let database: String
     let cas: String
+    let adminApi: String
 }
