@@ -5,12 +5,17 @@
       "Bash(make help)",
       "Bash(make audit-fingerprints)",
       "Bash(make audit-fingerprints ALL=1)",
+      "Bash(swift build)",
+      "Bash(swift build *)",
       "Bash(swift test)",
       "Bash(swift test --filter *)",
       "Bash(node --test Tests/Browser/*.test.mjs)",
       "Bash(git status --short)",
       "Bash(git diff -- *)",
-      "Bash(git diff --cached -- *)"
+      "Bash(git diff --cached -- *)",
+      "Bash(nm *)",
+      "Bash(xxd *)",
+      "Bash(actionlint *)"
     ],
     "ask": [
       "Bash(make run)",
