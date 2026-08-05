@@ -223,19 +223,7 @@ jobs:
             echo "WARNING: could not dispatch verify-release for $VERSION"
           fi
 
-      # --- 清理中间架构 tag ---
-      # 合并后的多架构 index 直接按 digest 引用各平台 manifest，删除中间 tag 不影响
-      # 已发布的 vX.Y.Z / <commit>。通过 GitHub Packages REST API 删除 tag；
-      # 公开包只需 write:packages，私有包需要 delete:packages 的 PAT。
-      # 权限不足时仅警告，不阻断发布。
-      - name: Clean up intermediate arch tags
-        run: |
-          PKG="${IMAGE_NAME##*/}"
-          for tag in "$VERSION-amd64" "$VERSION-arm64" "${{ github.sha }}-amd64" "${{ github.sha }}-arm64"; do
-            if output="$(gh api --method DELETE \
-                "/orgs/${{ github.repository_owner }}/packages/containers/$PKG/tags/$tag" 2>&1)"; then
-              echo "  removed $tag"
-            else
-              echo "  WARNING: could not remove tag $tag — ${output:-unknown error}"
-            fi
-          done
+      # 注：不清理中间架构 tag（如 0.0.7-amd64）。GHCR 不支持容器镜像 tag 级删除
+      # （Packages REST DELETE /tags/{tag} 返回 404，registry DELETE 返回 405），
+      # 且这些 per-arch 版本是合并后多架构 index 的依赖，删除会破坏镜像；它们无害，
+      # vX.Y.Z 才是规范引用。无 tag 的版本由 ghcr-cleanup.yml 定时清理。

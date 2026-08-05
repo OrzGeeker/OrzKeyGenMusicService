@@ -14,7 +14,7 @@
 
 部署包只包含生产机需要的运维文件，不包含源码、Swift 构建产物、测试、SDK 下载缓存或样例音乐。
 
-镜像按架构分别构建后合并为多架构 manifest，发布时自动删除中间架构 tag；对应的 untagged 镜像版本由仓库定时工作流（`ghcr-cleanup.yml`，每周）在保留 7 天后清理。
+镜像按架构分别构建后合并为多架构 manifest。中间架构 tag（如 `0.0.7-amd64`、`0.0.7-arm64`）会保留在 GHCR——GitHub 不提供容器镜像 tag 级删除（Packages REST `DELETE /tags/{tag}` 返回 404，registry `DELETE` 返回 405），且这些 per-arch 版本是合并后 index 的依赖、删除会破坏多架构镜像；它们无害，`vX.Y.Z` 才是规范引用。无 tag 的版本由仓库定时工作流（`ghcr-cleanup.yml`，每周）在保留 7 天后清理。
 
 ## Native 一键部署（源码仓库）
 
