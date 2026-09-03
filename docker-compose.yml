@@ -38,6 +38,11 @@ services:
     restart: "no"
 
   app:
+    # 资源上限（2026-09-03：Docker Desktop VM 扩容 8G/4vCPU 后加装防御性保险丝）
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     image: music-service:latest
     build:
       context: .
@@ -71,6 +76,11 @@ services:
       replicas: 0
 
   db:
+    # 资源上限（2026-09-03：Docker Desktop VM 扩容 8G/4vCPU 后加装防御性保险丝）
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     image: postgres:16-alpine
     volumes:
       - db_data:/var/lib/postgresql/data
